@@ -20,11 +20,16 @@ R12 (AC1009) writer; and an AutoLISP interpreter — arena, reader, evaluator,
 special forms, the builtin function table, and the entity-access functions
 (`entmake`, `entget`, `entmod`, `entdel`, `entlast`, `entnext`).
 
+Commands are resumable state machines — LINE, CIRCLE and ERASE so far — driven
+interchangeably by script text or by AutoLISP `(command ...)`. A command can be
+started by one `(command ...)` call and finished by a later one, with arbitrary
+LISP in between.
+
 Geometry can be generated procedurally from LISP and written to DXF today. The
 emitted DXF has been verified to open correctly in AutoCAD 2026, including
 entities on arbitrary tilted planes.
 
-**Not yet:** the resumable command state machines, the remaining R12 entities,
+**Not yet:** the remaining R12 entities,
 derived object snaps (perpendicular / tangent / nearest / intersection), a DXF
 reader, UCS, and the Qt6 shell.
 

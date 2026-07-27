@@ -9,6 +9,7 @@ add_library(noto_lisp STATIC
   builtins.cpp
   entity_subrs.cpp
   file_subrs.cpp
+  command_subr.cpp
 )
 
 target_include_directories(noto_lisp PUBLIC ${PROJECT_SOURCE_DIR}/include)

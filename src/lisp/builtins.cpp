@@ -9,6 +9,7 @@
 #include "noto/lisp/eval.hpp"
 
 #include "entity_subrs.hpp"
+#include "command_subr.hpp"
 #include "file_subrs.hpp"
 
 #include <cmath>
@@ -803,6 +804,7 @@ constexpr SubrDef kSubrs[] = {
     {"ENTNEXT", subr_entnext, 0, 1},
 
     // drawing file I/O -- implemented in file_subrs.cpp
+    {"COMMAND", subr_command, 0, kNoMax},
     {"DXFOUT", subr_dxfout, 1, 1},
     {"QUIT", subr_quit, 0, 0},
     {"EXIT", subr_quit, 0, 0},

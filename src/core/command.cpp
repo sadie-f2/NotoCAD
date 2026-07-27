@@ -1,0 +1,185 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
+#include "noto/command.hpp"
+
+namespace noto {
+
+// --- Prompt -----------------------------------------------------------------
+
+std::string Prompt::text() const {
+    std::string s = message;
+    if (!keywords.empty()) {
+        s += " or [";
+        for (std::size_t i = 0; i < keywords.size(); ++i) {
+            if (i != 0) s += '/';
+            s += keywords[i];
+        }
+        s += ']';
+    }
+    s += ": ";
+    return s;
+}
+
+// --- InputValue -------------------------------------------------------------
+
+InputValue InputValue::none() { return InputValue{}; }
+
+InputValue InputValue::cancel() {
+    InputValue v;
+    v.kind = InputKind::Cancel;
+    return v;
+}
+
+InputValue InputValue::of_point(const Vec3& p) {
+    InputValue v;
+    v.kind = InputKind::Point;
+    v.point = p;
+    return v;
+}
+
+InputValue InputValue::of_real(double r) {
+    InputValue v;
+    v.kind = InputKind::Real;
+    v.real = r;
+    return v;
+}
+
+InputValue InputValue::of_integer(std::int32_t i) {
+    InputValue v;
+    v.kind = InputKind::Integer;
+    v.integer = i;
+    return v;
+}
+
+InputValue InputValue::of_string(std::string s) {
+    InputValue v;
+    v.kind = InputKind::String;
+    v.text = std::move(s);
+    return v;
+}
+
+InputValue InputValue::of_keyword(std::string s) {
+    InputValue v;
+    v.kind = InputKind::Keyword;
+    v.text = std::move(s);
+    return v;
+}
+
+InputValue InputValue::of_entity(Handle h) {
+    InputValue v;
+    v.kind = InputKind::Entity;
+    v.entity = h;
+    return v;
+}
+
+// --- Step -------------------------------------------------------------------
+
+Step Step::ask(Prompt p) {
+    Step s;
+    s.kind = StepKind::Prompt;
+    s.prompt = std::move(p);
+    return s;
+}
+
+Step Step::done(std::string msg) {
+    Step s;
+    s.kind = StepKind::Done;
+    s.message = std::move(msg);
+    return s;
+}
+
+Step Step::cancelled() {
+    Step s;
+    s.kind = StepKind::Cancelled;
+    s.message = "*Cancel*";
+    return s;
+}
+
+Step Step::failed(std::string msg) {
+    Step s;
+    s.kind = StepKind::Failed;
+    s.message = std::move(msg);
+    return s;
+}
+
+// --- CommandEngine ----------------------------------------------------------
+
+EngineStatus CommandEngine::begin(CommandPtr cmd) {
+    if (!cmd) {
+        message_ = "no such command";
+        status_ = EngineStatus::Failed;
+        return status_;
+    }
+    // Typing a new command at a prompt abandons the current one, as R12 does.
+    if (command_) cancel();
+
+    command_ = std::move(cmd);
+    message_.clear();
+    return apply(command_->start(ctx_));
+}
+
+EngineStatus CommandEngine::supply(const InputValue& value) {
+    if (!command_ || status_ != EngineStatus::Waiting) {
+        message_ = "no command is waiting for input";
+        status_ = EngineStatus::Failed;
+        return status_;
+    }
+    // Escape is handled here rather than in every command. Work already
+    // committed to the database stays, matching R12: cancelling LINE after
+    // three segments keeps the three segments.
+    if (value.kind == InputKind::Cancel) {
+        cancel();
+        return status_;
+    }
+    return apply(command_->next(ctx_, value));
+}
+
+EngineStatus CommandEngine::run(InputSource& src) {
+    while (status_ == EngineStatus::Waiting) {
+        InputValue value;
+        // The source has nothing right now. Suspend and hand control back --
+        // this is the line that makes a GUI possible.
+        if (!src.next_value(prompt_, value)) return status_;
+        supply(value);
+    }
+    return status_;
+}
+
+void CommandEngine::cancel() {
+    if (!command_) return;
+    command_.reset();
+    prompt_ = Prompt{};
+    message_ = "*Cancel*";
+    status_ = EngineStatus::Cancelled;
+}
+
+EngineStatus CommandEngine::apply(const Step& step) {
+    switch (step.kind) {
+        case StepKind::Prompt:
+            prompt_ = step.prompt;
+            status_ = EngineStatus::Waiting;
+            return status_;
+        case StepKind::Done:
+            command_.reset();
+            prompt_ = Prompt{};
+            message_ = step.message;
+            status_ = EngineStatus::Finished;
+            return status_;
+        case StepKind::Cancelled:
+            command_.reset();
+            prompt_ = Prompt{};
+            message_ = step.message;
+            status_ = EngineStatus::Cancelled;
+            return status_;
+        case StepKind::Failed:
+            command_.reset();
+            prompt_ = Prompt{};
+            message_ = step.message;
+            status_ = EngineStatus::Failed;
+            return status_;
+    }
+    return status_;
+}
+
+}  // namespace noto

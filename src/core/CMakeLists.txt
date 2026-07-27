@@ -8,6 +8,9 @@ add_library(noto_core STATIC
   entities_dxf.cpp
   database.cpp
   dxf.cpp
+  command.cpp
+  commands.cpp
+  input_text.cpp
 )
 
 target_include_directories(noto_core PUBLIC ${PROJECT_SOURCE_DIR}/include)

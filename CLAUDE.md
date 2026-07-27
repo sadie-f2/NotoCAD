@@ -64,6 +64,17 @@ land in the wrong space, and UCS has nowhere to live. See `include/noto/ecs.hpp`
 is a state transition, never a blocking read. Commands written as blocking
 `read_point()` calls cannot be driven by LISP, and retrofitting that is a rewrite.
 
+Implemented in `command.hpp`. A `Command` is asked for its next `Step`, hands back a
+`Prompt`, and is later given the `InputValue` answering it; `CommandEngine` holds the
+suspended state between steps. `InputSource::next_value` returning false means "nothing
+right now" — the engine suspends and returns control, which is what lets a GUI call
+`CommandEngine::supply()` from an event handler instead. Escape is handled by the
+engine, not by each command, and committed work survives it as in R12.
+
+The test that matters: a command started by one `(command ...)` call, continued by
+arbitrary LISP, and finished by a later call. No blocking read can serve that, because
+between the two calls control is back in the interpreter.
+
 ## AutoLISP
 
 Targets the pre-Visual-LISP dialect: `command`, `entmake`, `entget`, `entmod`,
@@ -128,9 +139,10 @@ for the DXF and ECS code — headless tests only prove self-consistency.
 ## Layout
 
 ```
-include/noto/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, dxf
+include/noto/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, dxf,
+                     command, commands, input_text
 include/noto/lisp/   arena, value, reader, eval
-src/core/            geometry kernel, entities, database, DXF writer
+src/core/            geometry kernel, entities, database, DXF writer, commands
 src/lisp/            interpreter: arena, values, reader, eval, builtins, subrs
 src/app/             noto: the AutoLISP REPL and command-line entry point
 tools/               gen_sample

@@ -24,6 +24,7 @@
 
 namespace noto {
 class Database;
+class CommandEngine;
 }
 
 namespace noto::lisp {
@@ -115,6 +116,12 @@ public:
     void set_database(Database* db) { db_ = db; }
     Database* database() { return db_; }
 
+    // Drives (command ...). Held rather than created per call because a command
+    // may be started by one (command ...) and finished by a later one -- which
+    // is the whole reason commands are resumable state machines.
+    void set_command_engine(CommandEngine* engine) { engine_ = engine; }
+    CommandEngine* command_engine() { return engine_; }
+
     const EvalError& error() const { return error_; }
     void clear_error() { error_ = EvalError{}; }
 
@@ -159,6 +166,7 @@ private:
 
     Context& ctx_;
     Database* db_{nullptr};
+    CommandEngine* engine_{nullptr};
     EvalError error_{};
     std::ostream* out_{nullptr};
 

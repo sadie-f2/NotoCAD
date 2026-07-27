@@ -10,6 +10,7 @@ add_executable(noto_tests
   test_eval.cpp
   test_entmake.cpp
   test_dxfout.cpp
+  test_command.cpp
 )
 
 target_include_directories(noto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -33,3 +34,9 @@ set_tests_properties(noto_cli_error PROPERTIES WILL_FAIL TRUE)
 
 add_test(NAME noto_cli_help COMMAND noto -h)
 set_tests_properties(noto_cli_help PROPERTIES PASS_REGULAR_EXPRESSION "Usage")
+
+# The command state machine reached from LISP, through the real binary.
+add_test(NAME noto_cli_command COMMAND noto
+         -e "(command \"LINE\" '(0 0 0) '(10 0 0) \"\")"
+         -e "(princ (cdr (assoc 11 (entget (entlast)))))")
+set_tests_properties(noto_cli_command PROPERTIES PASS_REGULAR_EXPRESSION "10.0")

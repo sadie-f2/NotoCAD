@@ -16,6 +16,7 @@
 // would put the default build under the same obligation the DWG module is kept
 // optional to avoid. libedit (BSD) can go behind a build option later without
 // changing anything here.
+#include "noto/command.hpp"
 #include "noto/database.hpp"
 #include "noto/lisp/eval.hpp"
 #include "noto/lisp/reader.hpp"
@@ -177,9 +178,11 @@ int main(int argc, char** argv) {
     }
 
     noto::Database db;
+    noto::CommandEngine engine(db);
     noto::lisp::Context ctx;
     noto::lisp::Interp in(ctx);
     in.set_database(&db);
+    in.set_command_engine(&engine);
 
     for (const std::string& path : files) {
         if (!load_file(in, path)) return 1;
