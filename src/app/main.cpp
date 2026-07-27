@@ -3,9 +3,13 @@
 
 // ncad -- the command-line application.
 //
-// A read-eval-print loop over the AutoLISP interpreter, holding one drawing.
-// This is the whole user interface for now; the Qt6 shell comes later and stays
-// thin behind the same core.
+// A command prompt over the AutoLISP interpreter, holding one drawing. This is
+// the whole user interface for now; the Qt6 shell comes later and stays thin
+// behind the same core.
+//
+// Two modes. The default is R12's: a command prompt that evaluates LISP when a
+// line starts with "(". --lisp gives a plain LISP read-eval-print loop instead,
+// which is the better shape for piping a generated script in.
 //
 // Input completeness is decided by the reader, not by counting parentheses. A
 // naive counter gets ")" inside a string or a comment wrong, and the reader
@@ -16,6 +20,8 @@
 // would put the default build under the same obligation the DWG module is kept
 // optional to avoid. libedit (BSD) can go behind a build option later without
 // changing anything here.
+#include "prompt.hpp"
+
 #include "noto/command.hpp"
 #include "noto/database.hpp"
 #include "noto/lisp/eval.hpp"
@@ -58,9 +64,10 @@ void print_usage() {
               << "Options:\n"
               << "  -e EXPR    evaluate EXPR\n"
               << "  -i         stay interactive after evaluating files\n"
+              << "  --lisp     plain AutoLISP REPL instead of the command prompt\n"
               << "  -q         suppress the banner\n"
               << "  -h         show this help\n\n"
-              << "With no files and no -e, reads AutoLISP from standard input.\n\n"
+              << "With no files and no -e, reads from standard input.\n\n"
               << "Example:\n"
               << "  ncad -e '(entmake (list (cons 0 \"CIRCLE\") (list 10 0.0 0.0 0.0)"
               << " (cons 40 5.0)))' \\\n"
@@ -152,6 +159,7 @@ int main(int argc, char** argv) {
     std::vector<std::string> expressions;
     bool force_interactive = false;
     bool quiet = false;
+    bool lisp_mode = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -161,6 +169,8 @@ int main(int argc, char** argv) {
         }
         if (arg == "-i") {
             force_interactive = true;
+        } else if (arg == "--lisp") {
+            lisp_mode = true;
         } else if (arg == "-q") {
             quiet = true;
         } else if (arg == "-e") {
@@ -199,7 +209,10 @@ int main(int argc, char** argv) {
 
     const bool interactive = stdin_is_tty();
     if (interactive && !quiet) {
-        std::cout << "ncad " << kVersion << " -- AutoLISP. (quit) or Ctrl-D to exit.\n";
+        std::cout << "ncad " << kVersion
+                  << (lisp_mode ? " -- AutoLISP. (quit) or Ctrl-D to exit.\n"
+                                : " -- type ? for commands, ( for AutoLISP, QUIT to exit.\n");
     }
-    return repl(ctx, in, interactive);
+    if (lisp_mode) return repl(ctx, in, interactive);
+    return noto::app::run_command_prompt(ctx, in, engine, interactive);
 }

@@ -18,6 +18,7 @@
 #include "noto/command.hpp"
 #include "noto/commands.hpp"
 #include "noto/input_text.hpp"
+#include "noto/lisp/command_input.hpp"
 
 #include <string>
 #include <vector>
@@ -50,22 +51,6 @@ private:
     std::string error_;
 };
 
-// A LISP point is a list of two or three numbers.
-bool value_to_point(const Value& v, Vec3& out) {
-    if (!is_cons(v)) return false;
-    double c[3] = {0.0, 0.0, 0.0};
-    std::size_t i = 0;
-    for (Value cur = v; is_cons(cur); cur = cdr(cur)) {
-        if (i >= 3) return false;
-        const Value n = car(cur);
-        if (!is_number(n)) return false;
-        c[i++] = as_double(n);
-    }
-    if (i < 2) return false;
-    out = Vec3{c[0], c[1], c[2]};
-    return true;
-}
-
 std::string upcase(std::string_view s) {
     std::string out(s);
     for (char& c : out) {
@@ -89,72 +74,14 @@ bool LispInputSource::next_value(const Prompt& prompt, InputValue& out) {
     if (at_command_name()) return false;
 
     const Value& v = args_[pos_];
-
-    switch (v.type) {
-        case Type::Nil:
-            // nil is Enter, which is how a (command ...) call ends a loop.
-            out = InputValue::none();
-            ++pos_;
-            return true;
-
-        case Type::Str: {
-            const std::string text(v.str->view());
-            // "" is Enter.
-            if (text.empty()) {
-                out = InputValue::none();
-                ++pos_;
-                return true;
-            }
-            // A string at a non-string prompt is a keyword, matched the same way
-            // typed text is.
-            std::string parsed_error;
-            InputValue parsed;
-            if (parse_input(prompt, text, parsed, parsed_error)) {
-                out = parsed;
-                ++pos_;
-                return true;
-            }
-            error_ = "(command): " + parsed_error + ": \"" + text + "\"";
-            ++pos_;
-            return false;
-        }
-
-        case Type::Int:
-            out = (prompt.kind == PromptKind::Entity)
-                      ? InputValue::of_entity(static_cast<Handle>(v.i))
-                      : ((prompt.kind == PromptKind::Integer)
-                             ? InputValue::of_integer(v.i)
-                             : InputValue::of_real(static_cast<double>(v.i)));
-            ++pos_;
-            return true;
-
-        case Type::Real:
-            out = InputValue::of_real(v.d);
-            ++pos_;
-            return true;
-
-        case Type::Ename:
-            out = InputValue::of_entity(v.ename);
-            ++pos_;
-            return true;
-
-        case Type::Cons: {
-            Vec3 p;
-            if (!value_to_point(v, p)) {
-                error_ = "(command): not a point: " + prin1(v);
-                ++pos_;
-                return false;
-            }
-            out = InputValue::of_point(p);
-            ++pos_;
-            return true;
-        }
-
-        default:
-            error_ = "(command): cannot use " + std::string(type_name(v.type)) + " as input";
-            ++pos_;
-            return false;
+    std::string why;
+    if (!value_to_input(prompt, v, out, why)) {
+        error_ = "(command): " + why;
+        ++pos_;  // consuming it stops the run from spinning on the same value
+        return false;
     }
+    ++pos_;
+    return true;
 }
 
 }  // namespace

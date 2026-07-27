@@ -35,16 +35,34 @@ reader, UCS, and the Qt6 shell.
 
 ## Using it
 
-`ncad` is an AutoLISP read-eval-print loop holding one drawing.
+`ncad` is an R12-style command prompt holding one drawing: a command prompt
+that evaluates AutoLISP, not a LISP prompt that calls commands.
 
 ```console
 $ ncad
-ncad 0.0.1 -- AutoLISP. (quit) or Ctrl-D to exit.
-_$ (entmake '((0 . "CIRCLE") (8 . "PARTS") (10 0.0 0.0 0.0) (40 . 5.0)))
-((0 . "CIRCLE") (8 . "PARTS") (10 0.0 0.0 0.0) (40 . 5.0))
-_$ (dxfout "out.dxf")
+ncad 0.0.1 -- type ? for commands, ( for AutoLISP, QUIT to exit.
+Command: LINE
+Specify first point: 0,0
+Specify next point: 100,0
+Specify next point or [Undo]: 100,50
+Specify next point or [Close/Undo]: C
+Command: (setq r 25.0)
+25.0
+Command: CIRCLE
+Specify center point for circle: 50,25
+Specify radius of circle: !r
+Command: (dxfout "out.dxf")
 T
 ```
+
+A line starting with `(` is AutoLISP. `!name` prints a variable at the command
+prompt, or answers a prompt with its value; a parenthesised expression answers a
+prompt too, so `Specify radius of circle: (* 2.0 5.0)` works. A space acts as
+Enter, so `CIRCLE 50,25 20` is one line. `?` lists commands, `CANCEL` aborts a
+command, and Enter at the command prompt repeats the last one.
+
+`ncad --lisp` gives a plain AutoLISP REPL instead, which is the better shape for
+piping a generated script in.
 
 It also runs non-interactively, which is the point — geometry gets generated,
 not drawn:

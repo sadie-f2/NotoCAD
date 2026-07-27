@@ -10,6 +10,7 @@ add_library(noto_lisp STATIC
   entity_subrs.cpp
   file_subrs.cpp
   command_subr.cpp
+  command_input.cpp
 )
 
 target_include_directories(noto_lisp PUBLIC ${PROJECT_SOURCE_DIR}/include)

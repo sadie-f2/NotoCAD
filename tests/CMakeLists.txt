@@ -11,10 +11,11 @@ add_executable(noto_tests
   test_entmake.cpp
   test_dxfout.cpp
   test_command.cpp
+  test_prompt.cpp
 )
 
 target_include_directories(noto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(noto_tests PRIVATE noto_core noto_lisp noto_flags)
+target_link_libraries(noto_tests PRIVATE noto_core noto_lisp noto_app noto_flags)
 
 add_test(NAME noto_tests COMMAND noto_tests)
 
@@ -40,3 +41,14 @@ add_test(NAME ncad_cli_command COMMAND ncad
          -e "(command \"LINE\" '(0 0 0) '(10 0 0) \"\")"
          -e "(princ (cdr (assoc 11 (entget (entlast)))))")
 set_tests_properties(ncad_cli_command PROPERTIES PASS_REGULAR_EXPRESSION "10.0")
+
+# The command prompt reads stdin, so driving it needs a shell to pipe with.
+if(UNIX)
+  add_test(NAME ncad_cli_prompt COMMAND sh -c
+    "printf 'LINE\\n0,0\\n10,0\\n\\n(princ (cdr (assoc 11 (entget (entlast)))))\\n' | $<TARGET_FILE:ncad>")
+  set_tests_properties(ncad_cli_prompt PROPERTIES PASS_REGULAR_EXPRESSION "10.0")
+
+  add_test(NAME ncad_cli_bang_variable COMMAND sh -c
+    "printf '(setq r 7.5)\\nCIRCLE\\n0,0\\n!r\\n(princ (cdr (assoc 40 (entget (entlast)))))\\n' | $<TARGET_FILE:ncad>")
+  set_tests_properties(ncad_cli_bang_variable PROPERTIES PASS_REGULAR_EXPRESSION "7.5")
+endif()
