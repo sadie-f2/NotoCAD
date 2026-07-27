@@ -1,0 +1,412 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
+// entmake / entget / entmod / entdel / entlast / entnext -- the boundary where
+// AutoLISP association lists become entities and back again.
+//
+// This is the project's declared hot path: "alist of dotted pairs -> entity
+// struct", at tens of thousands of faces.
+//
+// Two conventions here are easy to get wrong and expensive to discover late:
+//
+// 1. COORDINATES. Group 10 arrives in the *entity coordinate system* for CIRCLE
+//    and ARC, exactly as DXF stores them, and must be carried into world space
+//    through the group-210 extrusion vector. LINE is the exception: R12 keeps
+//    both its endpoints in world coordinates. This mirrors entities_dxf.cpp,
+//    because AutoLISP's entity lists and the DXF file agree on this by design.
+//
+// 2. ANGLES. AutoLISP hands arc angles to LISP in RADIANS, even though the DXF
+//    file on disk stores degrees. So there is no conversion here, and there is
+//    one in the DXF writer. That asymmetry is real, not an oversight.
+//
+// Error policy: an entity type we do not implement yet returns nil, which is a
+// condition AutoLISP code tests for. Malformed data -- a missing group 10, a
+// radius that is a string -- raises an error instead. Silently returning nil at
+// face twenty thousand of a mesh build is not a diagnosis.
+#include "entity_subrs.hpp"
+
+#include "noto/database.hpp"
+#include "noto/ecs.hpp"
+#include "noto/entities.hpp"
+
+#include <cmath>
+#include <string>
+#include <vector>
+
+namespace noto::lisp {
+namespace {
+
+// --- alist reading ----------------------------------------------------------
+
+// Returns the cdr of the (code . value) pair, or nil with found=false.
+Value alist_get(const Value& alist, std::int32_t code, bool& found) {
+    for (Value cur = alist; is_cons(cur); cur = cdr(cur)) {
+        const Value pair = car(cur);
+        if (is_cons(pair) && car(pair).type == Type::Int && car(pair).i == code) {
+            found = true;
+            return cdr(pair);
+        }
+    }
+    found = false;
+    return make_nil();
+}
+
+std::string upcase(std::string_view s) {
+    std::string out(s);
+    for (char& c : out) {
+        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+    }
+    return out;
+}
+
+bool group_error(Interp& in, std::int32_t code, const char* what) {
+    return in.fail(EvalStatus::BadArgumentType,
+                   "group " + std::to_string(code) + ": " + what);
+}
+
+// A coordinate group's value is a bare list of 2 or 3 reals: (10 1.0 2.0 0.0).
+bool parse_point(Interp& in, std::int32_t code, const Value& v, Vec3& out) {
+    double c[3] = {0.0, 0.0, 0.0};
+    std::size_t i = 0;
+    for (Value cur = v; is_cons(cur); cur = cdr(cur)) {
+        if (i >= 3) return group_error(in, code, "more than three coordinates");
+        const Value n = car(cur);
+        if (!is_number(n)) return group_error(in, code, "coordinate is not a number");
+        c[i++] = as_double(n);
+    }
+    // Two coordinates is legal; R12 treats the point as lying at Z = 0.
+    if (i < 2) return group_error(in, code, "needs at least two coordinates");
+    out = Vec3{c[0], c[1], c[2]};
+    return true;
+}
+
+bool parse_real(Interp& in, std::int32_t code, const Value& v, double& out) {
+    if (!is_number(v)) return group_error(in, code, "not a number");
+    out = as_double(v);
+    return true;
+}
+
+// --- alist -> entity --------------------------------------------------------
+
+// Applies the properties every R12 entity shares. The layer is created if it
+// does not exist, which diverges from AutoCAD (where entmake fails); for a tool
+// whose purpose is generating geometry from analysis data, having to declare
+// layers up front is friction with no safety benefit.
+bool apply_common(Interp& in, Database& db, const Value& alist, Entity& ent,
+                  const Vec3& normal) {
+    bool found = false;
+
+    const Value layer = alist_get(alist, 8, found);
+    if (found) {
+        if (layer.type != Type::Str) return group_error(in, 8, "layer name is not a string");
+        ent.props().layer = db.add_layer(upcase(layer.str->view()));
+    }
+
+    const Value ltype = alist_get(alist, 6, found);
+    if (found) {
+        if (ltype.type != Type::Str) return group_error(in, 6, "linetype name is not a string");
+        const std::string name = upcase(ltype.str->view());
+        const LinetypeId id = db.find_linetype(name);
+        // A linetype cannot be invented: it needs a dash pattern.
+        if (id == kInvalidLinetype) {
+            return in.fail(EvalStatus::BadArgumentType, "group 6: no such linetype: " + name);
+        }
+        ent.props().linetype = id;
+    }
+
+    const Value color = alist_get(alist, 62, found);
+    if (found) {
+        if (color.type != Type::Int) return group_error(in, 62, "colour is not an integer");
+        ent.props().color = static_cast<std::int16_t>(color.i);
+    }
+
+    const Value thickness = alist_get(alist, 39, found);
+    if (found) {
+        double t = 0.0;
+        if (!parse_real(in, 39, thickness, t)) return false;
+        ent.props().thickness = t;
+    }
+
+    ent.props().normal = normal;
+    return true;
+}
+
+// Builds an entity from an association list. `unsupported` distinguishes "this
+// entity kind is not implemented" from "the data was wrong".
+bool build_entity(Interp& in, Database& db, const Value& alist, EntityPtr& out,
+                  bool& unsupported) {
+    unsupported = false;
+    if (!is_cons(alist)) {
+        return in.fail(EvalStatus::BadArgumentType, "entity data is not a list");
+    }
+
+    bool found = false;
+    const Value type_v = alist_get(alist, 0, found);
+    if (!found) return in.fail(EvalStatus::BadArgumentType, "missing group 0 (entity type)");
+    if (type_v.type != Type::Str) return group_error(in, 0, "entity type is not a string");
+    const std::string type = upcase(type_v.str->view());
+
+    // The extrusion vector, which defines the entity coordinate system.
+    Vec3 normal = kWorldZ;
+    const Value ext = alist_get(alist, 210, found);
+    if (found) {
+        if (!parse_point(in, 210, ext, normal)) return false;
+        if (is_zero(normal)) return group_error(in, 210, "extrusion vector is zero");
+        normal = normalize(normal);
+    }
+
+    const Value p10 = alist_get(alist, 10, found);
+    const bool has_p10 = found;
+    Vec3 point10{};
+    if (has_p10 && !parse_point(in, 10, p10, point10)) return false;
+
+    if (type == "LINE") {
+        if (!has_p10) return in.fail(EvalStatus::BadArgumentType, "LINE: missing group 10");
+        const Value p11 = alist_get(alist, 11, found);
+        if (!found) return in.fail(EvalStatus::BadArgumentType, "LINE: missing group 11");
+        Vec3 point11{};
+        if (!parse_point(in, 11, p11, point11)) return false;
+        // Both endpoints are already world coordinates; LINE is the exception.
+        out = std::make_unique<Line>(point10, point11);
+
+    } else if (type == "CIRCLE" || type == "ARC") {
+        if (!has_p10) return in.fail(EvalStatus::BadArgumentType, type + ": missing group 10");
+        const Value r = alist_get(alist, 40, found);
+        if (!found) return in.fail(EvalStatus::BadArgumentType, type + ": missing group 40");
+        double radius = 0.0;
+        if (!parse_real(in, 40, r, radius)) return false;
+        if (radius <= 0.0) return group_error(in, 40, "radius must be positive");
+
+        // Group 10 is in the entity coordinate system; the kernel wants world.
+        const Vec3 center = ecs_to_world(normal).transform_point(point10);
+
+        if (type == "CIRCLE") {
+            out = std::make_unique<Circle>(center, radius, normal);
+        } else {
+            const Value a50 = alist_get(alist, 50, found);
+            const bool has50 = found;
+            const Value a51 = alist_get(alist, 51, found);
+            if (!has50 || !found) {
+                return in.fail(EvalStatus::BadArgumentType, "ARC: missing group 50 or 51");
+            }
+            double start = 0.0;
+            double end = 0.0;
+            if (!parse_real(in, 50, a50, start)) return false;
+            if (!parse_real(in, 51, a51, end)) return false;
+            // Radians: AutoLISP's convention, not the DXF file's.
+            out = std::make_unique<Arc>(center, radius, start, end, normal);
+        }
+
+    } else {
+        // A kind we have not built yet. nil is the honest answer, and it is what
+        // AutoLISP code tests for.
+        unsupported = true;
+        return true;
+    }
+
+    return apply_common(in, db, alist, *out, normal);
+}
+
+// --- entity -> alist --------------------------------------------------------
+
+Value pair_int(Context& ctx, std::int32_t code, std::int32_t v) {
+    return ctx.cons(make_int(code), make_int(v));
+}
+
+Value pair_real(Context& ctx, std::int32_t code, double v) {
+    return ctx.cons(make_int(code), make_real(v));
+}
+
+Value pair_str(Context& ctx, std::int32_t code, std::string_view v) {
+    return ctx.cons(make_int(code), make_str(ctx.new_string(v)));
+}
+
+Value pair_point(Context& ctx, std::int32_t code, const Vec3& p) {
+    const Value coords[3] = {make_real(p.x), make_real(p.y), make_real(p.z)};
+    return ctx.cons(make_int(code), ctx.list(coords, 3));
+}
+
+Value entity_to_alist(Context& ctx, const Database& db, const Entity& ent) {
+    std::vector<Value> items;
+    const EntityProps& props = ent.props();
+
+    Value ename;
+    ename.type = Type::Ename;
+    ename.ename = ent.handle();
+    items.push_back(ctx.cons(make_int(-1), ename));
+    items.push_back(pair_str(ctx, 0, ent.type_name()));
+    items.push_back(pair_str(ctx, 8, db.layer(props.layer).name));
+
+    if (props.linetype != kLinetypeContinuous) {
+        items.push_back(pair_str(ctx, 6, db.linetype(props.linetype).name));
+    }
+    if (props.color != kColorByLayer) {
+        items.push_back(pair_int(ctx, 62, props.color));
+    }
+    if (props.thickness != 0.0) {
+        items.push_back(pair_real(ctx, 39, props.thickness));
+    }
+
+    switch (ent.type()) {
+        case EntityType::Line: {
+            const Line& line = static_cast<const Line&>(ent);
+            items.push_back(pair_point(ctx, 10, line.start()));
+            items.push_back(pair_point(ctx, 11, line.end()));
+            break;
+        }
+        case EntityType::Circle: {
+            const Circle& circle = static_cast<const Circle&>(ent);
+            const Mat4 to_ecs = world_to_ecs(props.normal);
+            items.push_back(pair_point(ctx, 10, to_ecs.transform_point(circle.center())));
+            items.push_back(pair_real(ctx, 40, circle.radius()));
+            break;
+        }
+        case EntityType::Arc: {
+            const Arc& arc = static_cast<const Arc&>(ent);
+            const Mat4 to_ecs = world_to_ecs(props.normal);
+            items.push_back(pair_point(ctx, 10, to_ecs.transform_point(arc.center())));
+            items.push_back(pair_real(ctx, 40, arc.radius()));
+            items.push_back(pair_real(ctx, 50, arc.start_angle()));
+            items.push_back(pair_real(ctx, 51, arc.end_angle()));
+            break;
+        }
+        default:
+            break;
+    }
+
+    // Omitted when it is world Z, matching both the DXF writer and AutoCAD.
+    if (!near_equal(props.normal, kWorldZ)) {
+        items.push_back(pair_point(ctx, 210, props.normal));
+    }
+    return ctx.list(items.data(), items.size());
+}
+
+// --- shared preamble --------------------------------------------------------
+
+Database* require_db(Interp& in, const char* who) {
+    Database* db = in.database();
+    if (!db) {
+        in.fail(EvalStatus::BadArgumentType, std::string(who) + ": no drawing is attached");
+    }
+    return db;
+}
+
+bool require_ename(Interp& in, const char* who, const Value& v, Handle& out) {
+    if (v.type != Type::Ename) {
+        in.fail(EvalStatus::BadArgumentType,
+                std::string(who) + ": not an entity name: " + prin1(v));
+        return false;
+    }
+    out = v.ename;
+    return true;
+}
+
+}  // namespace
+
+// --- the builtins -----------------------------------------------------------
+
+bool subr_entmake(Interp& in, const Value* a, std::size_t, Value& out) {
+    Database* db = require_db(in, "entmake");
+    if (!db) return false;
+
+    EntityPtr ent;
+    bool unsupported = false;
+    if (!build_entity(in, *db, a[0], ent, unsupported)) return false;
+    if (unsupported) {
+        out = make_nil();
+        return true;
+    }
+
+    db->add(std::move(ent));
+    out = a[0];  // AutoLISP returns the entity list it was given
+    return true;
+}
+
+bool subr_entget(Interp& in, const Value* a, std::size_t, Value& out) {
+    Database* db = require_db(in, "entget");
+    if (!db) return false;
+
+    Handle h = kNullHandle;
+    if (!require_ename(in, "entget", a[0], h)) return false;
+
+    const Entity* ent = db->get(h);
+    if (!ent) {
+        out = make_nil();  // a deleted entity, which is a condition not an error
+        return true;
+    }
+    out = entity_to_alist(in.ctx(), *db, *ent);
+    return true;
+}
+
+bool subr_entmod(Interp& in, const Value* a, std::size_t, Value& out) {
+    Database* db = require_db(in, "entmod");
+    if (!db) return false;
+
+    bool found = false;
+    const Value ename = alist_get(a[0], -1, found);
+    if (!found) return in.fail(EvalStatus::BadArgumentType, "entmod: missing group -1 (ename)");
+
+    Handle h = kNullHandle;
+    if (!require_ename(in, "entmod", ename, h)) return false;
+    if (!db->get(h)) {
+        out = make_nil();
+        return true;
+    }
+
+    EntityPtr ent;
+    bool unsupported = false;
+    if (!build_entity(in, *db, a[0], ent, unsupported)) return false;
+    if (unsupported) {
+        out = make_nil();
+        return true;
+    }
+
+    // Replacing under the same handle keeps every ename already handed to LISP
+    // valid, which is the whole point of entmod over delete-and-remake.
+    if (!db->replace(h, std::move(ent))) {
+        out = make_nil();
+        return true;
+    }
+    out = a[0];
+    return true;
+}
+
+bool subr_entdel(Interp& in, const Value* a, std::size_t, Value& out) {
+    Database* db = require_db(in, "entdel");
+    if (!db) return false;
+
+    Handle h = kNullHandle;
+    if (!require_ename(in, "entdel", a[0], h)) return false;
+
+    // R12's entdel toggles: calling it again within the same command undeletes.
+    // That needs an undo stack, which does not exist yet, so deletion is final.
+    out = db->erase(h) ? a[0] : make_nil();
+    return true;
+}
+
+bool subr_entlast(Interp& in, const Value*, std::size_t, Value& out) {
+    Database* db = require_db(in, "entlast");
+    if (!db) return false;
+
+    const Handle h = db->last();
+    out = (h == kNullHandle) ? make_nil() : make_ename(h);
+    return true;
+}
+
+bool subr_entnext(Interp& in, const Value* a, std::size_t argc, Value& out) {
+    Database* db = require_db(in, "entnext");
+    if (!db) return false;
+
+    Handle h = kNullHandle;
+    if (argc == 0 || is_nil(a[0])) {
+        h = db->first();
+    } else {
+        Handle from = kNullHandle;
+        if (!require_ename(in, "entnext", a[0], from)) return false;
+        h = db->next(from);
+    }
+    out = (h == kNullHandle) ? make_nil() : make_ename(h);
+    return true;
+}
+
+}  // namespace noto::lisp

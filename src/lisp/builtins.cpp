@@ -8,6 +8,8 @@
 // That is not a rounding artifact to be smoothed over -- LISP files depend on it.
 #include "noto/lisp/eval.hpp"
 
+#include "entity_subrs.hpp"
+
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -790,6 +792,14 @@ constexpr SubrDef kSubrs[] = {
     {"RTOS", subr_rtos, 1, 3},
     {"CHR", subr_chr, 1, 1},
     {"ASCII", subr_ascii, 1, 1},
+
+    // entity access -- implemented in entity_subrs.cpp
+    {"ENTMAKE", subr_entmake, 1, 1},
+    {"ENTGET", subr_entget, 1, 2},
+    {"ENTMOD", subr_entmod, 1, 1},
+    {"ENTDEL", subr_entdel, 1, 1},
+    {"ENTLAST", subr_entlast, 0, 0},
+    {"ENTNEXT", subr_entnext, 0, 1},
 
     // output
     {"PRINC", subr_princ, 0, 2},

@@ -17,12 +17,16 @@ Early. The headless core builds and tests with no GUI and no display.
 including rotation about an arbitrary axis and mirroring); LINE, CIRCLE and ARC
 with object snaps; an entity database with stable never-reused handles; a DXF
 R12 (AC1009) writer; and an AutoLISP interpreter — arena, reader, evaluator,
-special forms and the builtin function table.
+special forms, the builtin function table, and the entity-access functions
+(`entmake`, `entget`, `entmod`, `entdel`, `entlast`, `entnext`).
 
-**Not yet:** `entmake` and the rest of the entity-access functions, a REPL, the
-resumable command state machines, the remaining R12 entities, derived object
-snaps (perpendicular/tangent/nearest/intersection), a DXF reader, UCS, and the
-Qt6 shell.
+Geometry can be generated procedurally from LISP and written to DXF today. The
+emitted DXF has been verified to open correctly in AutoCAD 2026, including
+entities on arbitrary tilted planes.
+
+**Not yet:** a REPL and `dxfout`, the resumable command state machines, the
+remaining R12 entities, derived object snaps (perpendicular / tangent /
+nearest / intersection), a DXF reader, UCS, and the Qt6 shell.
 
 There is no application binary yet. The core is a library plus a test suite.
 

@@ -22,6 +22,10 @@
 #include <string_view>
 #include <vector>
 
+namespace noto {
+class Database;
+}
+
 namespace noto::lisp {
 
 enum class EvalStatus : std::uint8_t {
@@ -105,6 +109,12 @@ public:
 
     Context& ctx() { return ctx_; }
 
+    // The drawing entmake, entget and friends operate on. Null until attached,
+    // in which case those functions report an error rather than crashing --
+    // the interpreter is usable for pure computation without a drawing.
+    void set_database(Database* db) { db_ = db; }
+    Database* database() { return db_; }
+
     const EvalError& error() const { return error_; }
     void clear_error() { error_ = EvalError{}; }
 
@@ -142,6 +152,7 @@ private:
     void unwind_to(std::size_t mark);
 
     Context& ctx_;
+    Database* db_{nullptr};
     EvalError error_{};
     std::ostream* out_{nullptr};
 

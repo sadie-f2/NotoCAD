@@ -32,6 +32,29 @@ const Entity* Database::get(Handle h) const {
     return (it == entities_.end()) ? nullptr : it->second.get();
 }
 
+bool Database::replace(Handle h, EntityPtr entity) {
+    if (!entity) return false;
+    const auto it = entities_.find(h);
+    if (it == entities_.end()) return false;
+
+    // The handle carries over, so order_ needs no update and any ename held by
+    // AutoLISP stays valid.
+    entity->handle_ = h;
+    it->second = std::move(entity);
+    return true;
+}
+
+Handle Database::next(Handle h) const {
+    // Linear, matching erase(). Callers walking the whole drawing should iterate
+    // order() directly rather than calling this in a loop.
+    for (std::size_t i = 0; i < order_.size(); ++i) {
+        if (order_[i] == h) {
+            return (i + 1 < order_.size()) ? order_[i + 1] : kNullHandle;
+        }
+    }
+    return kNullHandle;
+}
+
 bool Database::erase(Handle h) {
     const auto it = entities_.find(h);
     if (it == entities_.end()) return false;

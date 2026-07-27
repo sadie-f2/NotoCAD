@@ -47,8 +47,20 @@ public:
     Entity* get(Handle h);
     const Entity* get(Handle h) const;
 
+    // Swaps in a new entity under an existing handle, keeping its position in
+    // the drawing order. AutoLISP's entmod needs this: the ename it holds must
+    // still refer to the same entity after the modification.
+    bool replace(Handle h, EntityPtr entity);
+
     bool erase(Handle h);
     void clear();
+
+    // Drawing-order traversal, for AutoLISP's entnext and entlast.
+    Handle first() const { return order_.empty() ? kNullHandle : order_.front(); }
+    Handle last() const { return order_.empty() ? kNullHandle : order_.back(); }
+
+    // kNullHandle when h is the last entity or is not in the database.
+    Handle next(Handle h) const;
 
     std::size_t size() const { return entities_.size(); }
     bool empty() const { return entities_.empty(); }
