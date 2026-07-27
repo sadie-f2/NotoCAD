@@ -20,6 +20,8 @@
 namespace noto {
 
 class DxfWriter;
+class Renderer;
+struct DrawContext;
 
 using Handle = std::uint64_t;
 inline constexpr Handle kNullHandle = 0;
@@ -87,8 +89,10 @@ public:
 
     virtual void dxf_write(DxfWriter& w) const = 0;
 
-    // draw() joins this list when the GUI shell lands; the core stays headless
-    // until then.
+    // Emits this entity as world-space wireframe. Styling is not this method's
+    // business -- the scene walker calls Renderer::begin_entity() first. The
+    // core stays headless: Renderer is abstract and knows nothing of Qt.
+    virtual void draw(const DrawContext& ctx, Renderer& r) const = 0;
 
 protected:
     // Copies props but deliberately not the handle: a clone is a new entity and

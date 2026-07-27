@@ -173,3 +173,147 @@ TEST_CASE("value_to_input: unusable values are reported") {
     // Nor a four-element list.
     CHECK(!lisp::value_to_input(p, read(ctx, "(1 2 3 4)"), v, err));
 }
+
+// --- PromptSession -----------------------------------------------------------
+//
+// The seam the Qt shell shares with ncad. Both front ends differ only in where
+// lines come from and where output goes, so these cases are what keeps the
+// command line in the window behaving like the one at the terminal.
+
+namespace {
+
+struct Session {
+    Database db;
+    lisp::Context ctx;
+    lisp::Interp in{ctx};
+    CommandEngine engine{db};
+
+    struct Recorder final : PromptOutput {
+        std::string out;
+        std::string err;
+        void write(const std::string& text) override { out += text; }
+        void write_error(const std::string& text) override { err += text; }
+    } rec;
+
+    PromptSession session{ctx, in, engine, rec, true};
+
+    Session() {
+        in.set_database(&db);
+        in.set_command_engine(&engine);
+    }
+
+    bool feed(const std::string& line) { return session.feed_line(line); }
+    std::string prompt() const { return session.current_prompt(); }
+};
+
+bool contains(const std::string& haystack, const std::string& needle) {
+    return haystack.find(needle) != std::string::npos;
+}
+
+}  // namespace
+
+TEST_CASE("session: a typed command runs to completion a line at a time") {
+    Session s;
+    CHECK(s.prompt() == "Command: ");
+
+    s.feed("LINE");
+    CHECK(s.engine.active());
+    CHECK(contains(s.prompt(), "first point"));
+
+    s.feed("0,0");
+    CHECK(contains(s.prompt(), "next point"));
+
+    s.feed("10,0");
+    s.feed("");  // Enter ends LINE
+    CHECK(!s.engine.active());
+    CHECK(s.db.size() == 1);
+    CHECK(s.prompt() == "Command: ");
+}
+
+TEST_CASE("session: a whole command on one line, as at the terminal") {
+    Session s;
+    s.feed("LINE 0,0 10,0 ");
+    CHECK(s.db.size() == 1);
+}
+
+TEST_CASE("session: supply() and typed lines drive the same command") {
+    // The case the GUI depends on: a command started by typing, answered by a
+    // click, and finished by typing again. If these were separate paths this is
+    // where they would diverge.
+    Session s;
+    s.feed("LINE");
+    s.feed("0,0");
+
+    s.engine.supply(InputValue::of_point({10.0, 0.0, 0.0}));  // the "click"
+    CHECK(s.engine.active());
+    CHECK(contains(s.prompt(), "next point"));
+
+    s.feed("");
+    CHECK(!s.engine.active());
+    CHECK(s.db.size() == 1);
+}
+
+TEST_CASE("session: an unterminated LISP form spans lines") {
+    Session s;
+    s.feed("(setq r");
+    CHECK(s.session.continuing());
+    CHECK(s.prompt() == ">  ");
+
+    s.feed(" 5.0)");
+    CHECK(!s.session.continuing());
+    CHECK(s.prompt() == "Command: ");
+    CHECK(contains(s.rec.out, "5.0"));
+}
+
+TEST_CASE("session: !variable answers a prompt from the interpreter") {
+    Session s;
+    s.feed("(setq r 7.5)");
+    s.feed("CIRCLE");
+    s.feed("0,0");
+    s.feed("!r");
+    CHECK(!s.engine.active());
+    CHECK(s.db.size() == 1);
+}
+
+TEST_CASE("session: Enter repeats the last command") {
+    // CIRCLE rather than LINE: LINE keeps asking for points, so it is still
+    // running after its arguments and a blank line would end it instead.
+    Session s;
+    s.feed("CIRCLE 0,0 5");
+    CHECK(!s.engine.active());
+    CHECK(s.db.size() == 1);
+
+    s.feed("");  // repeats CIRCLE
+    CHECK(s.engine.active());
+    CHECK(contains(s.prompt(), "enter") || contains(s.prompt(), "Specify"));
+}
+
+TEST_CASE("session: QUIT ends the session") {
+    Session s;
+    CHECK(s.feed("(setq a 1)"));
+    CHECK(!s.feed("QUIT"));
+}
+
+TEST_CASE("session: a running command takes the line before the command prompt does") {
+    // R12: while a command is asking, what you type answers it. QUIT here is a
+    // bad point, not the QUIT command -- which is why feed_line keeps going.
+    Session s;
+    s.feed("LINE");
+    CHECK(s.engine.active());
+    CHECK(s.feed("QUIT"));
+    CHECK(!s.rec.err.empty());
+}
+
+TEST_CASE("session: an unknown command is reported, not fatal") {
+    Session s;
+    CHECK(s.feed("NOSUCHCOMMAND"));
+    CHECK(contains(s.rec.err, "Unknown command"));
+    CHECK(s.prompt() == "Command: ");
+}
+
+TEST_CASE("session: an unterminated form left open is an error at end of input") {
+    Session s;
+    s.feed("(setq r");
+    CHECK(!s.session.finish());
+    CHECK(contains(s.rec.err, "unterminated"));
+}

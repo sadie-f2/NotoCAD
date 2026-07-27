@@ -28,6 +28,11 @@ add_subdirectory(src/lisp)
 add_subdirectory(src/app)
 add_subdirectory(tools)
 
+# After tools/: the viewer renders the sample drawing defined there.
+if(NOTO_BUILD_GUI)
+  add_subdirectory(src/gui)
+endif()
+
 if(NOTO_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)

@@ -102,33 +102,13 @@ bool PromptLineSource::next_value(const Prompt& prompt, InputValue& out) {
     return true;
 }
 
-void report_finished(const CommandEngine& engine, std::ostream& os) {
-    switch (engine.status()) {
-        case EngineStatus::Finished:
-            if (!engine.message().empty()) os << engine.message() << "\n";
-            break;
-        case EngineStatus::Cancelled:
-            os << "*Cancel*\n";
-            break;
-        case EngineStatus::Failed:
-            os << "; " << engine.message() << "\n";
-            break;
-        default:
-            break;
-    }
-}
-
-void list_commands(std::ostream& os) {
-    os << "Commands:";
-    for (const std::string& name : command_names()) os << ' ' << name;
-    os << " QUIT\nAliases:";
-    for (const CommandAlias& a : command_aliases()) os << ' ' << a.alias << '=' << a.name;
-    os << "\nAny abbreviation works; the shortest match wins."
-       << "\nPoints: 10,20  @5,0 (relative)  @30<45 (polar, degrees)  @ (last point)"
-       << "\nAnything starting with ( is evaluated as AutoLISP."
-       << "\n!name prints a variable, or answers a prompt with it."
-       << "\nCANCEL aborts a command; Enter repeats the last one.\n";
-}
+// Writes a session's output to the standard streams, which is what a terminal
+// front end wants and the GUI does not.
+class StreamOutput final : public PromptOutput {
+public:
+    void write(const std::string& text) override { std::cout << text; }
+    void write_error(const std::string& text) override { std::cerr << text; }
+};
 
 }  // namespace
 
@@ -194,121 +174,158 @@ bool needs_more_input(lisp::Context& ctx, const std::string& text) {
     return reader.error().status == lisp::ReadStatus::UnexpectedEof;
 }
 
+PromptSession::PromptSession(lisp::Context& ctx, lisp::Interp& in, CommandEngine& engine,
+                             PromptOutput& out, bool interactive)
+    : ctx_(ctx), in_(in), engine_(engine), out_(out), interactive_(interactive) {}
+
+void PromptSession::report_finished() {
+    switch (engine_.status()) {
+        case EngineStatus::Finished:
+            if (!engine_.message().empty()) out_.write(engine_.message() + "\n");
+            break;
+        case EngineStatus::Cancelled:
+            out_.write("*Cancel*\n");
+            break;
+        case EngineStatus::Failed:
+            out_.write_error("; " + engine_.message() + "\n");
+            break;
+        default:
+            break;
+    }
+}
+
+void PromptSession::list_commands() {
+    std::string s = "Commands:";
+    for (const std::string& name : command_names()) s += ' ' + name;
+    s += " QUIT\nAliases:";
+    for (const CommandAlias& a : command_aliases()) s += ' ' + a.alias + '=' + a.name;
+    s += "\nAny abbreviation works; the shortest match wins."
+         "\nPoints: 10,20  @5,0 (relative)  @30<45 (polar, degrees)  @ (last point)"
+         "\nAnything starting with ( is evaluated as AutoLISP."
+         "\n!name prints a variable, or answers a prompt with it."
+         "\nCANCEL aborts a command; Enter repeats the last one.\n";
+    out_.write(s);
+}
+
+std::string PromptSession::current_prompt() const {
+    if (!pending_.empty()) return ">  ";
+    if (engine_.active()) return engine_.prompt().text();
+    return kCommandPrompt;
+}
+
+bool PromptSession::feed_line(const std::string& line) {
+    // --- an incomplete LISP form, continued ---------------------------------
+    if (!pending_.empty() ||
+        (!trim(line).empty() && trim(line)[0] == '(' && !engine_.active())) {
+        pending_ += line;
+        pending_ += '\n';
+        if (needs_more_input(ctx_, pending_)) return true;
+
+        const std::string source = pending_;
+        pending_.clear();
+
+        in_.clear_error();
+        lisp::Value result;
+        if (!in_.eval_string(source, result)) {
+            out_.write_error("; " + in_.error().message() + "\n");
+            return true;
+        }
+        out_.write(lisp::prin1(result) + "\n");
+        return !in_.quit_requested();
+    }
+
+    // --- answering a running command ----------------------------------------
+    if (engine_.active()) {
+        const bool whole_line = engine_.prompt().kind == PromptKind::String;
+        std::vector<std::string> tokens = split_prompt_line(line, whole_line);
+        // A blank line is Enter. Without this the line yields no tokens, the
+        // command never advances, and the next line typed gets eaten as its
+        // answer instead.
+        if (tokens.empty()) tokens.emplace_back();
+
+        PromptLineSource source(std::move(tokens), in_);
+        engine_.run(source);
+        if (source.failed()) out_.write_error("; " + source.error() + "\n");
+        if (!engine_.active()) report_finished();
+        return true;
+    }
+
+    // --- the command prompt -------------------------------------------------
+    const std::vector<std::string> tokens = split_prompt_line(line, false);
+    if (tokens.empty()) {
+        // Enter repeats the last command, as R12 does. Interactive only: blank
+        // lines are common in files and silently repeating a command while
+        // reading one would quietly duplicate geometry.
+        if (interactive_ && !last_command_.empty()) {
+            engine_.begin(make_command(last_command_));
+            if (!engine_.active()) report_finished();
+        }
+        return true;
+    }
+
+    const std::string head = tokens.front();
+    const std::string upper = upcase(head);
+
+    if (upper == "QUIT" || upper == "EXIT") return false;
+    if (head == "?") {
+        list_commands();
+        return true;
+    }
+
+    // !name at the command prompt prints the variable.
+    if (head.size() > 1 && head[0] == '!') {
+        in_.clear_error();
+        lisp::Value result;
+        if (!in_.eval_string(head.substr(1), result)) {
+            out_.write_error("; " + in_.error().message() + "\n");
+        } else {
+            out_.write(lisp::prin1(result) + "\n");
+        }
+        return true;
+    }
+
+    // Abbreviations resolve here and only here; see make_command.
+    const CommandMatch match = resolve_command_name(upper);
+    CommandPtr cmd = match.ok() ? make_command(match.name) : nullptr;
+    if (!cmd) {
+        out_.write_error("Unknown command \"" + upper + "\". Type ? for a list.\n");
+        return true;
+    }
+
+    last_command_ = match.name;
+    engine_.begin(std::move(cmd));
+
+    // Anything after the command name on the same line answers its prompts.
+    if (tokens.size() > 1) {
+        PromptLineSource source(std::vector<std::string>(tokens.begin() + 1, tokens.end()), in_);
+        engine_.run(source);
+        if (source.failed()) out_.write_error("; " + source.error() + "\n");
+    }
+    if (!engine_.active()) report_finished();
+    return true;
+}
+
+bool PromptSession::finish() {
+    if (!pending_.empty() && !trim(pending_).empty()) {
+        out_.write_error("; unexpected end of input inside an unterminated form\n");
+        return false;
+    }
+    return true;
+}
+
 int run_command_prompt(lisp::Context& ctx, lisp::Interp& in, CommandEngine& engine,
                        bool interactive) {
-    std::string pending;   // an incomplete LISP form spanning lines
+    StreamOutput out;
+    PromptSession session(ctx, in, engine, out, interactive);
     std::string line;
-    std::string last_command;
 
     while (true) {
-        if (interactive) {
-            if (!pending.empty()) {
-                std::cout << ">  ";
-            } else if (engine.active()) {
-                std::cout << engine.prompt().text();
-            } else {
-                std::cout << kCommandPrompt;
-            }
-            std::cout << std::flush;
-        }
+        if (interactive) std::cout << session.current_prompt() << std::flush;
         if (!std::getline(std::cin, line)) break;
-
-        // --- an incomplete LISP form, continued -----------------------------
-        if (!pending.empty() || (!trim(line).empty() && trim(line)[0] == '(' &&
-                                 !engine.active())) {
-            pending += line;
-            pending += '\n';
-            if (needs_more_input(ctx, pending)) continue;
-
-            const std::string source = pending;
-            pending.clear();
-
-            in.clear_error();
-            lisp::Value result;
-            if (!in.eval_string(source, result)) {
-                std::cerr << "; " << in.error().message() << "\n";
-                continue;
-            }
-            std::cout << lisp::prin1(result) << "\n";
-            if (in.quit_requested()) return 0;
-            continue;
-        }
-
-        // --- answering a running command ------------------------------------
-        if (engine.active()) {
-            const bool whole_line = engine.prompt().kind == PromptKind::String;
-            std::vector<std::string> tokens = split_prompt_line(line, whole_line);
-            // A blank line is Enter. Without this the line yields no tokens, the
-            // command never advances, and the next line typed gets eaten as its
-            // answer instead.
-            if (tokens.empty()) tokens.emplace_back();
-
-            PromptLineSource source(std::move(tokens), in);
-            engine.run(source);
-            if (source.failed()) std::cerr << "; " << source.error() << "\n";
-            if (!engine.active()) report_finished(engine, std::cout);
-            continue;
-        }
-
-        // --- the command prompt ---------------------------------------------
-        const std::vector<std::string> tokens = split_prompt_line(line, false);
-        if (tokens.empty()) {
-            // Enter repeats the last command, as R12 does. Interactive only:
-            // blank lines are common in files and silently repeating a command
-            // while reading one would quietly duplicate geometry.
-            if (interactive && !last_command.empty()) {
-                engine.begin(make_command(last_command));
-                if (!engine.active()) report_finished(engine, std::cout);
-            }
-            continue;
-        }
-
-        const std::string head = tokens.front();
-        const std::string upper = upcase(head);
-
-        if (upper == "QUIT" || upper == "EXIT") return 0;
-        if (head == "?") {
-            list_commands(std::cout);
-            continue;
-        }
-
-        // !name at the command prompt prints the variable.
-        if (head.size() > 1 && head[0] == '!') {
-            in.clear_error();
-            lisp::Value result;
-            if (!in.eval_string(head.substr(1), result)) {
-                std::cerr << "; " << in.error().message() << "\n";
-            } else {
-                std::cout << lisp::prin1(result) << "\n";
-            }
-            continue;
-        }
-
-        // Abbreviations resolve here and only here; see make_command.
-        const CommandMatch match = resolve_command_name(upper);
-        CommandPtr cmd = match.ok() ? make_command(match.name) : nullptr;
-        if (!cmd) {
-            std::cerr << "Unknown command \"" << upper << "\". Type ? for a list.\n";
-            continue;
-        }
-
-        last_command = match.name;
-        engine.begin(std::move(cmd));
-
-        // Anything after the command name on the same line answers its prompts.
-        if (tokens.size() > 1) {
-            PromptLineSource source(
-                std::vector<std::string>(tokens.begin() + 1, tokens.end()), in);
-            engine.run(source);
-            if (source.failed()) std::cerr << "; " << source.error() << "\n";
-        }
-        if (!engine.active()) report_finished(engine, std::cout);
+        if (!session.feed_line(line)) return 0;
     }
 
-    if (!pending.empty() && !trim(pending).empty()) {
-        std::cerr << "; unexpected end of input inside an unterminated form\n";
-        return 1;
-    }
+    if (!session.finish()) return 1;
     if (interactive) std::cout << "\n";
     return 0;
 }

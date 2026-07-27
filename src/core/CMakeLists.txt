@@ -6,6 +6,10 @@ add_library(noto_core STATIC
   ecs.cpp
   entities.cpp
   entities_dxf.cpp
+  entities_draw.cpp
+  render.cpp
+  scene.cpp
+  viewport.cpp
   database.cpp
   dxf.cpp
   command.cpp

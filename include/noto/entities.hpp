@@ -36,6 +36,7 @@ public:
     BBox bbox() const override;
     void osnap_points(std::vector<OsnapPoint>& out) const override;
     void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
 
 private:
     Vec3 start_{};
@@ -63,6 +64,7 @@ public:
     BBox bbox() const override;
     void osnap_points(std::vector<OsnapPoint>& out) const override;
     void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
 
 private:
     Vec3 center_{};
@@ -111,6 +113,7 @@ public:
     BBox bbox() const override;
     void osnap_points(std::vector<OsnapPoint>& out) const override;
     void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
 
 private:
     Vec3 center_{};

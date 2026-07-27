@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
+// The R12 command line: a scrollback of what has happened and one input line.
+//
+// It knows nothing about commands. It emits the line that was typed and shows
+// whatever it is told to show -- PromptSession decides what a line means, in
+// exactly the same code `ncad` runs. The widget's only opinion is that the
+// prompt text sits in front of the input, as R12 has it, rather than being
+// printed into the scrollback where it would scroll away.
+#pragma once
+
+#include <QString>
+#include <QWidget>
+
+class QLabel;
+class QLineEdit;
+class QPlainTextEdit;
+
+namespace noto {
+
+class CommandLineWidget : public QWidget {
+    Q_OBJECT
+
+public:
+    explicit CommandLineWidget(QWidget* parent = nullptr);
+
+    void set_prompt(const QString& text);
+    void append_output(const QString& text);
+    void append_error(const QString& text);
+
+    // Echoes what the user typed into the scrollback, prefixed with the prompt
+    // that was showing -- otherwise the history reads as a list of bare words
+    // with no record of what was being asked.
+    void echo_input(const QString& prompt, const QString& text);
+
+    // Types text into the input line and takes focus. This is how a keypress in
+    // the viewport reaches the command line, which is what R12 does: there is
+    // no separate "focus the command line" step, you just start typing.
+    void insert_typed_text(const QString& text);
+
+    void focus_input();
+
+signals:
+    void lineEntered(const QString& line);
+
+    // Escape at the command line cancels the running command, as in R12.
+    void cancelRequested();
+
+private slots:
+    void on_return_pressed();
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
+private:
+    void append(const QString& text, const QColor& color);
+
+    QPlainTextEdit* history_{nullptr};
+    QLabel* prompt_{nullptr};
+    QLineEdit* input_{nullptr};
+
+    QStringList recall_;
+    qsizetype recall_pos_{0};  // qsizetype, not int: it indexes recall_
+};
+
+}  // namespace noto

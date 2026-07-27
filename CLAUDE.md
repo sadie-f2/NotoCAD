@@ -53,16 +53,25 @@ CAD software.
 
 **Qt6 is LGPLv3, so link it dynamically.** Static linking creates relinking
 obligations the BSD-3 core is meant to avoid. Same reasoning as the DWG decision:
-the boundary has to be visible in the build graph, not inferred.
+the boundary has to be visible in the build graph, not inferred. `src/gui/` is
+the only target that sees Qt, and its CMakeLists aborts the configure if it
+finds a static Qt — the licensing decision is enforced, not just documented.
 
 **Phase order.** Each phase is usable on its own, and the risk climbs steeply at
 the end:
 
 1. *(done)* Command state machine — `include/noto/command.hpp`.
-2. Read-only viewer: `draw()` on the entity vtable, viewport/camera, pan/zoom/orbit.
-   ~800–1200 lines, low risk. The second independent check on the geometry after
-   AutoCAD 2026.
-3. Interactive: route input events to `CommandEngine::supply()`, command-line widget.
+2. *(done)* Read-only viewer: `draw()` on the entity vtable (`render.hpp`,
+   `scene.hpp`), viewport/camera (`viewport.hpp`), pan/zoom/orbit. The second
+   independent check on the geometry after AutoCAD 2026, and it earned its
+   keep immediately: tilted circles render edge-on in plan and as ellipses
+   perpendicular to their normals under orbit.
+3. *(done)* Interactive: input events routed to `CommandEngine::supply()`, and a
+   command-line widget. The engine's design paid off exactly as intended — the
+   viewport is an `InputSource` whose `next_value` always returns false, and a
+   click calls `supply()` from the mouse handler. Prompt semantics were lifted
+   out of `ncad`'s `std::cin` loop into `app::PromptSession` so the window and
+   the terminal run the same code over a `PromptOutput` sink.
 4. Usable: pick box, entity hit-testing, osnap cursor tracking, grips. This is the
    expensive one, and most of it is geometry work rather than Qt work — the derived
    osnaps (PER/TAN/NEA/INT) do not exist yet and are the prerequisite.
@@ -171,15 +180,26 @@ cmake --build build-asan && ./build-asan/tests/noto_tests
 tilted planes. Opening it in another CAD application is the real correctness gate
 for the DXF and ECS code — headless tests only prove self-consistency.
 
+`cmake -B build -DNOTO_BUILD_GUI=ON` adds `./build/src/gui/ncad_gui`, the Qt
+shell: the same drawing, engine and interpreter as `ncad`, with a viewport.
+Middle-drag pans, shift+middle orbits, wheel zooms about the cursor, Home is
+extents and Ctrl+Home is plan. Typing anywhere goes to the command line, and a
+left click answers a point prompt. Rendering the same database two ways is a
+correctness check worth having — the two disagreeing is a real signal.
+
+Executables are `ncad*`; libraries are `noto_*`.
+
 ## Layout
 
 ```
 include/noto/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, dxf,
-                     command, commands, input_text
+                     command, commands, input_text, render, scene, viewport
 include/noto/lisp/   arena, value, reader, eval
 src/core/            geometry kernel, entities, database, DXF writer, commands
 src/lisp/            interpreter: arena, values, reader, eval, builtins, subrs
-src/app/             ncad: the R12 command prompt and command-line entry point
-tools/               gen_sample
+src/app/             ncad: the R12 command prompt, and PromptSession, which the
+                     Qt command line runs too
+src/gui/             ncad_gui: the Qt shell. The only target that sees Qt.
+tools/               gen_sample, and the sample drawing the viewer also renders
 tests/               in-tree harness + suites
 ```
