@@ -49,6 +49,41 @@ Qt6 shell comes later and stays thin: windowing, GL context, input events only,
 behind a stable core API. Correctness is verified by opening emitted DXF in other
 CAD software.
 
+## The Qt shell — decided, not yet built
+
+**Qt6 is LGPLv3, so link it dynamically.** Static linking creates relinking
+obligations the BSD-3 core is meant to avoid. Same reasoning as the DWG decision:
+the boundary has to be visible in the build graph, not inferred.
+
+**Phase order.** Each phase is usable on its own, and the risk climbs steeply at
+the end:
+
+1. *(done)* Command state machine — `include/noto/command.hpp`.
+2. Read-only viewer: `draw()` on the entity vtable, viewport/camera, pan/zoom/orbit.
+   ~800–1200 lines, low risk. The second independent check on the geometry after
+   AutoCAD 2026.
+3. Interactive: route input events to `CommandEngine::supply()`, command-line widget.
+4. Usable: pick box, entity hit-testing, osnap cursor tracking, grips. This is the
+   expensive one, and most of it is geometry work rather than Qt work — the derived
+   osnaps (PER/TAN/NEA/INT) do not exist yet and are the prerequisite.
+
+**QPainter before OpenGL.** R12-era display is wireframe: lines, arcs, text. QPainter
+does that in a fraction of the code with no shader pipeline, no GL context management
+and no driver variability. Move to `QOpenGLWidget` when 3D orbit performance demands
+it, behind the same `draw()` interface. Starting with GL means writing shader plumbing
+before a single line appears on screen.
+
+**The hooks already exist.** A viewport is just another `InputSource` that always
+returns false from `next_value` and calls `CommandEngine::supply()` from its event
+handler instead; there is a test using a source that never yields, pinning that the
+engine suspends rather than blocking. `Prompt::kind` says whether to rubber-band a
+line or show an aperture, `Prompt::base` is the rubber-band origin, and
+`Prompt::last_point` is LASTPOINT.
+
+**No terminal UI work.** The GUI is not driven from a terminal, so raw mode, termios
+and libedit are all off the table. `ncad` resolving abbreviations on Enter is enough
+for the CLI; live completion is a Qt widget concern where it is free.
+
 **Entity vtable.** `create / free / clone / transform(Mat4) / bbox / osnap_points /
 dxf_write / dxf_read / draw`. `transform` is the important one — MOVE, COPY, SCALE,
 MIRROR, ARRAY, ROTATE, ROTATE3D, ALIGN and block insertion all route through it.
