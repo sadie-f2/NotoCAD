@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // Emits a sample R12 DXF exercising the parts most likely to be wrong.
 //
 // This is the project's real correctness gate: open the output in another CAD

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // Core 3D vector type. Trivially copyable, constexpr-friendly, doubles throughout.
 #pragma once
 

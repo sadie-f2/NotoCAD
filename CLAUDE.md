@@ -30,6 +30,20 @@ avoids depending on LibreDWG's weaker R12 write path. DWG export is not planned.
 Consequence: there is no `serialize_dwg` slot on entities. DWG I/O converts at the
 boundary through LibreDWG's own structs.
 
+**License: BSD-3-Clause.** Chosen over MIT for the no-endorsement clause and the
+more explicit binary-redistribution terms. The README states that the license covers
+documentation as well, since BSD-3 — unlike MIT — does not name documentation as
+licensed subject matter.
+
+Incorporating GPLv3 code makes the *distributed binary* GPLv3, not the project. That
+is why DWG is a compile-time option rather than a dependency: the default build links
+no GPL code and stays BSD-3, and only a `NOTO_WITH_DWG=ON` binary must be conveyed
+under GPLv3. Permissive source flows into GPLv3 cleanly, so nothing is lost. This is
+the wall FreeCAD and LibreCAD hit from the other side, being GPLv2.
+
+Consequence: LibreDWG headers must not leak into core headers, and DWG lives in its
+own build target so the linkage is visible in the build graph rather than inferred.
+
 **Headless core first.** The core builds and tests with no GUI and no display. The
 Qt6 shell comes later and stays thin: windowing, GL context, input events only,
 behind a stable core API. Correctness is verified by opening emitted DXF in other

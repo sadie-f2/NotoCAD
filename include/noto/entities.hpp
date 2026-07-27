@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // The first three concrete entities: LINE, CIRCLE, ARC.
 //
 // Storage convention: geometry is held in WORLD coordinates, with `props().normal`

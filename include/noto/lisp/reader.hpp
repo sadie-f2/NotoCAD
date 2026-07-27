@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // AutoLISP reader: source text to Values.
 //
 // Errors are returned as status codes, never thrown. Per the project's dialect

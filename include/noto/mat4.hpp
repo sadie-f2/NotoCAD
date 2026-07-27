@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // 4x4 affine transform. Row-major storage, m[row][col], column-vector convention:
 // a transformed point is M * p. This is the single slot every entity's transform()
 // method takes, so MOVE/COPY/SCALE/MIRROR/ROTATE/ROTATE3D/ALIGN all share one path.

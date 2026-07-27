@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // Entity base class and the dispatch surface every entity kind implements.
 //
 // Deliberately a single level of inheritance: this base, and concrete entities

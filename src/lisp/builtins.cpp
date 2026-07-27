@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // The AutoLISP builtin function table.
 //
 // R12 arithmetic is type-sensitive: an operation on integers yields an integer,

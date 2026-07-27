@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // DXF R12 serialisation for the concrete entities.
 //
 // Kept apart from entities.cpp so the geometry stays free of format concerns.

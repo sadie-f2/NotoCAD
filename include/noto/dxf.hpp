@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // DXF R12 (AC1009) writer.
 //
 // Native and in-tree by design: R12 DXF is small, text, and fully documented, and

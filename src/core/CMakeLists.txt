@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Sadie Forbes
+
 add_library(noto_core STATIC
   mat4.cpp
   ecs.cpp

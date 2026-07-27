@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // Object snap points.
 //
 // Split into two families, because they have genuinely different signatures:

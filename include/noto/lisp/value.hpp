@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // AutoLISP value representation.
 //
 // A Value is 16 bytes: an 8-bit tag plus an 8-byte payload. Values are passed by

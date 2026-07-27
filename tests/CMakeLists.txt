@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Sadie Forbes
+
 add_executable(noto_tests
   test_main.cpp
   test_math.cpp

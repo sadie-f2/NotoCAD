@@ -1,0 +1,88 @@
+# NotoCAD
+
+An open-source, command-line-first CAD tool modeled on **AutoCAD R12** — the
+pre-GUI-heavy, pre-solids era. Not a modern AutoCAD clone.
+
+Linux-first, with a macOS port as a stated goal.
+
+The intended use is not drafting by mouse. It is driving a CAD kernel as a
+procedural 3D graphics engine from AutoLISP: generating geometry from external
+analysis data, and pulling results back in for visualisation.
+
+## Status
+
+Early. The headless core builds and tests with no GUI and no display.
+
+**Working:** geometry kernel (Vec3/Mat4, arbitrary-axis/ECS, 3D transforms
+including rotation about an arbitrary axis and mirroring); LINE, CIRCLE and ARC
+with object snaps; an entity database with stable never-reused handles; a DXF
+R12 (AC1009) writer; and an AutoLISP interpreter — arena, reader, evaluator,
+special forms and the builtin function table.
+
+**Not yet:** `entmake` and the rest of the entity-access functions, a REPL, the
+resumable command state machines, the remaining R12 entities, derived object
+snaps (perpendicular/tangent/nearest/intersection), a DXF reader, UCS, and the
+Qt6 shell.
+
+There is no application binary yet. The core is a library plus a test suite.
+
+## Build
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build
+./build/tests/noto_tests        # or: ctest --test-dir build
+```
+
+Options: `NOTO_BUILD_GUI` (off), `NOTO_WITH_DWG` (off), `NOTO_BUILD_TESTS` (on).
+
+Sanitizer build, worth running after any arena or interpreter work:
+
+```sh
+cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+cmake --build build-asan && ./build-asan/tests/noto_tests
+```
+
+`./build/tools/noto_gen_sample out.dxf` emits a drawing containing entities on
+tilted planes. Opening it in another CAD application is the real correctness
+gate for the DXF and ECS code — headless tests only prove self-consistency.
+
+## File formats
+
+**DXF is the native format.** R12 DXF read/write lives in-tree: the format is
+small, text, and fully documented.
+
+**DWG is optional and import-only**, via [LibreDWG][libredwg], enabled with
+`-DNOTO_WITH_DWG=ON`. It is off by default. DWG export is not planned, and
+LibreDWG types do not appear in core headers — conversion happens at the
+boundary through LibreDWG's own structs.
+
+[libredwg]: https://www.gnu.org/software/libredwg/
+
+## Licensing
+
+NotoCAD is licensed under the **BSD 3-Clause License** — see [LICENSE](LICENSE).
+The license applies to all content in this repository, including documentation.
+
+One exception applies to *binaries*, not to the source:
+
+> LibreDWG is licensed under the GPLv3. A binary built with `-DNOTO_WITH_DWG=ON`
+> links it, and so that binary must be conveyed under the GPLv3. This does not
+> affect the NotoCAD source, which remains BSD-3-Clause, and it does not affect
+> the default build, which links no GPL code.
+
+If you redistribute a DWG-enabled build, you are distributing a GPLv3 work.
+The default build carries no such obligation.
+
+This structure is deliberate: keeping DWG behind a compile-time option is what
+lets the core stay permissively licensed. See `CLAUDE.md` for the reasoning
+behind this and the other foundational decisions.
+
+## Design notes
+
+`CLAUDE.md` is the durable record of the decisions that shaped the codebase and
+why — the language dialect and its restraint rules, why the arbitrary axis
+algorithm is foundational rather than a feature, why commands must be resumable
+state machines, and why the AutoLISP implementation is written from scratch
+rather than derived from XLISP.

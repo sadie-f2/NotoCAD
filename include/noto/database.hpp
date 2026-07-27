@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // The drawing database: entity storage plus the symbol tables.
 //
 // Handles are stable for the lifetime of an entity and are never reused. This is

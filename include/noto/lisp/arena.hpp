@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // Bump allocator for interpreter data.
 //
 // The intended workload is AutoLISP generating meshes from external analysis

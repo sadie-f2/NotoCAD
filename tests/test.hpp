@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // Minimal zero-dependency test harness. Deliberately small: swap for doctest or
 // Catch2 later without touching test bodies, since the macro names match.
 #pragma once

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
 // Entity Coordinate System support: the Arbitrary Axis Algorithm.
 //
 // R12 stores CIRCLE, ARC, 2D POLYLINE, TEXT, SOLID and friends as 2D coordinates
