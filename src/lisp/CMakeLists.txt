@@ -1,0 +1,11 @@
+add_library(noto_lisp STATIC
+  arena.cpp
+  value.cpp
+  reader.cpp
+)
+
+target_include_directories(noto_lisp PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(noto_lisp PUBLIC noto_core)
+target_link_libraries(noto_lisp PRIVATE noto_flags)
+
+add_library(noto::lisp ALIAS noto_lisp)

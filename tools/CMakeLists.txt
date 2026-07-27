@@ -1,0 +1,2 @@
+add_executable(noto_gen_sample gen_sample.cpp)
+target_link_libraries(noto_gen_sample PRIVATE noto_core noto_flags)
