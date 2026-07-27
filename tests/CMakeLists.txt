@@ -9,6 +9,7 @@ add_executable(noto_tests
   test_lisp.cpp
   test_eval.cpp
   test_entmake.cpp
+  test_dxfout.cpp
 )
 
 target_include_directories(noto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

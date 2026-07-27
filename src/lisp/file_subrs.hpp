@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
+// Internal: drawing and file I/O builtins, declared here so the table in
+// builtins.cpp can reference them. Not an installed header.
+#pragma once
+
+#include "noto/lisp/eval.hpp"
+
+namespace noto::lisp {
+
+bool subr_dxfout(Interp& in, const Value* args, std::size_t argc, Value& out);
+
+}  // namespace noto::lisp
