@@ -16,3 +16,20 @@ target_include_directories(noto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(noto_tests PRIVATE noto_core noto_lisp noto_flags)
 
 add_test(NAME noto_tests COMMAND noto_tests)
+
+# Smoke tests for the application binary itself. The unit suite exercises the
+# library; these prove the wiring in main.cpp works and the exit codes are right.
+add_test(NAME noto_cli_eval COMMAND noto -e "(princ (* 6 7))")
+set_tests_properties(noto_cli_eval PROPERTIES PASS_REGULAR_EXPRESSION "42")
+
+add_test(NAME noto_cli_entmake COMMAND noto
+         -e "(entmake (list (cons 0 \"CIRCLE\") (list 10 0.0 0.0 0.0) (cons 40 5.0)))"
+         -e "(princ (type (entlast)))")
+set_tests_properties(noto_cli_entmake PROPERTIES PASS_REGULAR_EXPRESSION "ENAME")
+
+# A LISP error must fail the process, not be swallowed.
+add_test(NAME noto_cli_error COMMAND noto -e "(/ 1 0)")
+set_tests_properties(noto_cli_error PROPERTIES WILL_FAIL TRUE)
+
+add_test(NAME noto_cli_help COMMAND noto -h)
+set_tests_properties(noto_cli_help PROPERTIES PASS_REGULAR_EXPRESSION "Usage")

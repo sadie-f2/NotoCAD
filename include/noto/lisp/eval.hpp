@@ -118,6 +118,12 @@ public:
     const EvalError& error() const { return error_; }
     void clear_error() { error_ = EvalError{}; }
 
+    // Set by (quit) / (exit). Evaluation of remaining forms stops, but this is
+    // not an error -- the host decides what to do about it.
+    bool quit_requested() const { return quit_; }
+    void request_quit() { quit_ = true; }
+    void clear_quit() { quit_ = false; }
+
     // Always returns false, so builtins can `return in.fail(...)`.
     bool fail(EvalStatus status, std::string detail = {});
 
@@ -160,6 +166,7 @@ private:
     std::vector<Value> stack_;
     std::vector<Binding> bindings_;
 
+    bool quit_{false};
     std::size_t depth_{0};
     std::size_t max_depth_{2000};
 };

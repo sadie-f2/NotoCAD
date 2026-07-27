@@ -10,5 +10,6 @@
 namespace noto::lisp {
 
 bool subr_dxfout(Interp& in, const Value* args, std::size_t argc, Value& out);
+bool subr_quit(Interp& in, const Value* args, std::size_t argc, Value& out);
 
 }  // namespace noto::lisp

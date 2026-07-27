@@ -131,7 +131,8 @@ for the DXF and ECS code — headless tests only prove self-consistency.
 include/noto/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, dxf
 include/noto/lisp/   arena, value, reader, eval
 src/core/            geometry kernel, entities, database, DXF writer
-src/lisp/            interpreter: arena, values, reader, eval, builtins
+src/lisp/            interpreter: arena, values, reader, eval, builtins, subrs
+src/app/             noto: the AutoLISP REPL and command-line entry point
 tools/               gen_sample
 tests/               in-tree harness + suites
 ```

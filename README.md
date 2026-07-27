@@ -24,18 +24,47 @@ Geometry can be generated procedurally from LISP and written to DXF today. The
 emitted DXF has been verified to open correctly in AutoCAD 2026, including
 entities on arbitrary tilted planes.
 
-**Not yet:** a REPL and `dxfout`, the resumable command state machines, the
-remaining R12 entities, derived object snaps (perpendicular / tangent /
-nearest / intersection), a DXF reader, UCS, and the Qt6 shell.
+**Not yet:** the resumable command state machines, the remaining R12 entities,
+derived object snaps (perpendicular / tangent / nearest / intersection), a DXF
+reader, UCS, and the Qt6 shell.
 
-There is no application binary yet. The core is a library plus a test suite.
+## Using it
+
+`noto` is an AutoLISP read-eval-print loop holding one drawing.
+
+```console
+$ noto
+noto 0.0.1 -- AutoLISP. (quit) or Ctrl-D to exit.
+_$ (entmake '((0 . "CIRCLE") (8 . "PARTS") (10 0.0 0.0 0.0) (40 . 5.0)))
+((0 . "CIRCLE") (8 . "PARTS") (10 0.0 0.0 0.0) (40 . 5.0))
+_$ (dxfout "out.dxf")
+T
+```
+
+It also runs non-interactively, which is the point — geometry gets generated,
+not drawn:
+
+```sh
+noto wheel.lsp -e '(dxfout "wheel.dxf")'   # load files, then evaluate
+noto < script.lsp                          # or pipe it
+noto -e '(princ (* 6 7))'                  # one-off expression
+```
+
+Forms may span lines; the reader decides when one is complete, so a `)` inside
+a string or comment does not confuse it. An error returns you to the prompt with
+the interpreter intact, and makes the process exit non-zero in batch use.
+
+There is no line editing yet: GNU readline is GPLv3, and linking it would put
+the default build under the obligation the optional DWG module exists to avoid.
+libedit (BSD) can go behind a build option later.
 
 ## Build
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build
-./build/tests/noto_tests        # or: ctest --test-dir build
+ctest --test-dir build          # unit suite plus CLI smoke tests
+./build/src/app/noto            # the application
 ```
 
 Options: `NOTO_BUILD_GUI` (off), `NOTO_WITH_DWG` (off), `NOTO_BUILD_TESTS` (on).

@@ -37,4 +37,11 @@ bool subr_dxfout(Interp& in, const Value* args, std::size_t, Value& out) {
     return true;
 }
 
+// (quit) / (exit). Not an error: the host decides whether to stop.
+bool subr_quit(Interp& in, const Value*, std::size_t, Value& out) {
+    in.request_quit();
+    out = make_nil();
+    return true;
+}
+
 }  // namespace noto::lisp

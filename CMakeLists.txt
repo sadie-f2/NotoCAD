@@ -25,6 +25,7 @@ target_compile_options(noto_flags INTERFACE
 
 add_subdirectory(src/core)
 add_subdirectory(src/lisp)
+add_subdirectory(src/app)
 add_subdirectory(tools)
 
 if(NOTO_BUILD_TESTS)

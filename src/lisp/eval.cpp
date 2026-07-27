@@ -71,6 +71,11 @@ void Interp::install_builtins() {
     for (const SpecialDef& sp : kSpecials) {
         ctx_.intern(sp.name)->special = static_cast<std::int16_t>(sp.which);
     }
+
+    // PI is predefined in AutoLISP. Files assume it and never set it.
+    Symbol* pi = ctx_.intern("PI");
+    pi->value = make_real(3.14159265358979323846);
+    pi->bound = true;
 }
 
 std::ostream& Interp::output() { return out_ ? *out_ : std::cout; }
@@ -263,6 +268,7 @@ bool Interp::eval_body(const Value& body, Value& out) {
     out = make_nil();
     for (Value rest = body; is_cons(rest); rest = cdr(rest)) {
         if (!eval(car(rest), out)) return false;
+        if (quit_) return true;
     }
     return true;
 }
@@ -313,6 +319,7 @@ bool Interp::eval_special(Special which, const Value& args, Value& out) {
                 if (!eval(car(args), test)) return false;
                 if (!is_truthy(test)) return true;
                 if (!eval_body(cdr(args), out)) return false;
+                if (quit_) return true;
             }
         }
 
@@ -325,6 +332,7 @@ bool Interp::eval_special(Special which, const Value& args, Value& out) {
             out = make_nil();
             for (std::int32_t n = 0; n < count.i; ++n) {
                 if (!eval_body(cdr(args), out)) return false;
+                if (quit_) break;
             }
             return true;
         }
@@ -423,6 +431,7 @@ bool Interp::eval_string(std::string_view source, Value& out) {
     Value form;
     while (reader.read(form)) {
         if (!eval(form, out)) return false;
+        if (quit_) break;
     }
     const ReadError& re = reader.error();
     if (re.status != ReadStatus::Ok && re.status != ReadStatus::EndOfInput) {

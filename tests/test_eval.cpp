@@ -343,3 +343,29 @@ TEST_CASE("eval: bulk allocation stays in the arena") {
     CHECK(f.eval("(length (build 20000))") == "20000");
     CHECK(f.ctx.arena().bytes_used() > 20000 * sizeof(Cons));
 }
+
+TEST_CASE("eval: PI is predefined") {
+    // AutoLISP files assume it and never set it.
+    Fixture f;
+    CHECK(f.eval("(> pi 3.14159)") == "T");
+    CHECK(f.eval("(< pi 3.1416)") == "T");
+    CHECK(f.eval("(equal PI Pi)") == "T");  // symbols are case-insensitive
+}
+
+TEST_CASE("eval: quit stops evaluation without being an error") {
+    Fixture f;
+    CHECK(f.in.quit_requested() == false);
+    CHECK(f.eval("(setq a 1) (quit) (setq a 2)") == "nil");
+    CHECK(f.in.quit_requested() == true);
+    CHECK(f.in.error().ok());
+
+    // The form after (quit) never ran.
+    f.in.clear_quit();
+    CHECK(f.eval("a") == "1");
+
+    // It takes effect inside a loop too, rather than at the end of it.
+    f.in.clear_quit();
+    f.eval("(setq n 0)");
+    f.eval("(while (< n 100) (setq n (1+ n)) (if (= n 3) (exit)))");
+    CHECK(f.eval("n") == "3");
+}
