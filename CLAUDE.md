@@ -63,6 +63,17 @@ implies, by design and not as later optimisation: tagged compact values, interne
 symbols, arena-allocated cons cells, a pre-resolved AST rather than raw list walking,
 and a suppressed-regen batch mode during LISP loops.
 
+**Scoping is dynamic, not lexical.** R12 binds dynamically and real LISP files rely
+on it — a `defun` reads a variable its caller set. Bindings are shallow: a call saves
+the symbol's current value, overwrites it, and restores on return, including on the
+error path. Lexical scope would be cleaner and would silently break working files.
+
+**Not derived from XLISP.** AutoLISP itself descends from David Betz's XLISP 1.0, but
+reusing it here buys only a generic evaluator while imposing its mark-and-sweep GC on
+the arena design above, and the CAD builtins — `command`, `entmake`, `ssget` — are
+written from scratch either way. Semantics are matched deliberately; source is not
+borrowed.
+
 ## Scope
 
 **In:** core 2D entities (LINE, CIRCLE, ARC, PLINE, TEXT); object snaps
@@ -104,9 +115,9 @@ for the DXF and ECS code — headless tests only prove self-consistency.
 
 ```
 include/noto/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, dxf
-include/noto/lisp/   arena, value, reader
+include/noto/lisp/   arena, value, reader, eval
 src/core/            geometry kernel, entities, database, DXF writer
-src/lisp/            interpreter: arena, values, reader
+src/lisp/            interpreter: arena, values, reader, eval, builtins
 tools/               gen_sample
 tests/               in-tree harness + suites
 ```

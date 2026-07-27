@@ -2,6 +2,8 @@ add_library(noto_lisp STATIC
   arena.cpp
   value.cpp
   reader.cpp
+  eval.cpp
+  builtins.cpp
 )
 
 target_include_directories(noto_lisp PUBLIC ${PROJECT_SOURCE_DIR}/include)

@@ -73,6 +73,17 @@ struct Symbol {
     Value value;            // global binding
     bool bound{false};
     std::int32_t subr{-1};  // >= 0 if this symbol names a builtin
+
+    // Functions live in their own slot rather than in `value`. AutoLISP keeps
+    // defun'd functions in the value cell, but separating them means a variable
+    // named PT cannot quietly destroy a function named PT, which is a failure
+    // mode with no diagnostic and no upside.
+    Value func;              // (LAMBDA params . body), when has_func
+    bool has_func{false};
+
+    // >= 0 if this symbol names a special form, which is dispatched before
+    // arguments are evaluated. See Special in eval.hpp.
+    std::int16_t special{-1};
 };
 
 // --- constructors -----------------------------------------------------------
@@ -117,6 +128,13 @@ inline Value make_cons(Cons* c) {
     Value v;
     v.type = Type::Cons;
     v.cons = c;
+    return v;
+}
+
+inline Value make_subr(std::int32_t index) {
+    Value v;
+    v.type = Type::Subr;
+    v.subr = index;
     return v;
 }
 
