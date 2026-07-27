@@ -64,6 +64,17 @@ private:
     std::vector<Handle> selected_;
 };
 
+// DXFOUT: prompt for a file name and write the drawing. In R12 this is a
+// command, and it only lived as a LISP function because the command layer did
+// not exist yet. The (dxfout ...) function stays -- scripts want it -- but this
+// is the form a person types.
+class DxfOutCommand final : public Command {
+public:
+    const char* name() const override { return "DXFOUT"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
 // Looks a command up by name, case-insensitively. Returns nullptr if unknown,
 // which callers report rather than treating as a crash.
 CommandPtr make_command(std::string_view name);

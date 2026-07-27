@@ -10,6 +10,8 @@
 #include "noto/input_text.hpp"
 #include "noto/lisp/eval.hpp"
 
+#include <cstdio>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -442,4 +444,63 @@ TEST_CASE("lisp: a LISP loop drives a command, which is the point") {
     )");
     CHECK(f.db.size() == 20);
     CHECK(!f.engine.active());
+}
+
+TEST_CASE("DXFOUT: writes from the command prompt, not only from LISP") {
+    // It was a LISP function first only because the command layer did not exist.
+    ScriptFixture f;
+    f.run("LINE 0,0 10,0\n\n");
+    CHECK(f.db.size() == 1);
+
+    const std::string path = "noto_test_cmd_dxfout.dxf";
+    std::remove(path.c_str());
+
+    TextInputSource src(tokenize_script(path + "\n"));
+    f.engine.begin(make_command("DXFOUT"));
+    CHECK(f.engine.run(src) == EngineStatus::Finished);
+    CHECK(f.engine.message().find("written") != std::string::npos);
+
+    std::ifstream check(path, std::ios::binary);
+    CHECK(check.good());
+    const std::string text((std::istreambuf_iterator<char>(check)),
+                           std::istreambuf_iterator<char>());
+    CHECK(text.find("LINE") != std::string::npos);
+    CHECK(text.substr(text.size() - 5) == "EOF\r\n");
+    check.close();
+    std::remove(path.c_str());
+}
+
+TEST_CASE("DXFOUT: supplies the extension when it is left off") {
+    ScriptFixture f;
+    f.run("CIRCLE 0,0 1\n");
+
+    const std::string stem = "noto_test_cmd_extension";
+    std::remove((stem + ".dxf").c_str());
+
+    TextInputSource src(tokenize_script(stem + "\n"));
+    f.engine.begin(make_command("DXFOUT"));
+    CHECK(f.engine.run(src) == EngineStatus::Finished);
+
+    std::ifstream check(stem + ".dxf", std::ios::binary);
+    CHECK(check.good());  // ".dxf" was appended
+    check.close();
+    std::remove((stem + ".dxf").c_str());
+
+    // And not doubled when it is already there.
+    ScriptFixture g;
+    g.run("CIRCLE 0,0 1\n");
+    TextInputSource src2(tokenize_script(stem + ".dxf\n"));
+    g.engine.begin(make_command("DXFOUT"));
+    CHECK(g.engine.run(src2) == EngineStatus::Finished);
+    CHECK(g.engine.message().find(".dxf.dxf") == std::string::npos);
+    std::remove((stem + ".dxf").c_str());
+}
+
+TEST_CASE("DXFOUT: an unwritable path fails the command") {
+    ScriptFixture f;
+    f.run("CIRCLE 0,0 1\n");
+    TextInputSource src(tokenize_script("/nonexistent-dir-xyzzy/out.dxf\n"));
+    f.engine.begin(make_command("DXFOUT"));
+    CHECK(f.engine.run(src) == EngineStatus::Failed);
+    CHECK(f.engine.message().find("cannot write") != std::string::npos);
 }

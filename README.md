@@ -51,8 +51,9 @@ Command: (setq r 25.0)
 Command: CIRCLE
 Specify center point for circle: 50,25
 Specify radius of circle: !r
-Command: (dxfout "out.dxf")
-T
+Command: DXFOUT
+Enter file name: out
+out.dxf written
 ```
 
 A line starting with `(` is AutoLISP. `!name` prints a variable at the command

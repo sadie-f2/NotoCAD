@@ -119,8 +119,10 @@ void report_finished(const CommandEngine& engine, std::ostream& os) {
 void list_commands(std::ostream& os) {
     os << "Commands:";
     for (const std::string& name : command_names()) os << ' ' << name;
-    os << "\nAnything starting with ( is evaluated as AutoLISP."
-       << "\n!name prints a variable, or answers a prompt with it.\n";
+    os << " QUIT"
+       << "\nAnything starting with ( is evaluated as AutoLISP."
+       << "\n!name prints a variable, or answers a prompt with it."
+       << "\nCANCEL aborts a command; Enter repeats the last one.\n";
 }
 
 }  // namespace

@@ -3,6 +3,7 @@
 
 #include "noto/commands.hpp"
 
+#include "noto/dxf.hpp"
 #include "noto/entities.hpp"
 
 #include <memory>
@@ -178,6 +179,28 @@ Step EraseCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::ask(select_prompt());
 }
 
+// --- DXFOUT -----------------------------------------------------------------
+
+Step DxfOutCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Enter file name";
+    return Step::ask(p);
+}
+
+Step DxfOutCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind != InputKind::String || value.text.empty()) {
+        return Step::failed("a file name is required");
+    }
+
+    // R12 supplies the extension when you leave it off.
+    std::string path = value.text;
+    if (path.size() < 4 || upcase(path.substr(path.size() - 4)) != ".DXF") path += ".dxf";
+
+    if (!write_dxf_file(ctx.db, path)) return Step::failed("cannot write " + path);
+    return Step::done(path + " written");
+}
+
 // --- registry ---------------------------------------------------------------
 
 CommandPtr make_command(std::string_view name) {
@@ -185,11 +208,12 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "LINE") return std::make_unique<LineCommand>();
     if (upper == "CIRCLE") return std::make_unique<CircleCommand>();
     if (upper == "ERASE") return std::make_unique<EraseCommand>();
+    if (upper == "DXFOUT") return std::make_unique<DxfOutCommand>();
     return nullptr;
 }
 
 const std::vector<std::string>& command_names() {
-    static const std::vector<std::string> names = {"CIRCLE", "ERASE", "LINE"};
+    static const std::vector<std::string> names = {"CIRCLE", "DXFOUT", "ERASE", "LINE"};
     return names;
 }
 
