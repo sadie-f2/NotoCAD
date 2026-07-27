@@ -52,10 +52,17 @@ struct Prompt {
     std::vector<std::string> keywords;   // e.g. {"Close", "Undo"}
     bool allow_empty{false};             // Enter is a valid answer
 
-    // Where a rubber-band line or relative coordinate starts from. The engine
-    // does not use it; a viewport does.
+    // Where a rubber-band line starts from. Set by the command; the engine does
+    // not use it, a viewport does.
     Vec3 base{};
     bool has_base{false};
+
+    // R12's LASTPOINT: the last point entered, which outlives the command that
+    // took it, so `LINE / @5,0` works right after a CIRCLE. Stamped on by the
+    // engine rather than by commands -- it is not theirs to know about. Usually
+    // equal to `base` during a command, and different everywhere else.
+    Vec3 last_point{};
+    bool has_last_point{false};
 
     // "Specify next point or [Close/Undo]: "
     std::string text() const;
@@ -187,6 +194,15 @@ public:
 
     Database& db() { return ctx_.db; }
 
+    // LASTPOINT. Updated whenever a point is supplied, and readable so a
+    // viewport can draw from it.
+    const Vec3& last_point() const { return last_point_; }
+    bool has_last_point() const { return has_last_point_; }
+    void set_last_point(const Vec3& p) {
+        last_point_ = p;
+        has_last_point_ = true;
+    }
+
 private:
     EngineStatus apply(const Step& step);
 
@@ -195,6 +211,8 @@ private:
     Prompt prompt_{};
     std::string message_;
     EngineStatus status_{EngineStatus::Idle};
+    Vec3 last_point_{};
+    bool has_last_point_{false};
 };
 
 }  // namespace noto

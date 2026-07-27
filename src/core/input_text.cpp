@@ -3,6 +3,7 @@
 
 #include "noto/input_text.hpp"
 
+#include <cmath>
 #include <cstdlib>
 #include <string>
 
@@ -38,6 +39,11 @@ bool parse_long(std::string_view text, long& out) {
     return true;
 }
 
+// Command-line angles are DEGREES, while AutoLISP angles are radians and the
+// DXF file stores degrees for arcs. Three conventions, one boundary each; this
+// is the one a person types at.
+inline constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+
 // "1,2,3" or "1,2". Z defaults to zero, as R12 does for 2D input.
 bool parse_point(std::string_view text, Vec3& out) {
     double c[3] = {0.0, 0.0, 0.0};
@@ -56,6 +62,66 @@ bool parse_point(std::string_view text, Vec3& out) {
     }
     if (count < 2) return false;
     out = Vec3{c[0], c[1], c[2]};
+    return true;
+}
+
+// "30<45" -- a distance and a bearing in degrees, in the XY plane. Z comes from
+// the base point, since polar input is planar.
+bool parse_polar(std::string_view text, const Vec3& base, Vec3& out) {
+    const std::size_t bracket = text.find('<');
+    if (bracket == std::string_view::npos) return false;
+
+    double distance = 0.0;
+    double degrees = 0.0;
+    if (!parse_double(text.substr(0, bracket), distance)) return false;
+    if (!parse_double(text.substr(bracket + 1), degrees)) return false;
+
+    const double radians = degrees * kDegToRad;
+    out = Vec3{base.x + distance * std::cos(radians), base.y + distance * std::sin(radians),
+               base.z};
+    return true;
+}
+
+// The R12 coordinate grammar:
+//
+//     10,20     absolute
+//     @5,0      relative to the last point
+//     @         the last point itself
+//     @30<45    polar, relative to the last point
+//     30<45     polar, from the origin
+//
+// Without the relative forms, drawing anything by hand is arithmetic homework.
+bool parse_coordinate(const Prompt& prompt, std::string_view text, Vec3& out,
+                      std::string& error) {
+    const bool relative = !text.empty() && text.front() == '@';
+    if (relative && !prompt.has_last_point) {
+        error = "no last point to measure from";
+        return false;
+    }
+    const Vec3 base = relative ? prompt.last_point : Vec3{0.0, 0.0, 0.0};
+
+    // "@" on its own is the last point.
+    if (relative && text.size() == 1) {
+        out = base;
+        return true;
+    }
+    const std::string_view body = relative ? text.substr(1) : text;
+
+    if (body.find('<') != std::string_view::npos) {
+        if (!parse_polar(body, base, out)) {
+            error = "expected a distance and angle like 30<45";
+            return false;
+        }
+        return true;
+    }
+
+    Vec3 coordinates;
+    if (!parse_point(body, coordinates)) {
+        error = relative ? "expected an offset like @5,0 or @30<45"
+                         : "expected a point like 1,2 or 1,2,3";
+        return false;
+    }
+    out = relative ? base + coordinates : coordinates;
     return true;
 }
 
@@ -110,10 +176,7 @@ bool parse_input(const Prompt& prompt, std::string_view token, InputValue& out,
     switch (prompt.kind) {
         case PromptKind::Point: {
             Vec3 p;
-            if (!parse_point(token, p)) {
-                error = "expected a point like 1,2 or 1,2,3";
-                return false;
-            }
+            if (!parse_coordinate(prompt, token, p, error)) return false;
             out = InputValue::of_point(p);
             return true;
         }
@@ -128,8 +191,10 @@ bool parse_input(const Prompt& prompt, std::string_view token, InputValue& out,
                 out = InputValue::of_real(d);
                 return true;
             }
+            std::string ignored;
             Vec3 p;
-            if (prompt.kind == PromptKind::Distance && parse_point(token, p)) {
+            if (prompt.kind == PromptKind::Distance &&
+                parse_coordinate(prompt, token, p, ignored)) {
                 out = InputValue::of_point(p);
                 return true;
             }

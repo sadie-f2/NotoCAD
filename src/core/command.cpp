@@ -132,6 +132,9 @@ EngineStatus CommandEngine::supply(const InputValue& value) {
         cancel();
         return status_;
     }
+    // Every point entered becomes LASTPOINT, whichever command took it.
+    if (value.kind == InputKind::Point) set_last_point(value.point);
+
     return apply(command_->next(ctx_, value));
 }
 
@@ -158,6 +161,10 @@ EngineStatus CommandEngine::apply(const Step& step) {
     switch (step.kind) {
         case StepKind::Prompt:
             prompt_ = step.prompt;
+            // Commands do not set this; the engine does, so that every prompt
+            // can resolve @ without each command having to thread it through.
+            prompt_.last_point = last_point_;
+            prompt_.has_last_point = has_last_point_;
             status_ = EngineStatus::Waiting;
             return status_;
         case StepKind::Done:

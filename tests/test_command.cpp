@@ -504,3 +504,152 @@ TEST_CASE("DXFOUT: an unwritable path fails the command") {
     CHECK(f.engine.run(src) == EngineStatus::Failed);
     CHECK(f.engine.message().find("cannot write") != std::string::npos);
 }
+
+TEST_CASE("commands: abbreviations resolve, exact names win") {
+    // What R12 users expect: type enough to be unambiguous and press Enter.
+    CHECK(resolve_command_name("LINE").name == "LINE");
+    CHECK(resolve_command_name("line").name == "LINE");
+    CHECK(resolve_command_name("LI").name == "LINE");
+    CHECK(resolve_command_name("D").name == "DXFOUT");
+    // acad.pgp short forms.
+    CHECK(resolve_command_name("C").name == "CIRCLE");
+    CHECK(resolve_command_name("E").name == "ERASE");
+    CHECK(resolve_command_name("L").name == "LINE");
+
+    CHECK(!resolve_command_name("ZZZ").ok());
+    CHECK(!resolve_command_name("").ok());
+}
+
+TEST_CASE("commands: an exact name is never shadowed by an abbreviation") {
+    // If a command called C were ever added, C must mean it and not CIRCLE.
+    const std::vector<std::string> names = {"C", "CIRCLE", "COPY"};
+    const std::vector<CommandAlias> aliases = {{"C", "CIRCLE"}};
+    CHECK(resolve_in("C", names, aliases).name == "C");
+}
+
+TEST_CASE("commands: an alias overrides prefix matching") {
+    // The reason R12 has a table rather than deriving prefixes: once CIRCLE and
+    // COPY both exist, "C" is ambiguous by prefix but must still mean CIRCLE.
+    const std::vector<std::string> names = {"CIRCLE", "COPY"};
+    const std::vector<CommandAlias> aliases = {{"C", "CIRCLE"}, {"CP", "COPY"}};
+    CHECK(resolve_in("C", names, aliases).name == "CIRCLE");
+    CHECK(resolve_in("CP", names, aliases).name == "COPY");
+    // Without the alias it is ambiguous, but still commits: shortest wins, so
+    // COPY beats CIRCLE. Pressing Enter always gets you a command.
+    const CommandMatch bare = resolve_in("C", names, {});
+    CHECK(bare.ambiguous);
+    CHECK(bare.ok());
+    CHECK(bare.name == "COPY");
+    CHECK(bare.candidates.size() == 2);
+}
+
+TEST_CASE("commands: make_command stays exact, so keywords are safe") {
+    // (command "LINE" p1 p2 "C") must close the polyline, not start CIRCLE.
+    // That only holds while make_command refuses to resolve abbreviations.
+    CHECK(make_command("C") == nullptr);
+    CHECK(make_command("LI") == nullptr);
+    CHECK(make_command("CIRCLE") != nullptr);
+}
+
+TEST_CASE("commands: an ambiguous prefix resolves shortest-first") {
+    // The fundamental command should win over the elaborate one sharing its
+    // prefix, which is what makes the rule feel right rather than arbitrary.
+    const std::vector<std::string> names = {"ARC", "ARRAY", "LINE", "LINETYPE"};
+    CHECK(resolve_in("AR", names, {}).name == "ARC");
+    CHECK(resolve_in("LI", names, {}).name == "LINE");
+    // Exact still wins outright.
+    CHECK(resolve_in("ARRAY", names, {}).name == "ARRAY");
+
+    // Equal lengths fall back to alphabetical, so the choice is still stable.
+    const std::vector<std::string> tie = {"CONE", "COPY"};
+    CHECK(resolve_in("CO", tie, {}).name == "CONE");
+    // ...and an alias is how you override a tie-break you disagree with.
+    CHECK(resolve_in("CP", tie, {{"CP", "COPY"}}).name == "COPY");
+}
+
+TEST_CASE("coordinates: @ is relative to the last point") {
+    // Without this, drawing anything by hand is arithmetic homework.
+    ScriptFixture f;
+    CHECK(f.run("LINE 0,0 @10,0 @0,5\n\n") == EngineStatus::Finished);
+    CHECK(f.db.size() == 2);
+    CHECK_VEC3(f.line_at(0)->end(), Vec3(10.0, 0.0, 0.0));
+    CHECK_VEC3(f.line_at(1)->end(), Vec3(10.0, 5.0, 0.0));
+}
+
+TEST_CASE("coordinates: polar input is degrees") {
+    // The command line takes degrees, while AutoLISP takes radians and the DXF
+    // file stores degrees. Three boundaries; this is the one a person types at.
+    ScriptFixture f;
+    f.run("LINE 0,0 @10<90\n\n");
+    CHECK_VEC3(f.line_at(0)->end(), Vec3(0.0, 10.0, 0.0));
+
+    ScriptFixture g;
+    g.run("LINE 0,0 @10<0 @10<45\n\n");
+    CHECK_VEC3(g.line_at(1)->end(),
+               Vec3(10.0 + 10.0 * 0.70710678118654752, 10.0 * 0.70710678118654752, 0.0));
+
+    // Absolute polar, measured from the origin.
+    ScriptFixture h;
+    h.run("LINE 0,0 20<180\n\n");
+    CHECK_VEC3(h.line_at(0)->end(), Vec3(-20.0, 0.0, 0.0));
+}
+
+TEST_CASE("coordinates: bare @ is the last point itself") {
+    ScriptFixture f;
+    f.run("LINE 0,0 10,10\n\n");
+    // A zero-length segment, but the parse is what is under test.
+    f.run("LINE @ 20,20\n\n");
+    CHECK_VEC3(f.line_at(1)->start(), Vec3(10.0, 10.0, 0.0));
+}
+
+TEST_CASE("coordinates: the last point outlives the command that set it") {
+    // LASTPOINT is engine state, not command state, so @ works across commands.
+    ScriptFixture f;
+    f.run("CIRCLE 30,40 5\n");
+    CHECK(f.engine.has_last_point());
+    CHECK_VEC3(f.engine.last_point(), Vec3(30.0, 40.0, 0.0));
+
+    f.run("LINE @ @10,0\n\n");
+    const Line* line = static_cast<const Line*>(f.db.get(f.db.order()[1]));
+    CHECK_VEC3(line->start(), Vec3(30.0, 40.0, 0.0));
+    CHECK_VEC3(line->end(), Vec3(40.0, 40.0, 0.0));
+}
+
+TEST_CASE("coordinates: @ without a last point is reported") {
+    Database db;
+    CommandEngine engine(db);
+    engine.begin(make_command("LINE"));
+    CHECK(!engine.has_last_point());
+
+    TextInputSource src(tokenize_script("@5,0"));
+    CHECK(engine.run(src) == EngineStatus::Waiting);
+    CHECK(src.failed());
+    CHECK(src.error().find("last point") != std::string::npos);
+    // The command is untouched and still asking.
+    CHECK(engine.active());
+}
+
+TEST_CASE("coordinates: a relative point answers a distance prompt") {
+    // CIRCLE radius by dragging: @5,0 from the centre is a radius of 5.
+    ScriptFixture f;
+    f.run("CIRCLE 10,10 @5,0\n");
+    CHECK_NEAR(static_cast<const Circle*>(f.db.get(f.db.order()[0]))->radius(), 5.0, 1e-12);
+}
+
+TEST_CASE("coordinates: malformed relative input is rejected") {
+    ScriptFixture f;
+    f.run("LINE 0,0 5,5\n\n");
+
+    Database db;
+    CommandEngine engine(db);
+    engine.set_last_point(Vec3(1.0, 1.0, 0.0));
+    engine.begin(make_command("LINE"));
+
+    TextInputSource bad(tokenize_script("@nonsense"));
+    CHECK(engine.run(bad) == EngineStatus::Waiting);
+    CHECK(bad.failed());
+
+    TextInputSource bad_polar(tokenize_script("@10<"));
+    CHECK(engine.run(bad_polar) == EngineStatus::Waiting);
+    CHECK(bad_polar.failed());
+}

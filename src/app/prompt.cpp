@@ -119,7 +119,10 @@ void report_finished(const CommandEngine& engine, std::ostream& os) {
 void list_commands(std::ostream& os) {
     os << "Commands:";
     for (const std::string& name : command_names()) os << ' ' << name;
-    os << " QUIT"
+    os << " QUIT\nAliases:";
+    for (const CommandAlias& a : command_aliases()) os << ' ' << a.alias << '=' << a.name;
+    os << "\nAny abbreviation works; the shortest match wins."
+       << "\nPoints: 10,20  @5,0 (relative)  @30<45 (polar, degrees)  @ (last point)"
        << "\nAnything starting with ( is evaluated as AutoLISP."
        << "\n!name prints a variable, or answers a prompt with it."
        << "\nCANCEL aborts a command; Enter repeats the last one.\n";
@@ -279,13 +282,15 @@ int run_command_prompt(lisp::Context& ctx, lisp::Interp& in, CommandEngine& engi
             continue;
         }
 
-        CommandPtr cmd = make_command(upper);
+        // Abbreviations resolve here and only here; see make_command.
+        const CommandMatch match = resolve_command_name(upper);
+        CommandPtr cmd = match.ok() ? make_command(match.name) : nullptr;
         if (!cmd) {
             std::cerr << "Unknown command \"" << upper << "\". Type ? for a list.\n";
             continue;
         }
 
-        last_command = upper;
+        last_command = match.name;
         engine.begin(std::move(cmd));
 
         // Anything after the command name on the same line answers its prompts.

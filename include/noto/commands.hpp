@@ -75,11 +75,56 @@ public:
     Step next(CommandContext& ctx, const InputValue& value) override;
 };
 
-// Looks a command up by name, case-insensitively. Returns nullptr if unknown,
-// which callers report rather than treating as a crash.
+// Looks a command up by its FULL name, case-insensitively. Returns nullptr if
+// unknown, which callers report rather than treating as a crash.
+//
+// Deliberately exact. Abbreviation resolution must not happen here: a string
+// argument to (command ...) is a command name only if it matches exactly, and
+// resolving prefixes would make (command "LINE" p1 p2 "C") start CIRCLE instead
+// of closing the polyline.
 CommandPtr make_command(std::string_view name);
 
 // The registered command names, for help text and completion.
 const std::vector<std::string>& command_names();
+
+// An acad.pgp-style abbreviation. R12 shipped a table of these rather than
+// deriving them, because the useful short forms are not always prefixes --
+// COPY is CP once COPY and CIRCLE both want to be C.
+struct CommandAlias {
+    std::string alias;
+    std::string name;
+};
+
+const std::vector<CommandAlias>& command_aliases();
+
+// What a typed command name resolved to.
+struct CommandMatch {
+    std::string name;                     // canonical name, empty if unresolved
+    bool ambiguous{false};                // the prefix matched more than one
+    std::vector<std::string> candidates;  // all matches, when ambiguous
+
+    bool ok() const { return !name.empty(); }
+};
+
+// Resolves what the user typed, in order: exact name, exact alias, then prefix.
+//
+// An ambiguous prefix still resolves rather than refusing -- pressing Enter is
+// expected to commit to something. The winner is the shortest candidate, ties
+// broken alphabetically. Shorter names are the more fundamental commands, so LI
+// is LINE rather than LINETYPE and AR is ARC rather than ARRAY, which is the
+// right answer for the common case.
+//
+// Deliberately not AutoCAD's modern behaviour, which ranks by how often you have
+// used each command and so shifts underneath you. A command line worth building
+// muscle memory against has to resolve the same way next month. Where the rule
+// picks wrong, the alias table is the override.
+//
+// For interactive input only -- see make_command above.
+CommandMatch resolve_command_name(std::string_view typed);
+
+// The same resolution against an explicit table, so the rules can be tested
+// without waiting for two real commands to share a prefix.
+CommandMatch resolve_in(std::string_view typed, const std::vector<std::string>& names,
+                        const std::vector<CommandAlias>& aliases);
 
 }  // namespace noto

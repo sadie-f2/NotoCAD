@@ -217,4 +217,68 @@ const std::vector<std::string>& command_names() {
     return names;
 }
 
+const std::vector<CommandAlias>& command_aliases() {
+    // The R12 acad.pgp short forms for the commands that exist so far.
+    static const std::vector<CommandAlias> aliases = {
+        {"C", "CIRCLE"},
+        {"E", "ERASE"},
+        {"L", "LINE"},
+    };
+    return aliases;
+}
+
+CommandMatch resolve_in(std::string_view typed, const std::vector<std::string>& names,
+                        const std::vector<CommandAlias>& aliases) {
+    CommandMatch result;
+    const std::string upper = upcase(typed);
+    if (upper.empty()) return result;
+
+    // An exact name beats everything, so a command can never be shadowed by an
+    // abbreviation of another.
+    for (const std::string& name : names) {
+        if (name == upper) {
+            result.name = name;
+            return result;
+        }
+    }
+
+    // Then the alias table, which exists to override prefix matching.
+    for (const CommandAlias& alias : aliases) {
+        if (alias.alias == upper) {
+            result.name = alias.name;
+            return result;
+        }
+    }
+
+    // Finally the unique-prefix rule.
+    for (const std::string& name : names) {
+        if (name.size() < upper.size()) continue;
+        if (name.compare(0, upper.size(), upper) != 0) continue;
+        result.candidates.push_back(name);
+    }
+    if (result.candidates.size() == 1) {
+        result.name = result.candidates.front();
+        result.candidates.clear();
+        return result;
+    }
+    if (result.candidates.size() > 1) {
+        result.ambiguous = true;
+        // Shortest wins, alphabetical breaks ties. Stable forever, and it puts
+        // the fundamental command ahead of the elaborate one sharing its prefix.
+        const std::string* best = &result.candidates.front();
+        for (const std::string& candidate : result.candidates) {
+            if (candidate.size() < best->size() ||
+                (candidate.size() == best->size() && candidate < *best)) {
+                best = &candidate;
+            }
+        }
+        result.name = *best;
+    }
+    return result;
+}
+
+CommandMatch resolve_command_name(std::string_view typed) {
+    return resolve_in(typed, command_names(), command_aliases());
+}
+
 }  // namespace noto
