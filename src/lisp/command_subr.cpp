@@ -70,18 +70,25 @@ bool LispInputSource::at_command_name() const {
 
 bool LispInputSource::next_value(const Prompt& prompt, InputValue& out) {
     if (pos_ >= argc_) return false;
-    // Stop rather than feeding a command name in as data.
-    if (at_command_name()) return false;
 
+    // The prompt gets first refusal. A string is a command name only where the
+    // running command cannot use it: "U" at LINE's next-point prompt is Undo
+    // even once an UNDO command exists, and "LINE" is a perfectly good file
+    // name at DXFOUT's prompt.
     const Value& v = args_[pos_];
     std::string why;
-    if (!value_to_input(prompt, v, out, why)) {
-        error_ = "(command): " + why;
-        ++pos_;  // consuming it stops the run from spinning on the same value
-        return false;
+    if (value_to_input(prompt, v, out, why)) {
+        ++pos_;
+        return true;
     }
-    ++pos_;
-    return true;
+
+    // Unusable here. If it names a command, stop without consuming it so the
+    // caller starts that command instead.
+    if (at_command_name()) return false;
+
+    error_ = "(command): " + why;
+    ++pos_;  // consuming it stops the run from spinning on the same value
+    return false;
 }
 
 }  // namespace

@@ -653,3 +653,48 @@ TEST_CASE("coordinates: malformed relative input is rejected") {
     CHECK(engine.run(bad_polar) == EngineStatus::Waiting);
     CHECK(bad_polar.failed());
 }
+
+TEST_CASE("lisp: the prompt gets first refusal over the command registry") {
+    // (command "DXFOUT" "LINE") writes LINE.dxf. It must not abandon DXFOUT to
+    // start the LINE command: the running prompt wants a file name, and "LINE"
+    // is a perfectly good one.
+    LispFixture f;
+    f.eval(R"((command "CIRCLE" '(0 0 0) 5.0))");
+    CHECK(f.db.size() == 1);
+
+    std::remove("LINE.dxf");
+    f.eval(R"((command "DXFOUT" "LINE"))");
+    CHECK(!f.engine.active());  // DXFOUT ran to completion
+
+    std::ifstream written("LINE.dxf", std::ios::binary);
+    CHECK(written.good());
+    written.close();
+    std::remove("LINE.dxf");
+
+    // Still only the one circle: no LINE command ever started.
+    CHECK(f.db.size() == 1);
+}
+
+TEST_CASE("lisp: a keyword beats a command name at the same prompt") {
+    // The general form of the rule. A string usable by the running prompt is
+    // consumed there, whatever the command registry happens to contain.
+    LispFixture f;
+    f.eval(R"((command "LINE" '(0 0 0) '(10 0 0) '(10 10 0) "C"))");
+    CHECK(f.db.size() == 3);  // closed, not three separate starts
+    CHECK(!f.engine.active());
+}
+
+TEST_CASE("lisp: a command name still starts a command where the prompt cannot use it") {
+    // The fallback has to keep working, or several commands in one call breaks.
+    LispFixture f;
+    f.eval(R"((command "LINE" '(0 0 0) '(1 0 0) "" "CIRCLE" '(5 5 0) 2.0))");
+    CHECK(f.db.size() == 2);
+    CHECK(f.db.get(f.db.order()[0])->type() == EntityType::Line);
+    CHECK(f.db.get(f.db.order()[1])->type() == EntityType::Circle);
+
+    // And a command name arriving mid-command abandons it, as R12 does.
+    LispFixture g;
+    g.eval(R"((command "LINE" '(0 0 0) "CIRCLE" '(0 0 0) 1.0))");
+    CHECK(g.db.size() == 1);
+    CHECK(g.db.get(g.db.order()[0])->type() == EntityType::Circle);
+}

@@ -85,8 +85,10 @@ bool PromptLineSource::next_value(const Prompt& prompt, InputValue& out) {
         return from_lisp(prompt, token.substr(1), out);
     }
 
-    // A parenthesised expression is evaluated and its value used as the answer.
-    if (!token.empty() && token[0] == '(') {
+    // A parenthesised expression is evaluated and its value used as the answer,
+    // except at a string prompt: "bracket (rev 2).dxf" is an ordinary file name
+    // and parens are common in paths, where a leading ! is not.
+    if (!token.empty() && token[0] == '(' && prompt.kind != PromptKind::String) {
         return from_lisp(prompt, token, out);
     }
 

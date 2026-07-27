@@ -52,3 +52,7 @@ if(UNIX)
     "printf '(setq r 7.5)\\nCIRCLE\\n0,0\\n!r\\n(princ (cdr (assoc 40 (entget (entlast)))))\\n' | $<TARGET_FILE:ncad>")
   set_tests_properties(ncad_cli_bang_variable PROPERTIES PASS_REGULAR_EXPRESSION "7.5")
 endif()
+
+  # A file name with parens must not be evaluated as LISP at a string prompt.
+  add_test(NAME ncad_cli_paren_filename COMMAND sh -c
+    "cd \"$<TARGET_FILE_DIR:ncad>\" && rm -f 'out (rev 2).dxf' && printf 'CIRCLE 0,0 5\\nDXFOUT\\nout (rev 2).dxf\\n' | ./ncad && test -f 'out (rev 2).dxf' && rm -f 'out (rev 2).dxf'")

@@ -56,7 +56,13 @@ Enter file name: out
 out.dxf written
 ```
 
-A line starting with `(` is AutoLISP. `!name` prints a variable at the command
+A line starting with `(` is AutoLISP, and an expression also answers a prompt:
+`Specify radius of circle: (* 25.4 2)` works, as does `!r` for a variable. The
+one exception is a file name prompt, which takes the line verbatim — parens are
+ordinary in paths. A name containing spaces has to go on its own line, since a
+space acts as Enter.
+
+ `!name` prints a variable at the command
 prompt, or answers a prompt with its value; a parenthesised expression answers a
 prompt too, so `Specify radius of circle: (* 2.0 5.0)` works. A space acts as
 Enter, so `CIRCLE 50,25 20` is one line. `?` lists commands, `CANCEL` aborts a
