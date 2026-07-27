@@ -144,7 +144,7 @@ include/noto/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, d
 include/noto/lisp/   arena, value, reader, eval
 src/core/            geometry kernel, entities, database, DXF writer, commands
 src/lisp/            interpreter: arena, values, reader, eval, builtins, subrs
-src/app/             noto: the AutoLISP REPL and command-line entry point
+src/app/             ncad: the AutoLISP REPL and command-line entry point
 tools/               gen_sample
 tests/               in-tree harness + suites
 ```

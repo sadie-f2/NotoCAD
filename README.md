@@ -35,11 +35,11 @@ reader, UCS, and the Qt6 shell.
 
 ## Using it
 
-`noto` is an AutoLISP read-eval-print loop holding one drawing.
+`ncad` is an AutoLISP read-eval-print loop holding one drawing.
 
 ```console
-$ noto
-noto 0.0.1 -- AutoLISP. (quit) or Ctrl-D to exit.
+$ ncad
+ncad 0.0.1 -- AutoLISP. (quit) or Ctrl-D to exit.
 _$ (entmake '((0 . "CIRCLE") (8 . "PARTS") (10 0.0 0.0 0.0) (40 . 5.0)))
 ((0 . "CIRCLE") (8 . "PARTS") (10 0.0 0.0 0.0) (40 . 5.0))
 _$ (dxfout "out.dxf")
@@ -50,9 +50,9 @@ It also runs non-interactively, which is the point — geometry gets generated,
 not drawn:
 
 ```sh
-noto wheel.lsp -e '(dxfout "wheel.dxf")'   # load files, then evaluate
-noto < script.lsp                          # or pipe it
-noto -e '(princ (* 6 7))'                  # one-off expression
+ncad wheel.lsp -e '(dxfout "wheel.dxf")'   # load files, then evaluate
+ncad < script.lsp                          # or pipe it
+ncad -e '(princ (* 6 7))'                  # one-off expression
 ```
 
 Forms may span lines; the reader decides when one is complete, so a `)` inside
@@ -69,7 +69,7 @@ libedit (BSD) can go behind a build option later.
 cmake -S . -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build
 ctest --test-dir build          # unit suite plus CLI smoke tests
-./build/src/app/noto            # the application
+./build/src/app/ncad            # the application
 ```
 
 Options: `NOTO_BUILD_GUI` (off), `NOTO_WITH_DWG` (off), `NOTO_BUILD_TESTS` (on).

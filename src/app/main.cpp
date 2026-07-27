@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-// noto -- the command-line application.
+// ncad -- the command-line application.
 //
 // A read-eval-print loop over the AutoLISP interpreter, holding one drawing.
 // This is the whole user interface for now; the Qt6 shell comes later and stays
@@ -52,9 +52,9 @@ bool stdin_is_tty() {
 }
 
 void print_usage() {
-    std::cout << "noto " << kVersion << " -- command-line CAD, AutoCAD R12 dialect\n\n"
+    std::cout << "ncad " << kVersion << " -- command-line CAD, AutoCAD R12 dialect\n\n"
               << "Usage:\n"
-              << "  noto [options] [file.lsp ...]\n\n"
+              << "  ncad [options] [file.lsp ...]\n\n"
               << "Options:\n"
               << "  -e EXPR    evaluate EXPR\n"
               << "  -i         stay interactive after evaluating files\n"
@@ -62,7 +62,7 @@ void print_usage() {
               << "  -h         show this help\n\n"
               << "With no files and no -e, reads AutoLISP from standard input.\n\n"
               << "Example:\n"
-              << "  noto -e '(entmake (list (cons 0 \"CIRCLE\") (list 10 0.0 0.0 0.0)"
+              << "  ncad -e '(entmake (list (cons 0 \"CIRCLE\") (list 10 0.0 0.0 0.0)"
               << " (cons 40 5.0)))' \\\n"
               << "       -e '(dxfout \"out.dxf\")'\n";
 }
@@ -81,7 +81,7 @@ bool eval_source(noto::lisp::Interp& in, const std::string& source, const std::s
 bool load_file(noto::lisp::Interp& in, const std::string& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
-        std::cerr << "noto: cannot open " << path << "\n";
+        std::cerr << "ncad: cannot open " << path << "\n";
         return false;
     }
     std::ostringstream buffer;
@@ -165,12 +165,12 @@ int main(int argc, char** argv) {
             quiet = true;
         } else if (arg == "-e") {
             if (i + 1 >= argc) {
-                std::cerr << "noto: -e needs an expression\n";
+                std::cerr << "ncad: -e needs an expression\n";
                 return 2;
             }
             expressions.push_back(argv[++i]);
         } else if (!arg.empty() && arg[0] == '-' && arg != "-") {
-            std::cerr << "noto: unknown option " << arg << "\n";
+            std::cerr << "ncad: unknown option " << arg << "\n";
             return 2;
         } else {
             files.push_back(arg);
@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
 
     const bool interactive = stdin_is_tty();
     if (interactive && !quiet) {
-        std::cout << "noto " << kVersion << " -- AutoLISP. (quit) or Ctrl-D to exit.\n";
+        std::cout << "ncad " << kVersion << " -- AutoLISP. (quit) or Ctrl-D to exit.\n";
     }
     return repl(ctx, in, interactive);
 }
