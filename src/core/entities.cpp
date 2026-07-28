@@ -74,6 +74,9 @@ const char* entity_type_name(EntityType t) {
         case EntityType::Arc: return "ARC";
         case EntityType::Polyline: return "POLYLINE";
         case EntityType::Text: return "TEXT";
+        case EntityType::Point: return "POINT";
+        case EntityType::Solid: return "SOLID";
+        case EntityType::Face3d: return "3DFACE";
         case EntityType::Proxy: return "PROXY";
     }
     return "UNKNOWN";

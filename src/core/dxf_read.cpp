@@ -224,6 +224,41 @@ EntityPtr Reader::build(const EntityGroups& g, GroupStream& in, int& pending_cod
     if (g.name == "POLYLINE") {
         return build_polyline(g, in, pending_code, pending_value, has_pending);
     }
+    if (g.name == "POINT") {
+        auto e = std::make_unique<PointEntity>();
+        apply_common(*e, g);
+        e->set_position(ecs_to_world(e->props().normal).transform_point(g.point(10)));
+        return e;
+    }
+    if (g.name == "SOLID" || g.name == "TRACE") {
+        // TRACE is a SOLID with width semantics R12 draws differently and this
+        // program does not; holding it as a SOLID keeps the geometry rather
+        // than proxying a shape it could otherwise edit.
+        auto e = std::make_unique<Face>(EntityType::Solid);
+        apply_common(*e, g);
+        const Mat4 to_world = ecs_to_world(e->props().normal);
+        for (int i = 0; i < 4; ++i) e->set_corner(i, to_world.transform_point(g.point(10 + i)));
+        return e;
+    }
+    if (g.name == "3DFACE") {
+        auto e = std::make_unique<Face>(EntityType::Face3d);
+        apply_common(*e, g);
+        // World coordinates throughout, unlike SOLID.
+        for (int i = 0; i < 4; ++i) e->set_corner(i, g.point(10 + i));
+        e->set_edge_flags(static_cast<std::int16_t>(to_int(g.text(70, "0"))));
+        return e;
+    }
+    if (g.name == "TEXT") {
+        auto e = std::make_unique<Text>();
+        apply_common(*e, g);
+        e->set_position(ecs_to_world(e->props().normal).transform_point(g.point(10)));
+        e->set_value(g.text(1));
+        e->set_height(g.real(40, 1.0));
+        e->set_rotation(g.real(50) * kDegToRad);
+        e->set_width_factor(g.real(41, 1.0));
+        e->set_oblique(g.real(51) * kDegToRad);
+        return e;
+    }
 
     // Everything else survives as itself.
     auto p = std::make_unique<Proxy>();

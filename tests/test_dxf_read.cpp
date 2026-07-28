@@ -115,10 +115,13 @@ TEST_CASE("dxf read: an entity after a polyline is not swallowed") {
 
 TEST_CASE("dxf read: an unknown entity survives as a proxy") {
     Database db;
+    // INSERT, which has no class here yet. This test used to use TEXT; TEXT is
+    // now a real entity, which is exactly how a type is meant to leave proxy
+    // status -- the reader changes, nothing else does.
     const DxfReadResult r = read_dxf_text(
         db, dxf({kEntitiesOpen,
-                 "  0\nTEXT\n  8\nNOTES\n 10\n1.0\n 20\n2.0\n 30\n0.0\n 40\n0.2\n"
-                 "  1\nHello world",
+                 "  0\nINSERT\n  8\nBLOCKS\n  2\nCHAIR\n 10\n1.0\n 20\n2.0\n 30\n0.0\n"
+                 " 41\n1.0\n 42\n1.0",
                  kEnd}));
 
     CHECK(r.ok);
@@ -127,9 +130,32 @@ TEST_CASE("dxf read: an unknown entity survives as a proxy") {
 
     const Entity* e = db.get(db.order()[0]);
     CHECK(e->type() == EntityType::Proxy);
-    CHECK(static_cast<const Proxy*>(e)->dxf_name() == "TEXT");
+    CHECK(static_cast<const Proxy*>(e)->dxf_name() == "INSERT");
     // Nothing to draw, nothing to pick, nothing to frame.
     CHECK(!e->bbox().valid());
+}
+
+TEST_CASE("dxf read: TEXT is held as an entity, not as a proxy") {
+    Database db;
+    const DxfReadResult r = read_dxf_text(
+        db, dxf({kEntitiesOpen,
+                 "  0\nTEXT\n  8\nNOTES\n 10\n1.0\n 20\n2.0\n 30\n0.0\n 40\n0.25\n"
+                 " 50\n30.0\n  1\nHello world",
+                 kEnd}));
+
+    CHECK(r.ok);
+    CHECK(r.proxies == 0);
+
+    const Entity* e = db.get(db.order()[0]);
+    CHECK(e->type() == EntityType::Text);
+
+    // The glyphs are deferred; the content is not. A reader that dropped this
+    // would open a drawing and save it back without its annotation.
+    const Text* t = static_cast<const Text*>(e);
+    CHECK(t->value() == "Hello world");
+    CHECK_NEAR(t->height(), 0.25, 1e-12);
+    CHECK_NEAR(t->rotation(), 30.0 * 3.14159265358979323846 / 180.0, 1e-9);
+    CHECK_VEC(t->position(), 1.0, 2.0, 0.0, 1e-12);
 }
 
 TEST_CASE("dxf read: a proxy writes back what it read, unchanged") {

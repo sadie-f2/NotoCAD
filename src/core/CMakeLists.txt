@@ -10,6 +10,8 @@ add_library(noto_core STATIC
   entities_grip.cpp
   dash.cpp
   polyline.cpp
+  faces.cpp
+  text.cpp
   proxy.cpp
   osnap_derived.cpp
   selection.cpp

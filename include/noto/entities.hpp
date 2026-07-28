@@ -193,6 +193,134 @@ private:
     bool closed_{false};
 };
 
+// POINT. A location and nothing else.
+//
+// Drawn as a small cross sized from the draw context, so it stays the same size
+// on screen at any zoom. R12 draws it per PDMODE and PDSIZE, which do not exist
+// here yet -- see SF_todo.md.
+class PointEntity final : public Entity {
+public:
+    PointEntity() : Entity(EntityType::Point) {}
+    explicit PointEntity(const Vec3& p) : Entity(EntityType::Point), pos_(p) {}
+
+    const Vec3& position() const { return pos_; }
+    void set_position(const Vec3& p) { pos_ = p; }
+
+    EntityPtr clone() const override;
+    void transform(const Mat4& m) override;
+    BBox bbox() const override;
+    void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
+    void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
+
+private:
+    Vec3 pos_{};
+};
+
+// SOLID and 3DFACE: four corners, or three with the fourth repeated.
+//
+// One class for both, because they differ in what they mean rather than in what
+// they hold. SOLID is a filled quadrilateral in its own plane and stores its
+// corners in the entity coordinate system; 3DFACE is a face in space, stores
+// world coordinates, and carries per-edge visibility. Both draw as outlines
+// here, since the display is wireframe.
+//
+// The corner order is R12's and is famously not the order you would draw them
+// in: the third and fourth corners run across the shape, so a rectangle is
+// given as two opposite edges rather than as a loop. Getting it wrong yields a
+// bowtie, which is the traditional way to discover it.
+class Face final : public Entity {
+public:
+    explicit Face(EntityType type) : Entity(type) {}
+
+    const Vec3& corner(int i) const { return corners_[i]; }
+    void set_corner(int i, const Vec3& p) { corners_[i] = p; }
+
+    // Three-cornered when the fourth repeats the third, which is how the format
+    // says triangle.
+    bool triangular() const { return near_equal(corners_[2], corners_[3], 1e-12); }
+
+    // 3DFACE group 70: bit 1 hides edge 1-2, bit 2 edge 2-3, and so on.
+    std::int16_t edge_flags() const { return edge_flags_; }
+    void set_edge_flags(std::int16_t f) { edge_flags_ = f; }
+    bool edge_visible(int i) const { return (edge_flags_ & (1 << i)) == 0; }
+
+    EntityPtr clone() const override;
+    void transform(const Mat4& m) override;
+    BBox bbox() const override;
+    void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
+    void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
+
+private:
+    Vec3 corners_[4]{};
+    std::int16_t edge_flags_{0};
+};
+
+// TEXT.
+//
+// The entity exists; the glyphs do not. R12 draws text with SHX vector fonts,
+// and that decision is deliberately deferred -- see CLAUDE.md. What is NOT
+// deferred is the entity itself, because DXF read must be able to hold a TEXT
+// record: a reader that drops text opens a drawing and saves it back emptied of
+// its annotation, which is the one failure this project decided it would not
+// have.
+//
+// Until a font arrives, draw() emits a box of the right height and approximate
+// width. That is honest about what is known -- position, height, rotation and
+// extent -- and wrong about nothing, where a guess at letterforms would be.
+class Text final : public Entity {
+public:
+    Text() : Entity(EntityType::Text) {}
+    Text(const Vec3& at, std::string value, double height)
+        : Entity(EntityType::Text), pos_(at), value_(std::move(value)), height_(height) {}
+
+    const Vec3& position() const { return pos_; }
+    void set_position(const Vec3& p) { pos_ = p; }
+
+    const std::string& value() const { return value_; }
+    void set_value(std::string v) { value_ = std::move(v); }
+
+    double height() const { return height_; }
+    void set_height(double h) { height_ = h; }
+
+    // Radians, in the entity's own plane, as every other angle here is.
+    double rotation() const { return rotation_; }
+    void set_rotation(double r) { rotation_ = r; }
+
+    // Width factor (DXF group 41) and oblique angle (group 51), kept so a round
+    // trip does not quietly normalise someone's text.
+    double width_factor() const { return width_factor_; }
+    void set_width_factor(double w) { width_factor_ = w; }
+    double oblique() const { return oblique_; }
+    void set_oblique(double o) { oblique_ = o; }
+
+    // The width the placeholder assumes. Without a font this is a guess, and it
+    // is only used for the box and the bounding box.
+    double approximate_width() const;
+
+    EntityPtr clone() const override;
+    void transform(const Mat4& m) override;
+    BBox bbox() const override;
+    void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
+    void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
+
+private:
+    Vec3 pos_{};
+    std::string value_;
+    double height_{1.0};
+    double rotation_{0.0};
+    double width_factor_{1.0};
+    double oblique_{0.0};
+};
+
 // One DXF group: a code and its value, kept as text.
 //
 // Text rather than parsed, because a proxy's whole job is to give back exactly
