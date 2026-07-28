@@ -26,6 +26,7 @@
 
 #include "noto/database.hpp"
 #include "noto/osnap.hpp"
+#include "noto/selection.hpp"
 #include "noto/vec3.hpp"
 
 #include <cstdint>
@@ -144,11 +145,22 @@ struct Step {
     static Step failed(std::string msg);
 };
 
-// What a command is allowed to touch. Deliberately narrow: no view, no
-// selection set, no UI. Those arrive as explicit members when they exist, so
-// the coupling stays visible.
+// What a command is allowed to touch. Still deliberately narrow: no view, no
+// UI. New members arrive explicitly, so the coupling stays visible.
+//
+// The selection set is the second member, and it is here rather than inside
+// each command because R12's Previous outlives the command that built it: ERASE
+// then MOVE Previous is one selection used twice. The engine owns it for the
+// same reason it owns LASTPOINT -- state that spans commands belongs to
+// whatever spans commands.
 struct CommandContext {
     Database& db;
+    SelectionSet& selection;
+
+    // R12's Previous: the last selection an editing command actually used. It
+    // survives intervening commands that select nothing, so ERASE, then LINE,
+    // then MOVE Previous still means the entities ERASE was given.
+    const SelectionSet& previous;
 };
 
 class Command {
@@ -189,7 +201,7 @@ enum class EngineStatus : std::uint8_t {
 
 class CommandEngine {
 public:
-    explicit CommandEngine(Database& db) : ctx_{db} {}
+    explicit CommandEngine(Database& db) : ctx_{db, selection_, previous_} {}
 
     CommandEngine(const CommandEngine&) = delete;
     CommandEngine& operator=(const CommandEngine&) = delete;
@@ -222,6 +234,12 @@ public:
 
     Database& db() { return ctx_.db; }
 
+    // The current selection, which survives between commands so that Previous
+    // means something.
+    SelectionSet& selection() { return selection_; }
+    const SelectionSet& selection() const { return selection_; }
+    const SelectionSet& previous_selection() const { return previous_; }
+
     // The pending one-shot osnap override, if any. Set by supplying an
     // InputValue of kind OsnapOverride, and cleared as soon as any value
     // actually answers a prompt -- an override lasts for exactly one pick,
@@ -250,6 +268,9 @@ private:
     void open_group(const char* name);
     void close_group();
 
+    // Declared before ctx_, which holds references to them.
+    SelectionSet selection_;
+    SelectionSet previous_;
     CommandContext ctx_;
     CommandPtr command_;
     Prompt prompt_{};

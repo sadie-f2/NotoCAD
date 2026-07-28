@@ -20,6 +20,7 @@ add_executable(noto_tests
   test_grip.cpp
   test_osnap_override.cpp
   test_undo.cpp
+  test_selection.cpp
   test_render.cpp
   test_viewport.cpp
 )

@@ -51,6 +51,18 @@ private:
     bool diameter_{false};
 };
 
+// Collects entities into ctx.selection until Enter. Shared by every editing
+// command, so the selection vocabulary is written once: Last, Previous, All,
+// plus Remove and Add to take things back out.
+//
+// Returns true when the value was a selection keyword and was handled.
+bool apply_selection_keyword(CommandContext& ctx, const InputValue& value, bool& removing,
+                             std::string& note);
+
+// Builds the "Select objects (N found)" prompt, with the selection keywords
+// attached so every command asking it offers the same ones.
+Prompt selection_prompt(const CommandContext& ctx, bool removing);
+
 // ERASE: select entities until Enter, then delete them all.
 class EraseCommand final : public Command {
 public:
@@ -59,9 +71,10 @@ public:
     Step next(CommandContext& ctx, const InputValue& value) override;
 
 private:
-    Prompt select_prompt() const;
-
-    std::vector<Handle> selected_;
+    // Remove mode: R12's "Remove objects:" sub-state, entered with R and left
+    // with A. It is a mode rather than a per-pick modifier because that is how
+    // it reads at the prompt.
+    bool removing_{false};
 };
 
 // DXFOUT: prompt for a file name and write the drawing. In R12 this is a

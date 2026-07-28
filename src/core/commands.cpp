@@ -3,6 +3,8 @@
 
 #include "noto/commands.hpp"
 
+#include "noto/scene.hpp"
+
 #include "noto/dxf.hpp"
 #include "noto/entities.hpp"
 
@@ -147,36 +149,111 @@ Step CircleCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
-// --- ERASE ------------------------------------------------------------------
+// --- selection --------------------------------------------------------------
 
-Step EraseCommand::start(CommandContext&) { return Step::ask(select_prompt()); }
-
-Prompt EraseCommand::select_prompt() const {
+Prompt selection_prompt(const CommandContext& ctx, bool removing) {
     Prompt p;
     p.kind = PromptKind::Entity;
-    p.message = selected_.empty() ? "Select objects"
-                                  : "Select objects (" + std::to_string(selected_.size()) +
-                                        " found)";
+    const std::size_t n = ctx.selection.size();
+    p.message = removing ? "Remove objects" : "Select objects";
+    if (n != 0) p.message += " (" + std::to_string(n) + " found)";
+
+    // One vocabulary, written once, so every command that selects offers the
+    // same words. Window and Crossing arrive with the region machinery.
+    p.keywords = {"Last", "Previous", "ALL", "Remove", "Add"};
     p.allow_empty = true;
     return p;
 }
 
+bool apply_selection_keyword(CommandContext& ctx, const InputValue& value, bool& removing,
+                             std::string& note) {
+    if (value.kind != InputKind::Keyword) return false;
+    const std::string& k = value.text;
+
+    if (k == "REMOVE") {
+        removing = true;
+        return true;
+    }
+    if (k == "ADD") {
+        removing = false;
+        return true;
+    }
+    if (k == "LAST") {
+        // The most recently created entity still in the drawing.
+        const Handle h = ctx.db.last();
+        if (h == kNullHandle) {
+            note = "Nothing to select";
+            return true;
+        }
+        if (removing) {
+            ctx.selection.remove(h);
+        } else {
+            ctx.selection.add(h);
+        }
+        return true;
+    }
+    if (k == "PREVIOUS") {
+        for (const Handle h : ctx.previous.handles()) {
+            // Entities erased since then are silently skipped rather than
+            // reselected as dangling handles.
+            if (!ctx.db.get(h)) continue;
+            if (removing) {
+                ctx.selection.remove(h);
+            } else {
+                ctx.selection.add(h);
+            }
+        }
+        return true;
+    }
+    if (k == "ALL") {
+        for (const Handle h : ctx.db.order()) {
+            const Entity* e = ctx.db.get(h);
+            // R12's All skips what is not visible: you cannot erase what you
+            // cannot see without noticing afterwards.
+            if (!e || !entity_visible(ctx.db, *e)) continue;
+            if (removing) {
+                ctx.selection.remove(h);
+            } else {
+                ctx.selection.add(h);
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+// --- ERASE ------------------------------------------------------------------
+
+Step EraseCommand::start(CommandContext& ctx) { return Step::ask(selection_prompt(ctx, false)); }
+
 Step EraseCommand::next(CommandContext& ctx, const InputValue& value) {
-    // Enter with nothing selected is a no-op, not an error.
+    // Enter ends the selection. With nothing selected it is a no-op, not an
+    // error -- missing everything is how you decide you are finished.
     if (value.kind == InputKind::None) {
-        for (const Handle h : selected_) ctx.db.erase(h);
-        return Step::done(std::to_string(selected_.size()) + " erased");
+        std::size_t n = 0;
+        for (const Handle h : ctx.selection.handles()) {
+            if (ctx.db.erase(h)) ++n;
+        }
+        return Step::done(std::to_string(n) + " erased");
+    }
+
+    std::string note;
+    if (apply_selection_keyword(ctx, value, removing_, note)) {
+        Prompt p = selection_prompt(ctx, removing_);
+        if (!note.empty()) p.message = note + ". " + p.message;
+        return Step::ask(p);
     }
 
     if (value.kind != InputKind::Entity) return Step::failed("an entity is required");
     if (!ctx.db.get(value.entity)) return Step::failed("no such entity");
 
-    // Selecting the same entity twice must not erase it twice.
-    for (const Handle h : selected_) {
-        if (h == value.entity) return Step::ask(select_prompt());
+    // add() dedupes, so picking the same line twice does not erase it twice.
+    if (removing_) {
+        ctx.selection.remove(value.entity);
+    } else {
+        ctx.selection.add(value.entity);
     }
-    selected_.push_back(value.entity);
-    return Step::ask(select_prompt());
+    return Step::ask(selection_prompt(ctx, removing_));
 }
 
 // --- UNDO / REDO ------------------------------------------------------------

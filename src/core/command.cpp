@@ -134,6 +134,14 @@ EngineStatus CommandEngine::begin(CommandPtr cmd) {
     // Typing a new command at a prompt abandons the current one, as R12 does.
     if (command_) cancel();
 
+    // A selection that was built and used becomes Previous, and the working set
+    // starts empty. Only a non-empty one is promoted, so Previous survives the
+    // LINE you ran between ERASE and MOVE.
+    if (!selection_.empty()) {
+        previous_ = selection_;
+        selection_.clear();
+    }
+
     command_ = std::move(cmd);
     message_.clear();
     open_group(command_->name());

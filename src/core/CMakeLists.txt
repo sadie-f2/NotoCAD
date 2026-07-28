@@ -9,6 +9,7 @@ add_library(noto_core STATIC
   entities_draw.cpp
   entities_grip.cpp
   osnap_derived.cpp
+  selection.cpp
   sysvar.cpp
   undo.cpp
   pick.cpp
