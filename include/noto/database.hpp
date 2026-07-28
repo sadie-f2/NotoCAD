@@ -9,6 +9,7 @@
 #pragma once
 
 #include "noto/entity.hpp"
+#include "noto/sysvar.hpp"
 
 #include <string>
 #include <unordered_map>
@@ -86,6 +87,15 @@ public:
     const Linetype& linetype(LinetypeId id) const { return linetypes_[id]; }
     const std::vector<Linetype>& linetypes() const { return linetypes_; }
 
+    // --- system variables ---------------------------------------------------
+
+    // They live here so commands reach them through the context they already
+    // have, and CommandContext stays {Database&}. Not everything in the table is
+    // drawing state -- PICKBOX and APERTURE follow the installation -- which is
+    // what SysvarDef::save_in_drawing and reset_drawing_vars() are for.
+    Sysvars& sysvars() { return sysvars_; }
+    const Sysvars& sysvars() const { return sysvars_; }
+
     Handle peek_next_handle() const { return next_handle_; }
 
 private:
@@ -95,6 +105,7 @@ private:
 
     std::vector<Layer> layers_;
     std::vector<Linetype> linetypes_;
+    Sysvars sysvars_;
 };
 
 }  // namespace noto

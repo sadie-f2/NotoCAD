@@ -92,6 +92,45 @@ const char* osnap_name(OsnapType t) {
     return "???";
 }
 
+// Written out rather than shifted: R12's OSMODE bit order is not this enum's
+// declaration order. See the comment in osnap.hpp.
+OsnapMask osnap_bit(OsnapType t) {
+    switch (t) {
+        case OsnapType::Endpoint: return kOsnapEndpoint;
+        case OsnapType::Midpoint: return kOsnapMidpoint;
+        case OsnapType::Center: return kOsnapCenter;
+        case OsnapType::Quadrant: return kOsnapQuadrant;
+        case OsnapType::Node: return kOsnapNode;
+        case OsnapType::Insert: return kOsnapInsert;
+        case OsnapType::Perpendicular: return kOsnapPerpendicular;
+        case OsnapType::Tangent: return kOsnapTangent;
+        case OsnapType::Nearest: return kOsnapNearest;
+        case OsnapType::Intersection: return kOsnapIntersection;
+    }
+    return kOsnapNone;
+}
+
+bool osnap_enabled(OsnapMask mask, OsnapType t) {
+    const OsnapMask bit = osnap_bit(t);
+    return bit != kOsnapNone && (mask & bit) != 0;
+}
+
+bool osnap_type_from_bit(OsnapMask bit, OsnapType* out) {
+    switch (bit) {
+        case kOsnapEndpoint: *out = OsnapType::Endpoint; return true;
+        case kOsnapMidpoint: *out = OsnapType::Midpoint; return true;
+        case kOsnapCenter: *out = OsnapType::Center; return true;
+        case kOsnapNode: *out = OsnapType::Node; return true;
+        case kOsnapQuadrant: *out = OsnapType::Quadrant; return true;
+        case kOsnapIntersection: *out = OsnapType::Intersection; return true;
+        case kOsnapInsert: *out = OsnapType::Insert; return true;
+        case kOsnapPerpendicular: *out = OsnapType::Perpendicular; return true;
+        case kOsnapTangent: *out = OsnapType::Tangent; return true;
+        case kOsnapNearest: *out = OsnapType::Nearest; return true;
+        default: return false;
+    }
+}
+
 // --- Line -------------------------------------------------------------------
 
 EntityPtr Line::clone() const {

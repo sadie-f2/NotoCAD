@@ -8,6 +8,7 @@ add_library(noto_core STATIC
   entities_dxf.cpp
   entities_draw.cpp
   osnap_derived.cpp
+  sysvar.cpp
   render.cpp
   scene.cpp
   viewport.cpp
