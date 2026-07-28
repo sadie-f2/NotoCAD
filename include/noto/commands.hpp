@@ -186,6 +186,45 @@ private:
     Vec3 mirror_second_{};
 };
 
+// ROTATE3D: rotate about an arbitrary axis in space.
+//
+// The command ROTATE is a special case of -- ROTATE takes the construction
+// plane's normal through a base point, this takes any axis at all. Everything
+// underneath already existed: Mat4::rotation has taken an arbitrary axis since
+// the first commit, and entities have carried an extrusion since the ECS work,
+// so geometry deliberately put into an arbitrary plane serialises correctly.
+//
+// R12's axis options are Entity/Last/View/Xaxis/Yaxis/Zaxis/<2points>. Last is
+// absent here: it has to outlive the command that set it, and CommandContext
+// has nowhere for it to live yet. Recorded in SF_todo.md rather than bodged.
+class Rotate3dCommand final : public Command {
+public:
+    const char* name() const override { return "ROTATE3D"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t {
+        Selecting,
+        AxisOption,
+        SecondPoint,
+        PointOnAxis,
+        AxisEntity,
+        Angle,
+    };
+
+    Step ask_angle();
+    Step apply(CommandContext& ctx, double radians);
+
+    State state_{State::Selecting};
+    SelectionPrompter select_;
+
+    // Which world direction a named axis option means, once a point is given.
+    Vec3 named_axis_{};
+    Vec3 origin_{};
+    Vec3 direction_{};
+};
+
 // ARRAY: rectangular or polar, following R12's prompt sequence.
 //
 // The longest command here by some way, and it is all prompt sequencing --

@@ -89,11 +89,11 @@ commands: foundational, not a feature.
 - [ ] `entsel` — needs interactive input, see below
 - [ ] `getpoint`, `getdist`, `getangle`, `getstring`, `getreal`, `getint` — same
 - [x] MOVE, COPY (with Multiple), ROTATE, SCALE, MIRROR, ARRAY, STRETCH
-- [ ] **ROTATE3D** — never built. Everything under it exists: `Mat4::rotation` has always
-      taken an arbitrary axis, `TransformCommand` is the right shape, and the View axis
-      option now has `ViewControl::view_basis()`. What is missing is the axis
-      sub-machine (`Xaxis/Yaxis/Zaxis/Entity/Last/View/<2points>`), a per-type axis
-      extraction for the Entity option, and somewhere for Last to live.
+- [x] **ROTATE3D** — done, with Entity/View/Xaxis/Yaxis/Zaxis/2points.
+- [ ] ROTATE3D's **Last** axis option. It has to outlive the command that set it, and
+      `CommandContext` has nowhere for it to live — the same shape of problem LASTPOINT
+      solved by living on the engine. Small, but it wants a decision about whether the
+      context grows a fifth member or the engine grows another accessor.
 - [ ] **Reference angle** on ROTATE, and reference length on SCALE — R12 has both and
       neither was built, so ROTATE3D would inherit the gap. Worth doing together.
 - [ ] Interactive grip dragging

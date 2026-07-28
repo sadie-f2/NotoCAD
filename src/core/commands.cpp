@@ -682,6 +682,167 @@ Step TransformCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- ROTATE3D ---------------------------------------------------------------
+
+namespace {
+
+// The axis an entity defines: a line is its own direction, a circle or arc is
+// the axis it turns about. Nothing else here has an axis worth the name.
+bool entity_axis(const Entity& e, Vec3& origin, Vec3& direction) {
+    switch (e.type()) {
+        case EntityType::Line: {
+            const Line& l = static_cast<const Line&>(e);
+            origin = l.start();
+            direction = l.direction();
+            return !is_zero(direction);
+        }
+        case EntityType::Circle: {
+            const Circle& c = static_cast<const Circle&>(e);
+            origin = c.center();
+            direction = c.props().normal;
+            return true;
+        }
+        case EntityType::Arc: {
+            const Arc& a = static_cast<const Arc&>(e);
+            origin = a.center();
+            direction = a.props().normal;
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+}  // namespace
+
+Step Rotate3dCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
+
+Step Rotate3dCommand::ask_angle() {
+    state_ = State::Angle;
+    Prompt p;
+    p.kind = PromptKind::Angle;
+    p.message = "Rotation angle";
+    p.base = origin_;
+    p.has_base = true;
+    return Step::ask(p);
+}
+
+Step Rotate3dCommand::apply(CommandContext& ctx, double radians) {
+    if (is_zero(direction_)) return Step::failed("the axis has no direction");
+
+    const Mat4 m = Mat4::rotation(origin_, normalize(direction_), radians);
+    const std::vector<Handle> handles = ctx.selection.handles();
+
+    std::size_t n = 0;
+    for (const Handle h : handles) {
+        const Entity* e = ctx.db.get(h);
+        if (!e) continue;
+        EntityPtr moved = e->clone();
+        moved->transform(m);
+        // In place, so the handle survives an AutoLISP ename.
+        ctx.db.replace(h, std::move(moved));
+        ++n;
+    }
+    return Step::done(std::to_string(n) + " rotated");
+}
+
+Step Rotate3dCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Selecting: {
+            switch (select_.feed(ctx, value)) {
+                case SelectionPrompter::Result::Selecting:
+                    return Step::ask(select_.prompt(ctx));
+                case SelectionPrompter::Result::Rejected:
+                    return Step::failed("an entity is required");
+                case SelectionPrompter::Result::Finished:
+                    break;
+            }
+            if (ctx.selection.empty()) return Step::done("Nothing selected");
+
+            state_ = State::AxisOption;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Axis by Entity/View/Xaxis/Yaxis/Zaxis/<2points>";
+            p.keywords = {"Entity", "View", "Xaxis", "Yaxis", "Zaxis"};
+            return Step::ask(p);
+        }
+
+        case State::AxisOption: {
+            if (keyword_is(value, "ENTITY")) {
+                state_ = State::AxisEntity;
+                Prompt p;
+                p.kind = PromptKind::Entity;
+                p.message = "Pick a line, circle or arc";
+                return Step::ask(p);
+            }
+            if (keyword_is(value, "XAXIS") || keyword_is(value, "YAXIS") ||
+                keyword_is(value, "ZAXIS")) {
+                named_axis_ = keyword_is(value, "XAXIS")   ? Vec3{1, 0, 0}
+                              : keyword_is(value, "YAXIS") ? Vec3{0, 1, 0}
+                                                           : Vec3{0, 0, 1};
+                state_ = State::PointOnAxis;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Point on axis";
+                return Step::ask(p);
+            }
+            if (keyword_is(value, "VIEW")) {
+                if (!ctx.view) return Step::failed("no view to take an axis from");
+                // Straight into the screen, so the rotation looks like a plain
+                // spin from where you are standing.
+                named_axis_ = ctx.view->view_basis().az;
+                state_ = State::PointOnAxis;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Point on axis";
+                return Step::ask(p);
+            }
+
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            origin_ = value.point;
+            state_ = State::SecondPoint;
+
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Second point on axis";
+            p.base = origin_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::SecondPoint: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            direction_ = value.point - origin_;
+            if (is_zero(direction_)) return Step::failed("the two points are the same");
+            return ask_angle();
+        }
+
+        case State::PointOnAxis: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            origin_ = value.point;
+            direction_ = named_axis_;
+            return ask_angle();
+        }
+
+        case State::AxisEntity: {
+            if (value.kind != InputKind::Entity) return Step::failed("an entity is required");
+            const Entity* e = ctx.db.get(value.entity);
+            if (!e) return Step::failed("no such entity");
+            if (!entity_axis(*e, origin_, direction_)) {
+                return Step::failed("that entity defines no axis");
+            }
+            return ask_angle();
+        }
+
+        case State::Angle: {
+            double radians = 0.0;
+            if (!angle_from(value, origin_, radians)) return Step::failed("an angle is required");
+            return apply(ctx, radians);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
 // --- ARRAY ------------------------------------------------------------------
 
 Step ArrayCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
@@ -1918,6 +2079,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "ZOOM") return std::make_unique<ZoomCommand>();
     if (upper == "MOVE") return std::make_unique<MoveCommand>(false);
     if (upper == "ROTATE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Rotate);
+    if (upper == "ROTATE3D") return std::make_unique<Rotate3dCommand>();
     if (upper == "SCALE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Scale);
     if (upper == "STRETCH") return std::make_unique<StretchCommand>();
     if (upper == "MIRROR") return std::make_unique<TransformCommand>(TransformCommand::Kind::Mirror);
@@ -1933,7 +2095,7 @@ const std::vector<std::string>& command_names() {
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PLAN",  "REDO",  "ROTATE",
-        "SCALE", "STRETCH", "UNDO", "ZOOM"};
+        "ROTATE3D", "SCALE", "STRETCH", "UNDO", "ZOOM"};
     return names;
 }
 

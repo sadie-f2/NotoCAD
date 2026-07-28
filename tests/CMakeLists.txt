@@ -33,6 +33,7 @@ add_executable(noto_tests
   test_dash.cpp
   test_dxf_read.cpp
   test_entities7.cpp
+  test_rotate3d.cpp
   test_render.cpp
   test_viewport.cpp
 )
