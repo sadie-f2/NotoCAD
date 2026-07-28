@@ -87,6 +87,21 @@ enum class InputKind : std::uint8_t {
     OsnapOverride,
 };
 
+// Whether a prompt of this kind can be answered by pointing at somewhere.
+//
+// One rule, asked by everything: the text parser uses it to decide whether a
+// coordinate is a valid answer, and the viewport uses it to decide whether a
+// click means anything, whether to track object snaps, and whether to rubber
+// band. Those three had drifted apart -- the parser accepted a coordinate for a
+// radius while the viewport refused the click that would produce one -- and a
+// second copy of this judgement is how they drifted.
+//
+// Distance and Angle qualify because a magnitude and a direction are both things
+// you show rather than type: a radius is the distance from Prompt::base to where
+// you pointed, an angle is the direction to it. Real, Integer and String do not:
+// there is no geometry that answers "how many rows" or "what file name".
+bool prompt_takes_point(PromptKind kind);
+
 struct InputValue {
     InputKind kind{InputKind::None};
     Vec3 point{};

@@ -162,6 +162,25 @@ rather than guessing — the interface hides which one it is.
 
 ---
 
+## CIRCLE is missing its construction options
+
+`CIRCLE` takes centre-then-radius only. R12 also has **2P**, **3P** and **TTR**
+(tangent-tangent-radius), and they are the reason CIRCLE is worth more than a radius
+box.
+
+Worth separating two things that look alike and are not:
+
+- *Snapping the radius pick to a TAN point* — now works, since the radius prompt takes
+  a picked point and osnap runs there. It gives a circle passing **through** a tangent
+  point of another entity.
+- *A circle tangent **to** another entity* — a different construction. With the centre
+  fixed, the radius is the perpendicular distance to that entity, and there are
+  generally two answers (inside and outside). TTR with two tangent entities has up to
+  eight. Solving those is real geometry work, not prompt plumbing.
+
+The second is what "always two solutions" means and what TTR is for. Neither exists.
+Phase 5 or 6, alongside the other construction commands.
+
 ## Known issues — reported, not yet diagnosed
 
 **TAN snaps to a circle that is not in the drawing plane.** Reported from the viewport,

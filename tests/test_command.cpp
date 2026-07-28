@@ -698,3 +698,84 @@ TEST_CASE("lisp: a command name still starts a command where the prompt cannot u
     CHECK(g.db.size() == 1);
     CHECK(g.db.get(g.db.order()[0])->type() == EntityType::Circle);
 }
+
+TEST_CASE("input: which prompts can be answered by pointing") {
+    // One rule, asked by the text parser and the viewport alike. A magnitude and
+    // a direction are both things you show rather than type; a row count and a
+    // file name are not.
+    CHECK(prompt_takes_point(PromptKind::Point));
+    CHECK(prompt_takes_point(PromptKind::Distance));
+    CHECK(prompt_takes_point(PromptKind::Angle));
+
+    CHECK(!prompt_takes_point(PromptKind::Real));
+    CHECK(!prompt_takes_point(PromptKind::Integer));
+    CHECK(!prompt_takes_point(PromptKind::String));
+    // An entity prompt takes a handle, not a location.
+    CHECK(!prompt_takes_point(PromptKind::Entity));
+}
+
+TEST_CASE("input: a distance or an angle can be given as a coordinate") {
+    std::string err;
+    InputValue v;
+
+    Prompt d;
+    d.kind = PromptKind::Distance;
+    d.base = Vec3{1, 1, 0};
+    d.has_base = true;
+
+    // A number is still a number.
+    CHECK(parse_input(d, "5", v, err));
+    CHECK(v.kind == InputKind::Real);
+
+    // And a coordinate is a point, which the command turns into a distance from
+    // its own base -- the same value a click would have produced.
+    CHECK(parse_input(d, "4,3", v, err));
+    CHECK(v.kind == InputKind::Point);
+    CHECK_VEC(v.point, 4.0, 3.0, 0.0, 1e-12);
+
+    Prompt a;
+    a.kind = PromptKind::Angle;
+    a.base = Vec3{0, 0, 0};
+    a.has_base = true;
+    CHECK(parse_input(a, "45", v, err));
+    CHECK(v.kind == InputKind::Real);
+    CHECK(parse_input(a, "10,10", v, err));
+    CHECK(v.kind == InputKind::Point);
+}
+
+TEST_CASE("circle: the radius can be given by pointing, and D means diameter") {
+    Database db;
+    CommandEngine engine(db);
+
+    // Radius by picking a point the circle should pass through.
+    engine.begin(make_command("CIRCLE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    CHECK(engine.prompt().kind == PromptKind::Distance);
+    CHECK(engine.prompt().has_base);
+    CHECK_VEC(engine.prompt().base, 0.0, 0.0, 0.0, 1e-12);
+    engine.supply(InputValue::of_point({3, 4, 0}));
+    CHECK(engine.status() == EngineStatus::Finished);
+
+    const Entity* e = db.get(db.order().back());
+    CHECK(e->type() == EntityType::Circle);
+    CHECK_NEAR(static_cast<const Circle*>(e)->radius(), 5.0, 1e-12);
+
+    // Radius is the default; D switches to diameter, and halves it.
+    engine.begin(make_command("CIRCLE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_real(7.0));
+    CHECK_NEAR(static_cast<const Circle*>(db.get(db.order().back()))->radius(), 7.0, 1e-12);
+
+    engine.begin(make_command("CIRCLE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_keyword("DIAMETER"));
+    engine.supply(InputValue::of_real(10.0));
+    CHECK_NEAR(static_cast<const Circle*>(db.get(db.order().back()))->radius(), 5.0, 1e-12);
+
+    // And a picked diameter is measured across, not from the centre.
+    engine.begin(make_command("CIRCLE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_keyword("DIAMETER"));
+    engine.supply(InputValue::of_point({3, 4, 0}));
+    CHECK_NEAR(static_cast<const Circle*>(db.get(db.order().back()))->radius(), 2.5, 1e-12);
+}

@@ -23,6 +23,19 @@ std::string Prompt::text() const {
 
 // --- InputValue -------------------------------------------------------------
 
+bool prompt_takes_point(PromptKind kind) {
+    switch (kind) {
+        case PromptKind::Point:
+        case PromptKind::Distance:
+        case PromptKind::Angle: return true;
+        case PromptKind::Real:
+        case PromptKind::Integer:
+        case PromptKind::String:
+        case PromptKind::Entity: return false;
+    }
+    return false;
+}
+
 InputValue InputValue::none() { return InputValue{}; }
 
 InputValue InputValue::cancel() {
