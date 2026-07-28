@@ -30,6 +30,20 @@ constexpr double kBulgeEps = 1e-12;
 
 }  // namespace
 
+void Polyline::set_uniform_width(double w) {
+    for (PolyVertex& v : vertices_) {
+        v.start_width = w;
+        v.end_width = w;
+    }
+}
+
+bool Polyline::has_width() const {
+    for (const PolyVertex& v : vertices_) {
+        if (v.start_width != 0.0 || v.end_width != 0.0) return true;
+    }
+    return false;
+}
+
 std::size_t Polyline::segment_count() const {
     if (vertices_.size() < 2) return 0;
     return closed_ ? vertices_.size() : vertices_.size() - 1;
@@ -125,6 +139,17 @@ void Polyline::transform(const Mat4& m) {
     const double det = dot(cross(tx, ty), m.transform_vector(b.az));
     if (det < 0.0) {
         for (PolyVertex& v : vertices_) v.bulge = -v.bulge;
+    }
+
+    // Widths are lengths, so they scale. Uniform scale is assumed for the same
+    // reason the circular entities assume it -- R12 cannot represent the
+    // non-uniform result -- and the factor is taken from the same basis vector.
+    const double scale = noto::length(tx);
+    if (scale != 1.0) {
+        for (PolyVertex& v : vertices_) {
+            v.start_width *= scale;
+            v.end_width *= scale;
+        }
     }
 }
 

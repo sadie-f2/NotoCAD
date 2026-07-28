@@ -98,6 +98,31 @@ bool distance_from(const InputValue& v, const Vec3& base, double& out) {
     return false;
 }
 
+// The normal of the current construction plane. World Z until UCS exists; this
+// is the single place that has to learn about UCS later.
+Vec3 construction_normal() {
+    return kWorldZ;
+}
+
+// Signed angle from `a` to `b` measured about `n`, in (-pi, pi]. The sign is
+// what distinguishes a clockwise arc from a counterclockwise one, so every
+// bulge in PLINE ultimately comes from here.
+double signed_angle(const Vec3& a, const Vec3& b, const Vec3& n) {
+    return std::atan2(dot(cross(a, b), n), dot(a, b));
+}
+
+// R12's group 42, from the arc's included angle. The quarter-angle tangent is
+// the definition; see polyline.cpp for the arithmetic that reads it back.
+double bulge_from_included(double included) {
+    return std::tan(included * 0.25);
+}
+
+// Turns `v` by `radians` about `n`, for carrying an arc's tangent direction
+// from one segment to the next.
+Vec3 rotate_about(const Vec3& v, const Vec3& n, double radians) {
+    return Mat4::rotation(Vec3{}, n, radians).transform_vector(v);
+}
+
 }  // namespace
 
 // --- LINE -------------------------------------------------------------------
@@ -203,6 +228,996 @@ Step CircleCommand::next(CommandContext& ctx, const InputValue& value) {
 
             ctx.db.add(with_current_props(ctx.db, std::make_unique<Circle>(centre_, radius)));
             return Step::done();
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- PLINE ------------------------------------------------------------------
+
+Step PlineCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "From point";
+    return Step::ask(p);
+}
+
+Prompt PlineCommand::line_prompt() const {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Endpoint of line";
+    p.allow_empty = true;
+    p.base = current();
+    p.has_base = true;
+    p.keywords = {"Arc", "Halfwidth", "Length", "Width"};
+    // Close needs two segments to be worth anything, the same rule LINE uses.
+    if (vertices_.size() >= 3) p.keywords.push_back("Close");
+    if (vertices_.size() >= 2) p.keywords.push_back("Undo");
+    return p;
+}
+
+Prompt PlineCommand::arc_prompt() const {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Endpoint of arc";
+    p.allow_empty = true;
+    p.base = current();
+    p.has_base = true;
+    p.keywords = {"Angle", "CEnter", "Direction", "Halfwidth",
+                  "Line",  "Radius", "Second",    "Width"};
+    if (vertices_.size() >= 3) p.keywords.push_back("CLose");
+    if (vertices_.size() >= 2) p.keywords.push_back("Undo");
+    return p;
+}
+
+Prompt PlineCommand::width_prompt(bool half, bool ending) const {
+    Prompt p;
+    p.kind = PromptKind::Distance;
+    const char* what = half ? "half-width" : "width";
+    p.message = std::string(ending ? "Ending " : "Starting ") + what;
+    p.allow_empty = true;
+    p.base = current();
+    p.has_base = true;
+    return p;
+}
+
+Step PlineCommand::resume() {
+    state_ = arc_mode_ ? State::Arc : State::Line;
+    return Step::ask(arc_mode_ ? arc_prompt() : line_prompt());
+}
+
+void PlineCommand::flush(CommandContext& ctx) {
+    if (vertices_.size() < 2) return;
+
+    auto poly = std::make_unique<Polyline>();
+    poly->vertices() = vertices_;
+
+    if (handle_ == kNullHandle) {
+        handle_ = ctx.db.add(with_current_props(ctx.db, std::move(poly)));
+        return;
+    }
+    // Replace rather than erase-and-add, so the polyline keeps its handle and
+    // its place in the drawing order while it is being built.
+    ctx.db.replace(handle_, with_current_props(ctx.db, std::move(poly)));
+}
+
+Step PlineCommand::add_vertex(CommandContext& ctx, const Vec3& p, double included, bool is_arc) {
+    // The widths and the bulge belong to the segment LEAVING the current
+    // vertex, so they are written onto the vertex already in the list.
+    vertices_.back().bulge = is_arc ? bulge_from_included(included) : 0.0;
+    vertices_.back().start_width = start_width_;
+    vertices_.back().end_width = end_width_;
+
+    const Vec3 from = current();
+    vertices_.push_back(PolyVertex{p, 0.0, start_width_, end_width_});
+
+    // The direction the next arc leaves in: along a straight segment, or the
+    // turned tangent of an arc. This is what makes a run of arcs flow rather
+    // than kink at every vertex.
+    if (is_arc) {
+        const Vec3 t = have_tangent_ ? tangent_ : normalize(p - from);
+        tangent_ = normalize(rotate_about(t, construction_normal(), included));
+    } else {
+        const Vec3 d = p - from;
+        if (!is_zero(d)) tangent_ = normalize(d);
+    }
+    have_tangent_ = true;
+
+    flush(ctx);
+    return resume();
+}
+
+Step PlineCommand::close_it(CommandContext& ctx, bool with_arc) {
+    if (vertices_.size() < 3) return Step::failed("nothing to close");
+
+    const Vec3 from = current();
+    const Vec3 to = vertices_.front().pos;
+    double included = 0.0;
+    if (with_arc && have_tangent_) {
+        const Vec3 chord = to - from;
+        if (!is_zero(chord)) {
+            included = 2.0 * signed_angle(tangent_, normalize(chord), construction_normal());
+        }
+    }
+    vertices_.back().bulge = with_arc ? bulge_from_included(included) : 0.0;
+    vertices_.back().start_width = start_width_;
+    vertices_.back().end_width = end_width_;
+
+    auto poly = std::make_unique<Polyline>();
+    poly->vertices() = vertices_;
+    poly->set_closed(true);
+    if (handle_ == kNullHandle) {
+        ctx.db.add(with_current_props(ctx.db, std::move(poly)));
+    } else {
+        ctx.db.replace(handle_, with_current_props(ctx.db, std::move(poly)));
+    }
+    return Step::done();
+}
+
+Step PlineCommand::undo_vertex(CommandContext& ctx) {
+    if (vertices_.size() < 2) return Step::failed("nothing to undo");
+
+    vertices_.pop_back();
+    // The segment that led here no longer exists, so neither does its bulge.
+    vertices_.back().bulge = 0.0;
+
+    if (vertices_.size() < 2 && handle_ != kNullHandle) {
+        // Back to a single point: there is no polyline left to be.
+        ctx.db.erase(handle_);
+        handle_ = kNullHandle;
+    } else {
+        flush(ctx);
+    }
+
+    have_tangent_ = false;
+    if (vertices_.size() >= 2) {
+        const Vec3 d = vertices_.back().pos - vertices_[vertices_.size() - 2].pos;
+        if (!is_zero(d)) {
+            tangent_ = normalize(d);
+            have_tangent_ = true;
+        }
+    }
+    return resume();
+}
+
+Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::First: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            vertices_.push_back(PolyVertex{value.point, 0.0, start_width_, end_width_});
+            state_ = State::Line;
+            return Step::ask(line_prompt());
+        }
+
+        case State::Line:
+        case State::Arc: {
+            if (value.kind == InputKind::None) return Step::done();
+
+            if (keyword_is(value, "ARC")) {
+                arc_mode_ = true;
+                return resume();
+            }
+            if (keyword_is(value, "LINE")) {
+                arc_mode_ = false;
+                return resume();
+            }
+            // "Close" and the arc mode's "CLose" upcase to the same word, which
+            // is why one test serves both modes.
+            if (keyword_is(value, "CLOSE")) return close_it(ctx, arc_mode_);
+            if (keyword_is(value, "UNDO")) return undo_vertex(ctx);
+            if (keyword_is(value, "WIDTH")) {
+                state_ = State::WidthStart;
+                return Step::ask(width_prompt(false, false));
+            }
+            if (keyword_is(value, "HALFWIDTH")) {
+                state_ = State::HalfStart;
+                return Step::ask(width_prompt(true, false));
+            }
+            if (keyword_is(value, "LENGTH")) {
+                state_ = State::Length;
+                Prompt p;
+                p.kind = PromptKind::Distance;
+                p.message = "Length of line";
+                p.base = current();
+                p.has_base = true;
+                return Step::ask(p);
+            }
+
+            // The arc sub-mode's own options.
+            if (arc_mode_) {
+                if (keyword_is(value, "ANGLE")) {
+                    state_ = State::ArcAngle;
+                    Prompt p;
+                    p.kind = PromptKind::Angle;
+                    p.message = "Included angle";
+                    p.base = current();
+                    p.has_base = true;
+                    return Step::ask(p);
+                }
+                if (keyword_is(value, "CENTER")) {
+                    state_ = State::ArcCentre;
+                    Prompt p;
+                    p.kind = PromptKind::Point;
+                    p.message = "Center point";
+                    p.base = current();
+                    p.has_base = true;
+                    return Step::ask(p);
+                }
+                if (keyword_is(value, "RADIUS")) {
+                    state_ = State::ArcRadius;
+                    Prompt p;
+                    p.kind = PromptKind::Distance;
+                    p.message = "Radius";
+                    p.base = current();
+                    p.has_base = true;
+                    return Step::ask(p);
+                }
+                if (keyword_is(value, "SECOND")) {
+                    state_ = State::ArcSecond;
+                    Prompt p;
+                    p.kind = PromptKind::Point;
+                    p.message = "Second point";
+                    p.base = current();
+                    p.has_base = true;
+                    return Step::ask(p);
+                }
+                if (keyword_is(value, "DIRECTION")) {
+                    state_ = State::ArcDirection;
+                    Prompt p;
+                    p.kind = PromptKind::Angle;
+                    p.message = "Direction from starting point";
+                    p.base = current();
+                    p.has_base = true;
+                    return Step::ask(p);
+                }
+            }
+
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+            if (!arc_mode_) return add_vertex(ctx, value.point, 0.0, false);
+
+            // A plain arc endpoint: the arc leaves along the current tangent
+            // and ends where you pointed, which fixes the included angle at
+            // twice the angle between the tangent and the chord.
+            const Vec3 chord = value.point - current();
+            if (is_zero(chord)) return Step::failed("zero-length arc");
+            double included = 0.0;
+            if (have_tangent_) {
+                included = 2.0 * signed_angle(tangent_, normalize(chord), construction_normal());
+            }
+            // With no previous segment there is no tangent to continue, so the
+            // arc degenerates to a straight segment rather than guessing.
+            return add_vertex(ctx, value.point, included, have_tangent_);
+        }
+
+        case State::WidthStart:
+        case State::HalfStart: {
+            const bool half = state_ == State::HalfStart;
+            double w = 0.0;
+            if (value.kind == InputKind::None) {
+                w = half ? start_width_ * 0.5 : start_width_;
+            } else if (!distance_from(value, current(), w)) {
+                return Step::failed("a width is required");
+            }
+            if (w < 0.0) return Step::failed("width must not be negative");
+            start_width_ = half ? w * 2.0 : w;
+            state_ = half ? State::HalfEnd : State::WidthEnd;
+            return Step::ask(width_prompt(half, true));
+        }
+
+        case State::WidthEnd:
+        case State::HalfEnd: {
+            const bool half = state_ == State::HalfEnd;
+            double w = 0.0;
+            if (value.kind == InputKind::None) {
+                // R12 offers the starting width as the default, which is what
+                // makes a constant-width polyline two keystrokes.
+                w = half ? start_width_ * 0.5 : start_width_;
+            } else if (!distance_from(value, current(), w)) {
+                return Step::failed("a width is required");
+            }
+            if (w < 0.0) return Step::failed("width must not be negative");
+            end_width_ = half ? w * 2.0 : w;
+            return resume();
+        }
+
+        case State::Length: {
+            double len = 0.0;
+            if (!signed_distance_from(value, current(), len)) {
+                return Step::failed("a length is required");
+            }
+            if (!have_tangent_) return Step::failed("no direction to continue");
+            return add_vertex(ctx, current() + tangent_ * len, 0.0, false);
+        }
+
+        case State::ArcAngle: {
+            if (!angle_from(value, current(), pending_angle_)) {
+                return Step::failed("an angle is required");
+            }
+            state_ = State::ArcAngleEnd;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Endpoint of arc";
+            p.base = current();
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::ArcAngleEnd: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            if (is_zero(value.point - current())) return Step::failed("zero-length arc");
+            // The angle was given outright, so it IS the included angle and no
+            // tangent is consulted -- this is the option you reach for when the
+            // continuation tangent is not what you want.
+            return add_vertex(ctx, value.point, pending_angle_, true);
+        }
+
+        case State::ArcCentre: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            pending_centre_ = value.point;
+            state_ = State::ArcCentreEnd;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Endpoint of arc";
+            p.base = pending_centre_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::ArcCentreEnd: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            const Vec3 from = current() - pending_centre_;
+            const Vec3 to = value.point - pending_centre_;
+            if (is_zero(from) || is_zero(to)) return Step::failed("degenerate arc");
+            // The shorter way round. R12 offers Angle and Length beside the
+            // endpoint for when the major arc is wanted; the minor arc is what
+            // an endpoint alone means.
+            const double included =
+                signed_angle(normalize(from), normalize(to), construction_normal());
+            if (std::abs(included) < 1e-12) return Step::failed("degenerate arc");
+            return add_vertex(ctx, value.point, included, true);
+        }
+
+        case State::ArcRadius: {
+            if (!distance_from(value, current(), pending_radius_)) {
+                return Step::failed("a radius is required");
+            }
+            if (pending_radius_ <= 0.0) return Step::failed("radius must be positive");
+            state_ = State::ArcRadiusEnd;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Endpoint of arc";
+            p.base = current();
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::ArcRadiusEnd: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            const Vec3 chord = value.point - current();
+            const double chord_len = length(chord);
+            if (chord_len < 1e-12) return Step::failed("zero-length arc");
+            // |chord| = 2r sin(theta/2), so a chord longer than the diameter
+            // has no arc of this radius at all.
+            const double ratio = chord_len / (2.0 * pending_radius_);
+            if (ratio > 1.0) return Step::failed("radius too small for that endpoint");
+            double included = 2.0 * std::asin(ratio);
+            // Which of the two ways round: follow the current tangent when
+            // there is one, so a run of arcs keeps its sense.
+            if (have_tangent_ &&
+                signed_angle(tangent_, normalize(chord), construction_normal()) < 0.0) {
+                included = -included;
+            }
+            return add_vertex(ctx, value.point, included, true);
+        }
+
+        case State::ArcSecond: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            pending_second_ = value.point;
+            state_ = State::ArcSecondEnd;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Endpoint of arc";
+            p.base = pending_second_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::ArcSecondEnd: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            // Three points on the arc. The included angle is the sum of the two
+            // signed turns, which is what carries a major arc correctly: going
+            // start -> second -> end the long way gives two same-signed turns
+            // adding past pi, where the chord alone could not say so.
+            const Vec3 a = pending_second_ - current();
+            const Vec3 b = value.point - pending_second_;
+            if (is_zero(a) || is_zero(b)) return Step::failed("degenerate arc");
+            const Vec3 n = construction_normal();
+            const double turn = signed_angle(normalize(a), normalize(b), n);
+            if (std::abs(turn) < 1e-12) return Step::failed("three points are collinear");
+            // The inscribed-angle relation: the turn between the two chords is
+            // half the total included angle.
+            return add_vertex(ctx, value.point, 2.0 * turn, true);
+        }
+
+        case State::ArcDirection: {
+            double dir = 0.0;
+            if (!angle_from(value, current(), dir)) return Step::failed("an angle is required");
+            tangent_ = normalize(rotate_about(Vec3{1, 0, 0}, construction_normal(), dir));
+            have_tangent_ = true;
+            state_ = State::ArcDirectionEnd;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Endpoint of arc";
+            p.base = current();
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::ArcDirectionEnd: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            const Vec3 chord = value.point - current();
+            if (is_zero(chord)) return Step::failed("zero-length arc");
+            const double included =
+                2.0 * signed_angle(tangent_, normalize(chord), construction_normal());
+            return add_vertex(ctx, value.point, included, true);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- POINT ------------------------------------------------------------------
+
+Step PointCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Point";
+    return Step::ask(p);
+}
+
+Step PointCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind != InputKind::Point) return Step::failed("a point is required");
+    ctx.db.add(with_current_props(ctx.db, std::make_unique<PointEntity>(value.point)));
+    return Step::done();
+}
+
+// --- SOLID and 3DFACE -------------------------------------------------------
+
+Prompt SolidCommand::ask(const char* message, bool allow_empty) const {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = message;
+    p.allow_empty = allow_empty;
+    return p;
+}
+
+void SolidCommand::emit(CommandContext& ctx) {
+    auto e = std::make_unique<Face>(face3d_ ? EntityType::Face3d : EntityType::Solid);
+    for (int i = 0; i < 4; ++i) e->set_corner(i, corner_[i]);
+    ctx.db.add(with_current_props(ctx.db, std::move(e)));
+    ++emitted_;
+}
+
+Step SolidCommand::start(CommandContext&) {
+    return Step::ask(ask("First point", false));
+}
+
+Step SolidCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::First: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            corner_[0] = value.point;
+            state_ = State::Second;
+            return Step::ask(ask("Second point", false));
+        }
+
+        case State::Second: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            corner_[1] = value.point;
+            state_ = State::Third;
+            return Step::ask(ask("Third point", false));
+        }
+
+        case State::Third: {
+            // Enter here ends a strip cleanly, which is how you stop after a
+            // quadrilateral rather than being forced into a triangle.
+            if (value.kind == InputKind::None) {
+                return emitted_ == 0 ? Step::failed("nothing drawn") : Step::done();
+            }
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            corner_[2] = value.point;
+            state_ = State::Fourth;
+            return Step::ask(ask("Fourth point", true));
+        }
+
+        case State::Fourth: {
+            // Enter means a triangle, which the format spells as the fourth
+            // corner repeating the third.
+            corner_[3] = (value.kind == InputKind::None) ? corner_[2] : value.point;
+            if (value.kind != InputKind::None && value.kind != InputKind::Point) {
+                return Step::failed("a point is required");
+            }
+            emit(ctx);
+
+            // The strip continues: this quadrilateral's far edge becomes the
+            // next one's near edge.
+            corner_[0] = corner_[2];
+            corner_[1] = corner_[3];
+            state_ = State::Third;
+            return Step::ask(ask("Third point", true));
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- TEXT -------------------------------------------------------------------
+
+namespace {
+
+// R12's justification keywords, and the pair of DXF codes each one means.
+struct JustifyRow {
+    const char* keyword;
+    TextHAlign h;
+    TextVAlign v;
+};
+
+constexpr JustifyRow kJustify[] = {
+    {"ALIGN", TextHAlign::Aligned, TextVAlign::Baseline},
+    {"FIT", TextHAlign::Fit, TextVAlign::Baseline},
+    {"CENTER", TextHAlign::Center, TextVAlign::Baseline},
+    {"MIDDLE", TextHAlign::Middle, TextVAlign::Baseline},
+    {"RIGHT", TextHAlign::Right, TextVAlign::Baseline},
+    {"TL", TextHAlign::Left, TextVAlign::Top},
+    {"TC", TextHAlign::Center, TextVAlign::Top},
+    {"TR", TextHAlign::Right, TextVAlign::Top},
+    {"ML", TextHAlign::Left, TextVAlign::Middle},
+    {"MC", TextHAlign::Center, TextVAlign::Middle},
+    {"MR", TextHAlign::Right, TextVAlign::Middle},
+    {"BL", TextHAlign::Left, TextVAlign::Bottom},
+    {"BC", TextHAlign::Center, TextVAlign::Bottom},
+    {"BR", TextHAlign::Right, TextVAlign::Bottom},
+};
+
+}  // namespace
+
+Step TextCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Start point of text";
+    p.keywords = {"Justify"};
+    return Step::ask(p);
+}
+
+Step TextCommand::ask_height() {
+    state_ = State::Height;
+    Prompt p;
+    p.kind = PromptKind::Distance;
+    p.message = "Height";
+    p.allow_empty = true;
+    p.base = start_;
+    p.has_base = true;
+    return Step::ask(p);
+}
+
+Step TextCommand::ask_rotation() {
+    state_ = State::Rotation;
+    Prompt p;
+    p.kind = PromptKind::Angle;
+    p.message = "Rotation angle";
+    p.allow_empty = true;
+    p.base = start_;
+    p.has_base = true;
+    return Step::ask(p);
+}
+
+Step TextCommand::ask_value() {
+    state_ = State::Value;
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Text";
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step TextCommand::build(CommandContext& ctx, const std::string& value) {
+    if (value.empty()) return Step::done();  // R12 draws nothing for empty text
+
+    auto text = std::make_unique<Text>(start_, value, height_);
+    text->set_rotation(rotation_);
+    text->set_align(h_align_, v_align_);
+    if (text->is_justified()) text->set_align_point(start_);
+
+    // Align and Fit both span two points, so the rotation comes from the pair
+    // rather than from a typed angle. What differs is which property gives way
+    // to make the text span the distance: Align scales the height, Fit squeezes
+    // the width factor and leaves the height where it was put.
+    if (h_align_ == TextHAlign::Aligned || h_align_ == TextHAlign::Fit) {
+        const Vec3 span = second_ - start_;
+        const double distance = length(span);
+        if (distance < 1e-12) return Step::failed("the two points are the same");
+        text->set_rotation(std::atan2(span.y, span.x));
+
+        // The nominal width of the string at the current height and width
+        // factor; both modes solve for whichever factor makes it equal the
+        // distance. Without a font this is the placeholder metric, which makes
+        // the result approximate in the same way the drawing already is.
+        const double nominal = text->approximate_width();
+        if (nominal < 1e-12) return Step::failed("cannot fit empty text");
+
+        if (h_align_ == TextHAlign::Aligned) {
+            text->set_height(height_ * distance / nominal);
+        } else {
+            text->set_width_factor(distance / nominal);
+        }
+    }
+
+    ctx.db.add(with_current_props(ctx.db, std::move(text)));
+    return Step::done();
+}
+
+Step TextCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Start: {
+            if (keyword_is(value, "JUSTIFY")) {
+                state_ = State::JustifyOption;
+                Prompt p;
+                p.kind = PromptKind::String;
+                p.message = "Align/Fit/Center/Middle/Right/TL/TC/TR/ML/MC/MR/BL/BC/BR";
+                for (const JustifyRow& row : kJustify) p.keywords.push_back(row.keyword);
+                return Step::ask(p);
+            }
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            start_ = value.point;
+
+            // Align and Fit span two points, so the second one is asked for
+            // before anything else -- it is what the rotation, and one of the
+            // height or the width factor, will be solved from.
+            if (h_align_ == TextHAlign::Aligned || h_align_ == TextHAlign::Fit) {
+                state_ = State::SecondPoint;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Second text line point";
+                p.base = start_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+            return ask_height();
+        }
+
+        case State::JustifyOption: {
+            const std::string word =
+                (value.kind == InputKind::Keyword || value.kind == InputKind::String)
+                    ? upcase(value.text)
+                    : std::string();
+            const JustifyRow* found = nullptr;
+            for (const JustifyRow& row : kJustify) {
+                if (word == row.keyword) found = &row;
+            }
+            if (!found) return Step::failed("unknown justification");
+            h_align_ = found->h;
+            v_align_ = found->v;
+
+            state_ = State::Start;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            // R12 names the point after the justification, because for Align
+            // and Fit it is one end of a span rather than an origin.
+            p.message = (h_align_ == TextHAlign::Aligned || h_align_ == TextHAlign::Fit)
+                            ? "First text line point"
+                            : "Text point";
+            return Step::ask(p);
+        }
+
+        case State::SecondPoint: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            second_ = value.point;
+            // Align derives its height, so it never asks; Fit keeps the height
+            // question and solves for width instead.
+            return (h_align_ == TextHAlign::Aligned) ? ask_value() : ask_height();
+        }
+
+        case State::Height: {
+            if (value.kind != InputKind::None) {
+                double h = 0.0;
+                if (!distance_from(value, start_, h)) return Step::failed("a height is required");
+                if (h <= 0.0) return Step::failed("height must be positive");
+                height_ = h;
+            }
+            // Align and Fit take their angle from the second point instead.
+            if (h_align_ == TextHAlign::Aligned || h_align_ == TextHAlign::Fit) {
+                return ask_value();
+            }
+            return ask_rotation();
+        }
+
+        case State::Rotation: {
+            if (value.kind != InputKind::None) {
+                if (!angle_from(value, start_, rotation_)) {
+                    return Step::failed("an angle is required");
+                }
+            }
+            return ask_value();
+        }
+
+        case State::Value: {
+            if (value.kind == InputKind::None) return Step::done();
+            if (value.kind != InputKind::String) return Step::failed("text is required");
+            return build(ctx, value.text);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- PEDIT ------------------------------------------------------------------
+
+namespace {
+
+// How close two endpoints must be to count as the same point. R12 joins only
+// on exact coincidence by default, so this is a floating-point tolerance rather
+// than a fuzz distance -- picking with an object snap lands exactly, and
+// anything looser would join things the user did not mean.
+constexpr double kJoinTol = 1e-9;
+
+// The vertex chain an entity contributes to a polyline it is joined to, or
+// empty when it cannot be joined at all.
+//
+// The bulge convention is the polyline's, not the entity's: an arc traversed
+// from its start point to its end point sweeps counterclockwise in its OWN
+// plane, which is the opposite sense when that plane faces the other way.
+std::vector<PolyVertex> join_chain(const Entity& e, const Vec3& poly_normal) {
+    std::vector<PolyVertex> chain;
+    switch (e.type()) {
+        case EntityType::Line: {
+            const Line& l = static_cast<const Line&>(e);
+            chain.push_back(PolyVertex{l.start(), 0.0, 0.0, 0.0});
+            chain.push_back(PolyVertex{l.end(), 0.0, 0.0, 0.0});
+            break;
+        }
+        case EntityType::Arc: {
+            const Arc& a = static_cast<const Arc&>(e);
+            double bulge = std::tan(a.sweep() * 0.25);
+            if (dot(a.props().normal, poly_normal) < 0.0) bulge = -bulge;
+            chain.push_back(PolyVertex{a.start_point(), bulge, 0.0, 0.0});
+            chain.push_back(PolyVertex{a.end_point(), 0.0, 0.0, 0.0});
+            break;
+        }
+        case EntityType::Polyline: {
+            const Polyline& p = static_cast<const Polyline&>(e);
+            // A closed polyline has no free ends, so there is nothing to join to.
+            if (p.closed() || p.size() < 2) break;
+            chain = p.vertices();
+            break;
+        }
+        default: break;
+    }
+    return chain;
+}
+
+// Reverses a chain's direction of travel. The bulges move as well as negate:
+// a bulge describes the segment LEAVING its vertex, so reversing hands each
+// one to the vertex at the other end of its own segment.
+void reverse_chain(std::vector<PolyVertex>& chain) {
+    if (chain.size() < 2) return;
+    std::vector<PolyVertex> out;
+    out.reserve(chain.size());
+    for (std::size_t i = chain.size(); i-- > 0;) {
+        PolyVertex v = chain[i];
+        v.bulge = (i == 0) ? 0.0 : -chain[i - 1].bulge;
+        // The widths belong to the same segment as the bulge and move with it.
+        if (i > 0) {
+            v.start_width = chain[i - 1].end_width;
+            v.end_width = chain[i - 1].start_width;
+        } else {
+            v.start_width = 0.0;
+            v.end_width = 0.0;
+        }
+        out.push_back(v);
+    }
+    chain.swap(out);
+}
+
+}  // namespace
+
+Polyline* PeditCommand::target(CommandContext& ctx) const {
+    Entity* e = ctx.db.get(handle_);
+    if (!e || e->type() != EntityType::Polyline) return nullptr;
+    return static_cast<Polyline*>(e);
+}
+
+void PeditCommand::push_snapshot(CommandContext& ctx) {
+    const Entity* e = ctx.db.get(handle_);
+    if (e) snapshots_.push_back(e->clone());
+}
+
+Step PeditCommand::do_undo(CommandContext& ctx) {
+    if (snapshots_.empty()) return Step::failed("nothing to undo");
+    ctx.db.replace(handle_, std::move(snapshots_.back()));
+    snapshots_.pop_back();
+    note_.clear();
+    return ask_option(ctx);
+}
+
+Step PeditCommand::ask_option(CommandContext& ctx) {
+    state_ = State::Option;
+    const Polyline* p = target(ctx);
+    if (!p) return Step::failed("the polyline is gone");
+
+    Prompt prompt;
+    prompt.kind = PromptKind::String;
+    prompt.message = note_.empty() ? "Enter an option" : note_;
+    prompt.allow_empty = true;  // Enter is eXit
+    // R12 shows Open when the polyline is already closed, which is the same
+    // option reading the other way round rather than a second one.
+    prompt.keywords = {p->closed() ? "Open" : "Close", "Join", "Width", "Undo", "eXit"};
+    note_.clear();
+    return Step::ask(prompt);
+}
+
+Step PeditCommand::do_join(CommandContext& ctx) {
+    Polyline* poly = target(ctx);
+    if (!poly) return Step::failed("the polyline is gone");
+    if (poly->closed()) return Step::failed("a closed polyline has no ends to join to");
+
+    // Work on a copy and write it back once, so the database sees one change
+    // and undo records one before/after pair.
+    std::vector<PolyVertex> verts = poly->vertices();
+    const Vec3 normal = poly->props().normal;
+
+    std::vector<Handle> candidates;
+    for (Handle h : ctx.selection.handles()) {
+        if (h != handle_) candidates.push_back(h);
+    }
+
+    std::vector<bool> used(candidates.size(), false);
+    std::size_t added = 0;
+
+    // Repeated passes, because joining one entity can expose an endpoint that
+    // lets an earlier candidate join too. R12 does the same, which is what
+    // makes joining a scattered set of segments work in one go.
+    bool progress = true;
+    while (progress) {
+        progress = false;
+        for (std::size_t i = 0; i < candidates.size(); ++i) {
+            if (used[i]) continue;
+            const Entity* e = ctx.db.get(candidates[i]);
+            if (!e) continue;
+
+            std::vector<PolyVertex> chain = join_chain(*e, normal);
+            if (chain.size() < 2) continue;
+
+            const Vec3& head = verts.front().pos;
+            const Vec3& tail = verts.back().pos;
+
+            bool attached = false;
+            if (near_equal(chain.front().pos, tail, kJoinTol)) {
+                // The tail's bulge belongs to the segment it already has; the
+                // incoming chain's first bulge takes over from the join point.
+                verts.back().bulge = chain.front().bulge;
+                verts.back().start_width = chain.front().start_width;
+                verts.back().end_width = chain.front().end_width;
+                verts.insert(verts.end(), chain.begin() + 1, chain.end());
+                attached = true;
+            } else if (near_equal(chain.back().pos, tail, kJoinTol)) {
+                reverse_chain(chain);
+                verts.back().bulge = chain.front().bulge;
+                verts.back().start_width = chain.front().start_width;
+                verts.back().end_width = chain.front().end_width;
+                verts.insert(verts.end(), chain.begin() + 1, chain.end());
+                attached = true;
+            } else if (near_equal(chain.back().pos, head, kJoinTol)) {
+                verts.insert(verts.begin(), chain.begin(), chain.end() - 1);
+                attached = true;
+            } else if (near_equal(chain.front().pos, head, kJoinTol)) {
+                reverse_chain(chain);
+                verts.insert(verts.begin(), chain.begin(), chain.end() - 1);
+                attached = true;
+            }
+
+            if (attached) {
+                used[i] = true;
+                ++added;
+                progress = true;
+                ctx.db.erase(candidates[i]);
+            }
+        }
+    }
+
+    if (added == 0) {
+        note_ = "0 segments added to polyline";
+        return ask_option(ctx);
+    }
+
+    push_snapshot(ctx);
+    auto merged = std::make_unique<Polyline>();
+    merged->vertices() = verts;
+    merged->props() = poly->props();
+    ctx.db.replace(handle_, std::move(merged));
+
+    note_ = std::to_string(added) + " segments added to polyline";
+    return ask_option(ctx);
+}
+
+Step PeditCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Entity;
+    p.message = "Select polyline";
+    return Step::ask(p);
+}
+
+Step PeditCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Select: {
+            if (value.kind != InputKind::Entity) return Step::failed("select a polyline");
+            const Entity* e = ctx.db.get(value.entity);
+            if (!e) return Step::failed("no such entity");
+            if (e->type() != EntityType::Polyline) {
+                // R12 offers to turn a line or arc into a one-segment polyline
+                // here. Not built: it is a creation path rather than an edit,
+                // and it wants deciding alongside the curve options.
+                return Step::failed("that is not a polyline");
+            }
+            handle_ = value.entity;
+            return ask_option(ctx);
+        }
+
+        case State::Option: {
+            if (value.kind == InputKind::None || keyword_is(value, "EXIT")) return Step::done();
+
+            if (keyword_is(value, "CLOSE") || keyword_is(value, "OPEN")) {
+                Polyline* p = target(ctx);
+                if (!p) return Step::failed("the polyline is gone");
+                if (!p->closed() && p->size() < 3) {
+                    return Step::failed("a polyline needs three vertices to close");
+                }
+                push_snapshot(ctx);
+                auto edited = static_cast<Polyline*>(p->clone().release());
+                edited->set_closed(!p->closed());
+                ctx.db.replace(handle_, EntityPtr(edited));
+                return ask_option(ctx);
+            }
+
+            if (keyword_is(value, "WIDTH")) {
+                state_ = State::WidthValue;
+                Prompt p;
+                p.kind = PromptKind::Distance;
+                p.message = "Enter new width for all segments";
+                return Step::ask(p);
+            }
+
+            if (keyword_is(value, "JOIN")) {
+                state_ = State::JoinSelect;
+                ctx.selection.clear();
+                return Step::ask(select_.prompt(ctx));
+            }
+
+            if (keyword_is(value, "UNDO")) return do_undo(ctx);
+
+            return Step::failed("unknown option");
+        }
+
+        case State::WidthValue: {
+            double w = 0.0;
+            if (!distance_from(value, Vec3{}, w)) return Step::failed("a width is required");
+            if (w < 0.0) return Step::failed("width must not be negative");
+
+            Polyline* p = target(ctx);
+            if (!p) return Step::failed("the polyline is gone");
+            push_snapshot(ctx);
+            auto edited = static_cast<Polyline*>(p->clone().release());
+            edited->set_uniform_width(w);
+            ctx.db.replace(handle_, EntityPtr(edited));
+            return ask_option(ctx);
+        }
+
+        case State::JoinSelect: {
+            const SelectionPrompter::Result r = select_.feed(ctx, value);
+            if (r == SelectionPrompter::Result::Rejected) {
+                return Step::failed("not a valid selection");
+            }
+            if (r == SelectionPrompter::Result::Selecting) {
+                return Step::ask(select_.prompt(ctx));
+            }
+            return do_join(ctx);
         }
     }
     return Step::failed("internal state error");
@@ -534,16 +1549,6 @@ Step MoveCommand::next(CommandContext& ctx, const InputValue& value) {
 }
 
 // --- ROTATE / SCALE / MIRROR ------------------------------------------------
-
-namespace {
-
-// The normal of the current construction plane. World Z until UCS exists; this
-// is the single place that has to learn about UCS later.
-Vec3 construction_normal() {
-    return kWorldZ;
-}
-
-}  // namespace
 
 const char* TransformCommand::name() const {
     switch (kind_) {
@@ -2075,6 +3080,12 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "LIST") return std::make_unique<ListCommand>();
     if (upper == "LTYPE") return std::make_unique<LtypeCommand>();
     if (upper == "PAN") return std::make_unique<PanCommand>();
+    if (upper == "PEDIT") return std::make_unique<PeditCommand>();
+    if (upper == "PLINE") return std::make_unique<PlineCommand>();
+    if (upper == "POINT") return std::make_unique<PointCommand>();
+    if (upper == "SOLID") return std::make_unique<SolidCommand>(false);
+    if (upper == "3DFACE") return std::make_unique<SolidCommand>(true);
+    if (upper == "TEXT") return std::make_unique<TextCommand>();
     if (upper == "PLAN") return std::make_unique<PlanCommand>();
     if (upper == "ZOOM") return std::make_unique<ZoomCommand>();
     if (upper == "MOVE") return std::make_unique<MoveCommand>(false);
@@ -2094,8 +3105,9 @@ const std::vector<std::string>& command_names() {
         "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
-        "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PLAN",  "REDO",  "ROTATE",
-        "ROTATE3D", "SCALE", "STRETCH", "UNDO", "ZOOM"};
+        "3DFACE",
+        "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
+        "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;
 }
 
@@ -2114,6 +3126,12 @@ const std::vector<CommandAlias>& command_aliases() {
         {"LI", "LIST"},
         {"CP", "COPY"},
         {"L", "LINE"},
+        {"PL", "PLINE"},
+        {"PO", "POINT"},
+        {"PE", "PEDIT"},
+        {"SO", "SOLID"},
+        {"DT", "TEXT"},
+        {"3F", "3DFACE"},
         {"M", "MOVE"},
         {"MI", "MIRROR"},
         {"RO", "ROTATE"},

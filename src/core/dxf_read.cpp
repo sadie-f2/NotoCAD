@@ -148,6 +148,12 @@ EntityPtr Reader::build_polyline(const EntityGroups& g, GroupStream& in, int& pe
 
     const Mat4 to_world = ecs_to_world(poly->props().normal);
 
+    // The header's groups 40 and 41 are the default widths for every vertex
+    // that does not carry its own. Reading them here rather than ignoring them
+    // is what stops a uniformly wide polyline coming back as a hairline.
+    const double default_start_width = g.real(40, 0.0);
+    const double default_end_width = g.real(41, 0.0);
+
     // VERTEX records follow until SEQEND. They are consumed here rather than
     // becoming entities, which is the storage decision: a mesh cannot afford
     // one database entity per vertex.
@@ -167,7 +173,9 @@ EntityPtr Reader::build_polyline(const EntityGroups& g, GroupStream& in, int& pe
 
         if (code == 0) {
             if (in_vertex) {
-                poly->add(to_world.transform_point(current.point(10)), current.real(42, 0.0));
+                poly->add(to_world.transform_point(current.point(10)), current.real(42, 0.0),
+                          current.real(40, default_start_width),
+                          current.real(41, default_end_width));
                 in_vertex = false;
             }
             if (value == "VERTEX") {
@@ -195,7 +203,9 @@ EntityPtr Reader::build_polyline(const EntityGroups& g, GroupStream& in, int& pe
         }
         if (in_vertex) current.groups.push_back({code, value});
     }
-    if (in_vertex) poly->add(to_world.transform_point(current.point(10)), current.real(42, 0.0));
+    if (in_vertex) poly->add(to_world.transform_point(current.point(10)), current.real(42, 0.0),
+                          current.real(40, default_start_width),
+                          current.real(41, default_end_width));
     return poly;
 }
 
@@ -257,6 +267,17 @@ EntityPtr Reader::build(const EntityGroups& g, GroupStream& in, int& pending_cod
         e->set_rotation(g.real(50) * kDegToRad);
         e->set_width_factor(g.real(41, 1.0));
         e->set_oblique(g.real(51) * kDegToRad);
+
+        // Justification. The group values are the enumerator values, but the
+        // file is not trusted to stay in range -- anything else falls back to
+        // the default rather than becoming an enumerator that does not exist.
+        const int h = to_int(g.text(72, "0"));
+        const int v = to_int(g.text(73, "0"));
+        e->set_align(h >= 0 && h <= 5 ? static_cast<TextHAlign>(h) : TextHAlign::Left,
+                     v >= 0 && v <= 3 ? static_cast<TextVAlign>(v) : TextVAlign::Baseline);
+        if (e->is_justified()) {
+            e->set_align_point(ecs_to_world(e->props().normal).transform_point(g.point(11)));
+        }
         return e;
     }
 

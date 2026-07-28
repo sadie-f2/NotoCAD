@@ -113,7 +113,8 @@ that seems broken to a user.
 
 The design consequence: `SelectionSet` must carry the crossing region's geometry, not
 only the handles. The question "which vertices move" is answered by the crossing
-rectangle, and that is not derivable from a set of entity handles.
+rectangle, and that is not derivable from a set of entity handles. *(Built —
+`SelectionRegion` in `selection.hpp`, one region, last one wins.)*
 
 *To verify before building:* AutoCAD is believed to honour only the **last** crossing
 window when deciding which points move, even after several selections. If that holds,
@@ -168,8 +169,8 @@ rather than guessing — the interface hides which one it is.
 | # | Phase | Why it sits here |
 |---|---|---|
 | 6 | View commands | *Mostly done.* ZOOM, PAN, PLAN and the inquiry commands are built, with transparent (`'ZOOM`) support. Still to write: VIEW (named views), REGEN, REDRAW, and ZOOM's Center, Left and Dynamic options. **VPOINT is deferred to phase 12**, since it is interpreted in the current CS and writing it against WCS only would mean writing it twice. |
-| 7 | Entity breadth | *Entities done.* POINT, SOLID, 3DFACE, TEXT and POLYLINE all exist, round-trip through DXF, and have left proxy status. Still to write: the PLINE, POINT, SOLID, 3DFACE and TEXT **commands**, and PEDIT. PDMODE and PDSIZE do not exist, so a POINT draws a fixed cross rather than R12's choice of marker. |
-| 7 | *(detail)* | PLINE, POINT, SOLID, 3DFACE, TEXT, then PEDIT. Forces the TEXT rendering decision (open question 2). Afterwards, selection, hit-testing, osnap, transforms and DXF are all exercised against a realistic entity set instead of Line/Circle/Arc. |
+| 7 | Entity breadth | *Done, apart from what is listed below.* The entities existed already; PLINE, POINT, SOLID, 3DFACE, TEXT and PEDIT are now the commands that make and edit them. **Not built:** PEDIT's `Edit vertex`, and its `Fit`/`Spline`/`Decurve` — see the curve-representation note below. PDMODE and PDSIZE do not exist, so a POINT draws a fixed cross rather than R12's choice of marker; TEXTSIZE does not exist either, so TEXT's height defaults to 1.0 rather than to the last one used. TEXT's `Style` option is absent because there is no STYLE table to choose from. |
+| 7 | *(detail)* | Done. Selection, hit-testing, osnap, transforms and DXF are now exercised against a realistic entity set rather than Line/Circle/Arc. The TEXT rendering decision (open question 2) is still open — the entity draws as a placeholder box, now correctly placed by its justification. |
 | 8 | Tables and settings | *Done, apart from UNITS.* LAYER, LTYPE with built-in patterns, dash rendering, COLOR, LTSCALE, LIMITS, and current entity properties. **UNITS is not built**: R12's is a page of report-format questions, and the formatting they control is hardcoded to four decimal places in DIST, ID, AREA and LIST. LUNITS/LUPREC/AUNITS/AUPREC do not exist yet. Also missing: LTYPE loading from a real `acad.lin`, and wildcards in layer and linetype names. |
 | 8 | *(detail)* | LAYER, LTYPE and dash rendering, COLOR, LTSCALE, UNITS, LIMITS. Linetypes touch three layers at once: the DXF table, dash generation in the render path, and LTSCALE — not just a table entry. |
 | 9 | DXF read and OPEN | *Done.* `dxf_read.hpp`, the `Proxy` entity, and DXFIN with OPEN as its alias. LINE, CIRCLE, ARC and POLYLINE become real entities; everything else becomes a proxy that writes back unchanged. **Not read yet:** the HEADER section's system variables (only `$ACADVER` is looked at), and the BLOCKS section — a file with blocks loses its definitions, though the INSERT entities referring to them survive as proxies. Both want doing before this is trusted with real drawings. |
@@ -381,7 +382,53 @@ the pick box, ordered topmost-first, plus somewhere to remember which one was of
 last so the next Ctrl+click moves on. The search itself is a small change —
 `pick_entity` already visits them all and simply returns early.
 
-## Known issues — reported, not yet diagnosed
+## PEDIT's curve options need a curve representation first
+
+`Fit curve`, `Spline curve` and `Decurve` are the three PEDIT options not built,
+and they are not command plumbing. R12 spells them as a flag on the polyline plus
+`SPLINETYPE` and `SPLINESEGS`, and `Decurve` has to put the original vertices
+back — so the polyline has to keep its control vertices alongside the fitted ones
+rather than replacing them.
+
+That is a storage decision of the same weight as the width one below, and it is
+the same question the splines note further down already raises. Worth settling
+both at once: the answer to "how does a polyline remember it is a spline" is the
+answer to both.
+
+`Edit vertex` is absent for a different reason — it is a nested prompt loop with
+ten options of its own, and its useful half is dragging vertices, which wants the
+interactive grip work that is still outstanding.
+
+Also absent, and smaller: PEDIT on a LINE or ARC offers to convert it into a
+one-segment polyline first. That is a creation path rather than an edit, and it
+wants deciding alongside the curve options.
+
+## Polyline width and text justification now have somewhere to live
+
+Both were added because a phase 7 command needed them and would otherwise have
+been offering an option with nowhere to put the answer.
+
+**`PolyVertex` carries `start_width` and `end_width`** — DXF groups 40 and 41,
+per vertex, belonging to the segment leaving that vertex. The reader applies the
+POLYLINE header's own 40/41 as defaults to any vertex without its own. Widths
+scale under `transform()`, on the same uniform-scale assumption the circular
+entities already make.
+
+*Not done:* the renderer ignores width entirely and draws a centreline. R12 with
+FILL off draws wide polylines as outlines, so this is a visible divergence rather
+than a hidden one, and it is display work rather than storage work.
+
+**`Text` carries `h_align`, `v_align` and `align_point`** — DXF groups 72, 73 and
+11. The enumerator values *are* the group values, so the writer needs no mapping
+table. Everything that has to agree about where a piece of text is — drawing, the
+bounding box, the INSERT snap, the grip — goes through `position_for_drawing()`
+and `box_origin()`, so they cannot drift apart.
+
+*Approximations, deliberate:* `Baseline` and `Bottom` are treated alike, because
+telling them apart needs a font's descender depth. `Align` and `Fit` solve for
+height and width factor respectively against `approximate_width()`, so both are
+as approximate as the placeholder metric is — and both become exact for free when
+the font question is settled.
 
 ## Known issues — reported, not yet diagnosed
 

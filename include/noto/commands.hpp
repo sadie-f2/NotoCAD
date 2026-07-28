@@ -13,6 +13,7 @@
 #pragma once
 
 #include "noto/command.hpp"
+#include "noto/entities.hpp"
 #include "noto/render.hpp"
 
 #include <string_view>
@@ -50,6 +51,182 @@ private:
     State state_{State::Centre};
     Vec3 centre_{};
     bool diameter_{false};
+};
+
+// PLINE: one polyline, grown a segment at a time.
+//
+// The longest state machine here, and all of it is R12's two prompts: a line
+// mode offering Arc/Close/Halfwidth/Length/Undo/Width, and an arc sub-mode
+// offering Angle/CEnter/CLose/Direction/Line/Radius/Second pt on top of the
+// same width and undo options. Each arc option is a different way of saying
+// the same thing -- an included angle -- so they all converge on one bulge.
+//
+// Unlike LINE, which adds one entity per segment, this builds a single entity
+// and replaces it as it grows. That is what makes Undo a vertex pop rather than
+// an entity erase, and it is why the polyline is added to the database as soon
+// as it has two vertices: committed work has to survive Escape, exactly as it
+// does in LINE, and an entity that only appears at the end would not.
+//
+// `Length` continues in the current direction -- along the last line segment,
+// or tangent to the last arc, which is the case that makes it worth having.
+class PlineCommand final : public Command {
+public:
+    const char* name() const override { return "PLINE"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t {
+        First,
+        Line,
+        Arc,
+        WidthStart,
+        WidthEnd,
+        HalfStart,
+        HalfEnd,
+        Length,
+        ArcAngle,
+        ArcAngleEnd,
+        ArcCentre,
+        ArcCentreEnd,
+        ArcRadius,
+        ArcRadiusEnd,
+        ArcSecond,
+        ArcSecondEnd,
+        ArcDirection,
+        ArcDirectionEnd,
+    };
+
+    Prompt line_prompt() const;
+    Prompt arc_prompt() const;
+    Prompt width_prompt(bool half, bool ending) const;
+
+    // Ask the question the current mode asks. Every option that finishes its
+    // job returns through here rather than rebuilding the prompt itself.
+    Step resume();
+
+    // Adds or replaces the entity so that what has been drawn so far is real.
+    void flush(CommandContext& ctx);
+
+    Step add_vertex(CommandContext& ctx, const Vec3& p, double included, bool is_arc);
+    Step close_it(CommandContext& ctx, bool with_arc);
+    Step undo_vertex(CommandContext& ctx);
+
+    const Vec3& current() const { return vertices_.back().pos; }
+
+    State state_{State::First};
+    bool arc_mode_{false};
+
+    std::vector<PolyVertex> vertices_;
+    Handle handle_{kNullHandle};
+
+    // The current widths, applied to each new segment as it is added.
+    double start_width_{0.0};
+    double end_width_{0.0};
+
+    // The direction the next arc leaves the current point in. Set from the last
+    // segment, and overridden by the arc sub-mode's Direction option.
+    Vec3 tangent_{1, 0, 0};
+    bool have_tangent_{false};
+
+    // Answers collected by the two-part arc options.
+    double pending_angle_{0.0};
+    double pending_radius_{0.0};
+    Vec3 pending_centre_{};
+    Vec3 pending_second_{};
+};
+
+// POINT: one location, and nothing else.
+//
+// R12 draws it per PDMODE and PDSIZE, neither of which exists here, so it
+// draws as a fixed cross. That is a rendering gap rather than a command one --
+// see SF_todo.md.
+class PointCommand final : public Command {
+public:
+    const char* name() const override { return "POINT"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
+// SOLID and 3DFACE: four corners, then four more, for as long as you keep
+// giving them.
+//
+// One class for both, because the prompt sequence is identical and the entity
+// class already is -- they differ in what the corners MEAN, which is settled by
+// the type enum and shows up only at DXF write time, where SOLID converts to
+// its own plane and 3DFACE does not.
+//
+// The continuation is the part worth getting right: after the fourth point R12
+// asks for a third and fourth again, and the previous third and fourth become
+// the new first and second. That is what makes it a strip rather than a series
+// of unrelated quadrilaterals, and it is why the corner order is the famous
+// across-the-shape one rather than a loop.
+class SolidCommand final : public Command {
+public:
+    explicit SolidCommand(bool face3d = false) : face3d_(face3d) {}
+
+    const char* name() const override { return face3d_ ? "3DFACE" : "SOLID"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { First, Second, Third, Fourth };
+
+    Prompt ask(const char* message, bool allow_empty) const;
+    void emit(CommandContext& ctx);
+
+    bool face3d_;
+    State state_{State::First};
+    Vec3 corner_[4]{};
+    // How many quadrilaterals have been committed, which is what decides
+    // whether Enter is "done" or "nothing drawn".
+    std::size_t emitted_{0};
+};
+
+// TEXT.
+//
+// The entity has existed since phase 7's entity work; this is the command that
+// makes one. R12's sequence is Justify/Style/<start point>, then height,
+// rotation and the string itself.
+//
+// Style is absent: there is no STYLE table yet, so offering the option would be
+// offering a question with one answer. Justify is present in full, which is why
+// Text grew groups 72, 73 and 11 -- without somewhere to store the answer the
+// option would be theatre.
+//
+// Align and Fit are the two modes that take a second point instead of a
+// rotation, and both need the string before they can be resolved: Align derives
+// the height from how much text has to span the distance, and Fit derives the
+// width factor instead. So the string is collected first and the geometry is
+// settled at the end, which is also the order R12 asks in.
+class TextCommand final : public Command {
+public:
+    const char* name() const override { return "TEXT"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t {
+        Start,
+        JustifyOption,
+        SecondPoint,  // Align and Fit
+        Height,
+        Rotation,
+        Value,
+    };
+
+    Step ask_height();
+    Step ask_rotation();
+    Step ask_value();
+    Step build(CommandContext& ctx, const std::string& value);
+
+    State state_{State::Start};
+    Vec3 start_{};
+    Vec3 second_{};
+    double height_{1.0};
+    double rotation_{0.0};
+    TextHAlign h_align_{TextHAlign::Left};
+    TextVAlign v_align_{TextVAlign::Baseline};
 };
 
 // "Select objects:" -- the whole of it, in one place.
@@ -113,6 +290,55 @@ public:
 
 private:
     SelectionPrompter select_;
+};
+
+// PEDIT: edit an existing polyline.
+//
+// R12's option list is Close/Join/Width/Edit vertex/Fit curve/Spline
+// curve/Decurve/Undo/eXit. Three of those are deliberately absent, and for two
+// different reasons:
+//
+//   Edit vertex is a nested prompt loop with ten options of its own -- a state
+//   machine inside a state machine -- and the useful half of it is dragging
+//   vertices, which wants the interactive grip work that is still outstanding.
+//
+//   Fit curve, Spline curve and Decurve are not command plumbing at all: they
+//   need a curve representation on the polyline itself. R12 spells them as a
+//   flag plus SPLINETYPE and SPLINESEGS, and Decurve has to restore the control
+//   vertices, so the polyline must keep them alongside the fitted ones. That is
+//   a storage decision of the same weight as the width one, and it belongs with
+//   the spline note in SF_todo.md rather than being settled in passing here.
+//
+// What is here is the half that edits the polyline as it stands: Close/Open,
+// Join, Width, Undo and eXit.
+//
+// Undo is PEDIT's own, not the drawing's: it steps back through this command's
+// edits while the command is still running, which is why it keeps a stack of
+// snapshots rather than leaning on UndoJournal. The whole PEDIT session is one
+// entry in the drawing's undo, exactly as R12 has it.
+class PeditCommand final : public Command {
+public:
+    const char* name() const override { return "PEDIT"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Select, Option, WidthValue, JoinSelect };
+
+    Step ask_option(CommandContext& ctx);
+    Polyline* target(CommandContext& ctx) const;
+
+    // Snapshots the polyline so PEDIT's own Undo can step back.
+    void push_snapshot(CommandContext& ctx);
+    Step do_undo(CommandContext& ctx);
+
+    Step do_join(CommandContext& ctx);
+
+    State state_{State::Select};
+    Handle handle_{kNullHandle};
+    SelectionPrompter select_;
+    std::vector<EntityPtr> snapshots_;
+    std::string note_;
 };
 
 // MOVE and COPY: select, then a base point, then a displacement.

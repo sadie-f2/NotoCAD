@@ -76,6 +76,12 @@ void Polyline::dxf_write(DxfWriter& w) const {
         w.code(5, w.handle_text(handle()));
         w.code(8, w.layer_name(*this));
         w.point(10, to_ecs.transform_point(v.pos));
+        // Widths are written per vertex rather than as the header's defaults,
+        // because a taper is a property of the segment and the header can only
+        // say one thing for the whole polyline. Omitted when zero, which is
+        // both the common case and R12's own default.
+        if (v.start_width != 0.0) w.code(40, v.start_width);
+        if (v.end_width != 0.0) w.code(41, v.end_width);
         if (v.bulge != 0.0) w.code(42, v.bulge);
     }
 

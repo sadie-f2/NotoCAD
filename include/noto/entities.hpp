@@ -139,9 +139,17 @@ private:
 // stores, and because it is the representation that survives editing: moving a
 // vertex keeps the arc's relationship to its neighbours without recomputing a
 // centre that might no longer exist.
+//
+// The widths are DXF groups 40 and 41, and they belong to the segment LEAVING
+// this vertex -- so a taper is expressed by one vertex's end width differing
+// from the next one's start width. Zero is R12's "no width", which draws as a
+// centreline; that is also what the wireframe display draws for any width, see
+// draw() for why.
 struct PolyVertex {
     Vec3 pos{};
     double bulge{0.0};
+    double start_width{0.0};
+    double end_width{0.0};
 };
 
 // POLYLINE.
@@ -158,7 +166,18 @@ public:
     const std::vector<PolyVertex>& vertices() const { return vertices_; }
     std::vector<PolyVertex>& vertices() { return vertices_; }
 
-    void add(const Vec3& p, double bulge = 0.0) { vertices_.push_back({p, bulge}); }
+    void add(const Vec3& p, double bulge = 0.0) { vertices_.push_back({p, bulge, 0.0, 0.0}); }
+    void add(const Vec3& p, double bulge, double start_width, double end_width) {
+        vertices_.push_back({p, bulge, start_width, end_width});
+    }
+
+    // PEDIT's Width: one width for every segment, which is the only width edit
+    // R12 offers outside the per-vertex editor.
+    void set_uniform_width(double w);
+
+    // True when any segment carries a width. The renderer asks, so that the
+    // common zero-width polyline costs nothing.
+    bool has_width() const;
 
     std::size_t size() const { return vertices_.size(); }
     bool empty() const { return vertices_.empty(); }
@@ -261,6 +280,30 @@ private:
     std::int16_t edge_flags_{0};
 };
 
+// TEXT justification. The enumerator values ARE the DXF group values -- 72 for
+// horizontal, 73 for vertical -- so the writer needs no mapping table and a
+// wrong one cannot drift into existence.
+//
+// Aligned and Fit are horizontal modes that R12 treats specially: both take two
+// points instead of a rotation, Aligned scaling the height to suit and Fit
+// squeezing the width factor instead. Stored so a file round-trips; the TEXT
+// command implements them as the two-point prompts they are.
+enum class TextHAlign : std::uint8_t {
+    Left = 0,
+    Center = 1,
+    Right = 2,
+    Aligned = 3,
+    Middle = 4,
+    Fit = 5,
+};
+
+enum class TextVAlign : std::uint8_t {
+    Baseline = 0,
+    Bottom = 1,
+    Middle = 2,
+    Top = 3,
+};
+
 // TEXT.
 //
 // The entity exists; the glyphs do not. R12 draws text with SHX vector fonts,
@@ -303,6 +346,35 @@ public:
     // is only used for the box and the bounding box.
     double approximate_width() const;
 
+    TextHAlign h_align() const { return h_align_; }
+    TextVAlign v_align() const { return v_align_; }
+    void set_align(TextHAlign h, TextVAlign v) {
+        h_align_ = h;
+        v_align_ = v;
+    }
+
+    // DXF group 11. R12 writes the insertion point twice for justified text:
+    // group 10 stays where it was and group 11 carries the point the
+    // justification is measured from. When the text is left-baseline -- the
+    // default and the common case -- there is no second point and group 10 is
+    // the whole story.
+    const Vec3& align_point() const { return align_point_; }
+    void set_align_point(const Vec3& p) { align_point_ = p; }
+
+    bool is_justified() const {
+        return h_align_ != TextHAlign::Left || v_align_ != TextVAlign::Baseline;
+    }
+
+    // Where the text actually sits: group 11 when justified, group 10 when not.
+    // Everything that has to agree about where the text IS -- drawing, the
+    // bounding box, the INSERT snap and the grip -- goes through this, so they
+    // cannot disagree.
+    const Vec3& position_for_drawing() const { return is_justified() ? align_point_ : pos_; }
+
+    // The lower-left corner of the placeholder box, in world space, with the
+    // justification applied.
+    Vec3 box_origin() const;
+
     EntityPtr clone() const override;
     void transform(const Mat4& m) override;
     BBox bbox() const override;
@@ -319,6 +391,9 @@ private:
     double rotation_{0.0};
     double width_factor_{1.0};
     double oblique_{0.0};
+    Vec3 align_point_{};
+    TextHAlign h_align_{TextHAlign::Left};
+    TextVAlign v_align_{TextVAlign::Baseline};
 };
 
 // One DXF group: a code and its value, kept as text.

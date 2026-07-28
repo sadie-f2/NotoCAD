@@ -75,6 +75,21 @@ inline int run_all() {
         if (!(expr)) ::nototest::fail(__FILE__, __LINE__, "CHECK(" #expr ")"); \
     } while (0)
 
+// Like CHECK, but abandons the rest of the case rather than carrying on into
+// code that the failed condition has just made unsafe -- a null pointer about
+// to be dereferenced, or a container about to be indexed past its end. doctest
+// and Catch2 both spell it this way, which is the point: test bodies stay
+// portable to either.
+//
+// It returns from the test function, so it is only valid at test-case scope.
+#define REQUIRE(expr)                                                       \
+    do {                                                                    \
+        if (!(expr)) {                                                      \
+            ::nototest::fail(__FILE__, __LINE__, "REQUIRE(" #expr ")");     \
+            return;                                                         \
+        }                                                                   \
+    } while (0)
+
 #define CHECK_NEAR(a, b, eps)                                               \
     do {                                                                    \
         const double a_ = (a), b_ = (b);                                    \
