@@ -106,7 +106,17 @@ std::vector<SubCurve> decompose(const Entity& e) {
                 SubCurve s;
                 s.t_lo = static_cast<double>(i) * step;
                 s.t_hi = static_cast<double>(i + 1) * step;
-                s.extendable = false;
+                // Only the TERMINAL segments of an open polyline have a
+                // carrier worth extending -- which is exactly what EXTEND grows.
+                // An interior segment's extension runs into its own neighbours
+                // and means nothing, and a closed polyline has no terminal
+                // segment at all.
+                //
+                // A hit found by extending a terminal segment inwards maps back
+                // to a parent parameter inside [0, 1], so it reads as an
+                // ordinary interior hit and EXTEND ignores it. The direction
+                // needs no separate guard.
+                s.extendable = !p.closed() && (i == 0 || i + 1 == n);
 
                 Vec3 centre{};
                 double radius = 0.0;

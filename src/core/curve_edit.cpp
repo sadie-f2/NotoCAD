@@ -199,6 +199,147 @@ EntityPtr extract_curve_span(const Entity& e, double ta, double tb) {
     }
 }
 
+bool trim_span(const Entity& e, std::vector<double> cuts, double at, double* lo, double* hi) {
+    if (!lo || !hi) return false;
+
+    std::sort(cuts.begin(), cuts.end());
+    // Two edges crossing at the same place are one cut. A zero-length stretch
+    // is not something to remove, and leaving duplicates in would let the pick
+    // fall "between" a cut and itself.
+    cuts.erase(std::unique(cuts.begin(), cuts.end(),
+                           [](double a, double b) { return std::abs(a - b) <= kSpanEps; }),
+               cuts.end());
+    if (cuts.empty()) return false;
+
+    if (curve_is_closed(e)) {
+        // No ends to bound the stretch, so it takes two cuts to isolate one.
+        if (cuts.size() < 2) return false;
+
+        for (std::size_t i = 0; i < cuts.size(); ++i) {
+            const double a = cuts[i];
+            const double b = (i + 1 < cuts.size()) ? cuts[i + 1] : cuts[0] + 1.0;
+            // The pick may sit in the stretch that wraps through the start, so
+            // it is tested lifted by a turn as well.
+            if ((at >= a && at <= b) || (at + 1.0 >= a && at + 1.0 <= b)) {
+                *lo = a;
+                *hi = (b > 1.0) ? b - 1.0 : b;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Open: the ends are cuts too, which is what lets a pick beyond the last
+    // intersection trim the overshoot.
+    double a = 0.0;
+    double b = 1.0;
+    for (const double c : cuts) {
+        if (c <= at && c > a) a = c;
+        if (c >= at && c < b) b = c;
+    }
+    if (b - a <= kSpanEps) return false;
+
+    *lo = a;
+    *hi = b;
+    return true;
+}
+
+EntityPtr extend_curve(const Entity& e, double t) {
+    // A closed curve has no end to grow.
+    if (curve_is_closed(e)) return nullptr;
+    if (t >= -kSpanEps && t <= 1.0 + kSpanEps) return nullptr;
+
+    const double lo = std::min(0.0, t);
+    const double hi = std::max(1.0, t);
+
+    switch (e.type()) {
+        case EntityType::Line: {
+            const Line& l = static_cast<const Line&>(e);
+            const Vec3 d = l.end() - l.start();
+            auto out = std::make_unique<Line>(l.start() + d * lo, l.start() + d * hi);
+            carry_properties(e, *out);
+            return out;
+        }
+
+        case EntityType::Arc: {
+            const Arc& a = static_cast<const Arc&>(e);
+            // Growing the sweep. Past a full turn the arc would swallow itself,
+            // which R12 does not allow either.
+            if ((hi - lo) * a.sweep() >= kTwoPi) return nullptr;
+            auto out = std::make_unique<Arc>(a.center(), a.radius(),
+                                             a.start_angle() + a.sweep() * lo,
+                                             a.start_angle() + a.sweep() * hi, a.props().normal);
+            carry_properties(e, *out);
+            return out;
+        }
+
+        case EntityType::Polyline: {
+            const Polyline& p = static_cast<const Polyline&>(e);
+            const std::size_t n = p.segment_count();
+            if (n == 0) return nullptr;
+
+            auto out = std::make_unique<Polyline>();
+            carry_properties(e, *out);
+            out->vertices() = p.vertices();
+
+            const double count = static_cast<double>(n);
+            if (t > 1.0) {
+                // The terminal segment grows past its end.
+                const std::size_t last = n - 1;
+                const double f = t * count - static_cast<double>(last);
+                const PolyVertex& v0 = p.vertices()[last];
+                const Vec3& p0 = v0.pos;
+
+                if (v0.bulge == 0.0) {
+                    const Vec3 d = p.vertices()[last + 1].pos - p0;
+                    out->vertices().back().pos = p0 + d * f;
+                } else {
+                    // An arc segment grows its included angle, so the bulge is
+                    // recomputed rather than kept, and the endpoint follows the
+                    // original arc round to the new angle.
+                    out->vertices()[last].bulge = partial_bulge(v0.bulge, 0.0, f);
+                    Vec3 centre{};
+                    double radius = 0.0;
+                    double a0 = 0.0;
+                    double a1 = 0.0;
+                    if (!p.segment_arc(last, &centre, &radius, &a0, &a1)) return nullptr;
+                    const Basis b = arbitrary_axis(p.props().normal);
+                    const double included = 4.0 * std::atan(v0.bulge);
+                    const double angle = a0 + included * f;
+                    out->vertices().back().pos =
+                        centre + (b.ax * std::cos(angle) + b.ay * std::sin(angle)) * radius;
+                }
+                return out;
+            }
+
+            // Below zero: the first segment grows backwards past its start.
+            const double f = t * count;
+            const PolyVertex& v0 = p.vertices()[0];
+
+            if (v0.bulge == 0.0) {
+                const Vec3 d = p.vertices()[1].pos - v0.pos;
+                out->vertices().front().pos = v0.pos + d * f;
+            } else {
+                Vec3 centre{};
+                double radius = 0.0;
+                double a0 = 0.0;
+                double a1 = 0.0;
+                if (!p.segment_arc(0, &centre, &radius, &a0, &a1)) return nullptr;
+                const Basis b = arbitrary_axis(p.props().normal);
+                const double included = 4.0 * std::atan(v0.bulge);
+                const double angle = a0 + included * f;
+                out->vertices().front().pos =
+                    centre + (b.ax * std::cos(angle) + b.ay * std::sin(angle)) * radius;
+                // The segment now spans [f, 1] of its original angle.
+                out->vertices().front().bulge = partial_bulge(v0.bulge, f, 1.0);
+            }
+            return out;
+        }
+
+        default: return nullptr;
+    }
+}
+
 std::size_t break_curve(const Entity& e, double t0, double t1, std::vector<EntityPtr>& out) {
     const std::size_t before = out.size();
 

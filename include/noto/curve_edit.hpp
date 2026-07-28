@@ -55,4 +55,33 @@ EntityPtr extract_curve_span(const Entity& e, double ta, double tb);
 // way -- there is nothing to open it at -- and yields nothing.
 std::size_t break_curve(const Entity& e, double t0, double t1, std::vector<EntityPtr>& out);
 
+// TRIM's question: which stretch of `e` does the pick at parameter `at` fall in,
+// given that the curve is cut at every parameter in `cuts`?
+//
+// That stretch is what TRIM removes. On an OPEN curve the ends count as cuts, so
+// picking beyond the outermost intersection trims the dangling tail -- which is
+// what makes TRIM useful for cleaning up overshoots and is most of what it is
+// used for. On a CLOSED curve there are no ends, so two cuts are the minimum and
+// the stretch is found by walking round; one cut leaves nothing to trim to and
+// is refused.
+//
+// `cuts` is taken by value and sorted internally. Duplicates -- two cutting
+// edges meeting the curve at the same place -- collapse, because a stretch of
+// zero length is not something to remove.
+//
+// False when there is no stretch to remove: no cuts at all, or a closed curve
+// with fewer than two.
+bool trim_span(const Entity& e, std::vector<double> cuts, double at, double* lo, double* hi);
+
+// `e` lengthened so its curve reaches parameter `t`, which lies outside [0, 1].
+//
+// EXTEND's half of the job. Which end grows follows from the sign: below zero
+// extends the start, above one extends the end. A LINE grows along itself, an
+// ARC grows its sweep, and a POLYLINE grows its terminal segment -- including
+// the bulge, when that segment is an arc.
+//
+// Null for a curve that cannot be extended: a CIRCLE or a closed POLYLINE has
+// no end to grow, and R12 refuses those too.
+EntityPtr extend_curve(const Entity& e, double t);
+
 }  // namespace noto

@@ -174,7 +174,7 @@ rather than guessing — the interface hides which one it is.
 | 8 | Tables and settings | *Done, apart from UNITS.* LAYER, LTYPE with built-in patterns, dash rendering, COLOR, LTSCALE, LIMITS, and current entity properties. **UNITS is not built**: R12's is a page of report-format questions, and the formatting they control is hardcoded to four decimal places in DIST, ID, AREA and LIST. LUNITS/LUPREC/AUNITS/AUPREC do not exist yet. Also missing: LTYPE loading from a real `acad.lin`, and wildcards in layer and linetype names. |
 | 8 | *(detail)* | LAYER, LTYPE and dash rendering, COLOR, LTSCALE, UNITS, LIMITS. Linetypes touch three layers at once: the DXF table, dash generation in the render path, and LTSCALE — not just a table entry. |
 | 9 | DXF read and OPEN | *Done.* `dxf_read.hpp`, the `Proxy` entity, and DXFIN with OPEN as its alias. LINE, CIRCLE, ARC, POLYLINE and INSERT become real entities; everything else becomes a proxy that writes back unchanged. **The BLOCKS gap is closed** — definitions are read, and an INSERT naming a block defined later still resolves, because inserts are fixed up in a second pass. **Still not read:** the HEADER section's system variables (only `$ACADVER` is looked at), so a file's OSMODE, LIMITS and INSBASE are ignored on the way in even though they are now written on the way out. |
-| 10 | Geometry editing | *In progress.* The kernel is built (`intersect.hpp`) and so are the cutting primitives (`curve_edit.hpp`). **BREAK is done.** Still to write: TRIM, EXTEND, OFFSET, FILLET, CHAMFER, CHANGE/CHPROP. |
+| 10 | Geometry editing | *Paused deliberately, not abandoned.* The kernel (`intersect.hpp`) and the cutting primitives (`curve_edit.hpp`) are built, and **BREAK, TRIM and EXTEND are done**. **OFFSET, FILLET and CHAMFER are deferred** — rarely used in Sadie's workflow and UCS-neutral, so they cost nothing to do later. **CHANGE/CHPROP is deferred on purpose until after UCS**: CHANGE's change point is interpreted in the current UCS, so writing it against WCS now would need revisiting rather than extending — the same trap VPOINT is held back from. |
 | 11 | Blocks | *Done.* BLOCK, INSERT, MINSERT, EXPLODE, WBLOCK and BASE, plus the BLOCKS section both ways. Open question 7 is answered below. **Not built:** ATTDEF/ATTRIB, and EXPLODE of a polyline. |
 | 12 | UCS | `CLAUDE.md` notes ECS is foundational and already in the kernel, but that UCS "has nowhere to live". This gives it one. |
 | 13 | Meshes and surfaces | PFACE, 3DMESH, RULESURF, TABSURF, REVSURF, EDGESURF; AutoLISP file I/O (`open`, `read-line` — `file_subrs.cpp` currently holds only `dxfout`); suppressed-regen batch mode for LISP loops. **The project's stated purpose.** |
@@ -489,6 +489,47 @@ Decisions worth not re-litigating:
 Not yet done: no spatial index, so `intersect` over a selection set is O(n^2) in
 the set's size. That is open question 5's problem and slots in behind this
 without changing the signature.
+
+## TRIM and EXTEND — and the carrier rule they refined
+
+One class for both, because they are the same command with the sign reversed:
+select edges, then pick objects until Enter, and each pick is answered by
+intersecting against every edge and acting on the parameters. TRIM removes the
+stretch the pick falls in; EXTEND grows the end the pick is nearest to.
+
+**The pick point is the argument, not a convenience.** "Trim this line" has no
+answer until you say which piece — a line crossing three edges has four. A typed
+handle is *refused* rather than guessed at, which is why `InputValue::has_point`
+earned its place in the BREAK commit.
+
+**Asymmetric intersection modes.** EXTEND asks about the target's carrier (that
+is the point — reaching a boundary the object stops short of) while requiring the
+boundary itself to be genuinely crossed. `IntersectMode::Extended` reports both
+and flags which, so the command filters on `within1` and ignores `within0`. No
+new mode was needed.
+
+**The rule that changed.** `intersect.hpp` originally said polyline segments are
+never extended, on the grounds that a polyline has no carrier. That is right for
+*interior* segments and wrong for terminal ones: the two end segments of an open
+polyline have perfectly good carriers, and growing one is exactly what EXTEND
+does to a polyline. So `extendable` is now `!closed && (first || last)`. A hit
+found by extending a terminal segment *inwards* maps back to a parent parameter
+inside [0, 1], so it reads as an ordinary interior hit and EXTEND ignores it —
+the direction needs no separate guard.
+
+Decisions worth not re-litigating:
+
+- **EXTEND reaches the first boundary, not the furthest.** R12's behaviour, and
+  the one that makes repeated EXTEND presses walk outwards predictably.
+- **Picking an object that meets no edge is not an error.** The command says
+  nothing and carries on asking, because picking a few misses mid-command is
+  ordinary. Only a pick with no location fails.
+- **Trimming past the outermost intersection removes the overshoot**, because an
+  open curve's ends count as cuts. A closed curve has no ends, hence its separate
+  rule and its two-cut minimum.
+- **Still true 3-space.** Two curves that merely cross on screen do not trim each
+  other. R12 has no PROJMODE — projecting the trim onto the view arrived with
+  R13 — so this is faithful rather than a limitation, and it is tested.
 
 ## BREAK, and the bug it found in the kernel
 

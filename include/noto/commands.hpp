@@ -683,6 +683,67 @@ private:
     Vec3 first_{};
 };
 
+// TRIM and EXTEND: the two commands that need both halves of phase 10's
+// foundation -- where curves meet, and what is left when one is cut or grown.
+//
+// One class for both, because they are the same command with the sign reversed.
+// Each selects a set of edges, then picks objects one at a time until Enter, and
+// each pick is answered by intersecting the picked object against every edge and
+// acting on the parameters that come back. What differs is which side of the
+// intersections is acted on: TRIM removes the stretch the pick falls in, EXTEND
+// grows the end the pick is nearest to. Writing them apart would be writing the
+// edge selection, the pick loop and the undo twice.
+//
+// THE PICK POINT IS THE ARGUMENT. Both commands are meaningless without it --
+// "trim this line" has no answer until you say which piece, and a line crossing
+// three edges has four pieces. That is what InputValue::has_point exists for,
+// and a typed handle is refused here rather than guessed at.
+//
+// R12's Undo option steps back one object at a time within the command, the
+// same shape PEDIT's own Undo has and for the same reason: the whole command is
+// one entry in the drawing's undo.
+//
+// Intersections are true 3-space, as everywhere else here. R12 has no PROJMODE
+// -- projecting the trim onto the current view arrived with R13 -- so two curves
+// that merely cross on screen do not trim each other, and that is correct
+// rather than a limitation.
+class TrimCommand final : public Command {
+public:
+    explicit TrimCommand(bool extend = false) : extend_(extend) {}
+
+    const char* name() const override { return extend_ ? "EXTEND" : "TRIM"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { SelectingEdges, Picking };
+
+    Prompt pick_prompt() const;
+    Step act_on(CommandContext& ctx, Handle target, const Vec3& at);
+
+    // Every parameter on `target` where a selected edge crosses it.
+    void cut_parameters(CommandContext& ctx, const Entity& target,
+                        std::vector<double>& out) const;
+
+    bool extend_;
+    State state_{State::SelectingEdges};
+    SelectionPrompter select_;
+
+    // The edges, kept as handles because the selection set is reused by the
+    // pick loop and must not be disturbed by it.
+    std::vector<Handle> edges_;
+
+    // Snapshots for the command's own Undo, newest last. Each is what the
+    // drawing held before one object was acted on.
+    struct Applied {
+        Handle target{kNullHandle};
+        EntityPtr before;
+        std::vector<Handle> added;
+    };
+    std::vector<Applied> history_;
+    std::size_t changed_{0};
+};
+
 // LAYER: R12's table editor, as one prompt that loops until Enter.
 //
 // ?/Make/Set/New/ON/OFF/Color/Ltype/Freeze/Thaw. Most options take a layer name

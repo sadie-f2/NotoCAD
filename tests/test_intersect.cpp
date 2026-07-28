@@ -378,16 +378,72 @@ TEST_CASE("intersect: a hit on a clockwise segment reports the parameter it is a
     CHECK(near_equal(back, hits[0].point, 1e-7));
 }
 
-TEST_CASE("intersect: a polyline's own segments are never extended") {
-    // A line that misses the polyline but would meet the carrier of one of its
-    // segments. Extended must still decline, because a polyline has no carrier.
+namespace {
+
+// A staple: up the left side, across the top, down the right. Both terminal
+// segments are vertical, so a vertical probe is parallel to their carriers and
+// cannot reach them -- which is what lets the interior segment be tested alone.
+Polyline staple() {
+    Polyline p;
+    p.add({0, 0, 0});
+    p.add({0, 10, 0});
+    p.add({10, 10, 0});
+    p.add({10, 0, 0});
+    return p;
+}
+
+}  // namespace
+
+TEST_CASE("intersect: an interior polyline segment has no carrier to extend") {
+    // The crossbar runs along y = 10 from x = 0 to 10. Its carrier would reach
+    // x = 25, but an interior segment's extension runs into its own neighbours
+    // and means nothing, so Extended declines.
+    //
+    // The two terminal segments are vertical and the probe is vertical, so
+    // their carriers are parallel to it and cannot contribute a hit -- leaving
+    // the crossbar as the only candidate.
+    const Polyline p = staple();
+    Line probe{{25, 9, 0}, {25, 11, 0}};
+
+    IntersectionList hits;
+    CHECK(intersect(p, probe, IntersectMode::Extended, hits) == 0);
+}
+
+TEST_CASE("intersect: a terminal polyline segment does extend, which is what EXTEND needs") {
+    // The right-hand leg runs down from (10,10) to (10,0). Its carrier reaches
+    // y = -20, and growing exactly that is what EXTEND does to a polyline.
+    const Polyline p = staple();
+    Line below{{9, -20, 0}, {11, -20, 0}};
+
+    IntersectionList hits;
+    intersect(p, below, IntersectMode::Extended, hits);
+
+    // The left leg's carrier reaches y = -20 as well, at x = 0 -- but that is
+    // off the probe as drawn, so it comes back flagged rather than filtered.
+    // What matters is that the right leg's extension is found and is beyond
+    // the end of the polyline.
+    bool found = false;
+    for (const Intersection& h : hits) {
+        if (!h.within1) continue;  // not on the boundary as drawn
+        CHECK(near_equal(h.point, Vec3{10, -20, 0}, 1e-7));
+        CHECK(h.t0 > 1.0);
+        CHECK(!h.within0);
+        found = true;
+    }
+    CHECK(found);
+}
+
+TEST_CASE("intersect: a closed polyline has no terminal segment to extend") {
     Polyline p;
     p.add({0, 0, 0});
     p.add({10, 0, 0});
-    Line l{{20, -5, 0}, {20, 5, 0}};
+    p.add({10, 10, 0});
+    p.set_closed(true);
+
+    Line beyond{{30, -5, 0}, {30, 5, 0}};
 
     IntersectionList hits;
-    CHECK(intersect(p, l, IntersectMode::Extended, hits) == 0);
+    CHECK(intersect(p, beyond, IntersectMode::Extended, hits) == 0);
 }
 
 TEST_CASE("intersect: two polylines meet at every crossing") {

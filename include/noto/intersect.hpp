@@ -58,9 +58,11 @@ enum class IntersectMode : std::uint8_t {
     // extension, an arc becomes its whole circle. What TRIM and EXTEND want,
     // because "extend this line to that arc" is a question about carriers.
     //
-    // Polyline segments are never extended, in either mode. A polyline's
-    // carrier is not a well-defined curve -- an interior segment's extension
-    // means nothing -- so its segments are always taken as drawn.
+    // A polyline extends only at its TERMINAL segments, and only when it is
+    // open. An interior segment's extension runs into its own neighbours and
+    // means nothing, and a closed polyline has no free end -- but the two end
+    // segments do have carriers, and growing one is precisely what EXTEND does
+    // to a polyline.
     Extended,
 };
 

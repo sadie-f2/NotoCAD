@@ -1080,6 +1080,184 @@ Step BreakCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- TRIM and EXTEND --------------------------------------------------------
+
+Step TrimCommand::start(CommandContext& ctx) {
+    Prompt p = select_.prompt(ctx);
+    p.message = extend_ ? "Select boundary edges" : "Select cutting edges";
+    return Step::ask(p);
+}
+
+Prompt TrimCommand::pick_prompt() const {
+    Prompt p;
+    p.kind = PromptKind::Entity;
+    p.message = extend_ ? "Select object to extend" : "Select object to trim";
+    p.allow_empty = true;  // Enter ends the command
+    if (!history_.empty()) p.keywords.push_back("Undo");
+    return p;
+}
+
+void TrimCommand::cut_parameters(CommandContext& ctx, const Entity& target,
+                                 std::vector<double>& out) const {
+    for (const Handle h : edges_) {
+        const Entity* edge = ctx.db.get(h);
+        // An edge may have been trimmed away by an earlier pick in this same
+        // command, which is legal and common.
+        if (!edge || edge == &target) continue;
+
+        IntersectionList hits;
+        // EXTEND asks about the target's carrier -- that is the whole point,
+        // reaching a boundary the object stops short of -- while the boundary
+        // itself must really be crossed. Extended mode reports both and flags
+        // which, so the filter below keeps only what landed on the edge.
+        intersect(target, *edge, extend_ ? IntersectMode::Extended : IntersectMode::Bounded,
+                  hits);
+
+        for (const Intersection& hit : hits) {
+            if (!hit.within1) continue;  // not actually on the edge as drawn
+            if (!extend_ && !hit.within0) continue;  // TRIM cuts only where it is
+            out.push_back(hit.t0);
+        }
+    }
+}
+
+Step TrimCommand::act_on(CommandContext& ctx, Handle target, const Vec3& at) {
+    const Entity* e = ctx.db.get(target);
+    if (!e) return Step::failed("no such entity");
+
+    double pick = 0.0;
+    if (!curve_parameter_at(*e, at, &pick)) {
+        return Step::failed(extend_ ? "that object cannot be extended"
+                                    : "that object cannot be trimmed");
+    }
+
+    std::vector<double> cuts;
+    cut_parameters(ctx, *e, cuts);
+    if (cuts.empty()) {
+        // Not a failure: R12 says so and carries on asking, because picking a
+        // few objects that do not meet the edges is an ordinary thing to do
+        // mid-command.
+        return Step::ask(pick_prompt());
+    }
+
+    Applied record;
+    record.target = target;
+    record.before = e->clone();
+
+    if (extend_) {
+        // Which end grows follows from where the pick was: the nearer one.
+        // Then, among the intersections beyond that end, the closest wins --
+        // R12 extends to the FIRST boundary reached, not the furthest.
+        const bool grow_end = pick >= 0.5;
+        bool found = false;
+        double best = 0.0;
+        for (const double t : cuts) {
+            if (grow_end && t > 1.0 + 1e-9) {
+                if (!found || t < best) {
+                    best = t;
+                    found = true;
+                }
+            } else if (!grow_end && t < -1e-9) {
+                if (!found || t > best) {
+                    best = t;
+                    found = true;
+                }
+            }
+        }
+        if (!found) return Step::ask(pick_prompt());  // nothing to reach
+
+        EntityPtr grown = extend_curve(*e, best);
+        if (!grown) return Step::ask(pick_prompt());
+        ctx.db.replace(target, std::move(grown));
+    } else {
+        double lo = 0.0;
+        double hi = 0.0;
+        if (!trim_span(*e, cuts, pick, &lo, &hi)) return Step::ask(pick_prompt());
+
+        std::vector<EntityPtr> pieces;
+        break_curve(*e, lo, hi, pieces);
+
+        if (pieces.empty()) {
+            // Trimmed away entirely -- every part of it was between edges.
+            ctx.db.erase(target);
+        } else {
+            ctx.db.replace(target, std::move(pieces[0]));
+            for (std::size_t i = 1; i < pieces.size(); ++i) {
+                record.added.push_back(ctx.db.add(std::move(pieces[i])));
+            }
+        }
+    }
+
+    history_.push_back(std::move(record));
+    ++changed_;
+    return Step::ask(pick_prompt());
+}
+
+Step TrimCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::SelectingEdges: {
+            const SelectionPrompter::Result r = select_.feed(ctx, value);
+            if (r == SelectionPrompter::Result::Rejected) {
+                return Step::failed("not a valid selection");
+            }
+            if (r == SelectionPrompter::Result::Selecting) {
+                Prompt p = select_.prompt(ctx);
+                p.message = extend_ ? "Select boundary edges" : "Select cutting edges";
+                return Step::ask(p);
+            }
+
+            if (ctx.selection.empty()) {
+                return Step::failed(extend_ ? "no boundary edges selected"
+                                            : "no cutting edges selected");
+            }
+            // Copied out, because the pick loop below is about to reuse the
+            // selection set and the edges have to outlive that.
+            edges_.assign(ctx.selection.handles().begin(), ctx.selection.handles().end());
+            ctx.selection.clear();
+
+            state_ = State::Picking;
+            return Step::ask(pick_prompt());
+        }
+
+        case State::Picking: {
+            if (value.kind == InputKind::None) {
+                if (changed_ == 0) return Step::done();
+                return Step::done(std::to_string(changed_) +
+                                  (extend_ ? " extended" : " trimmed"));
+            }
+
+            if (keyword_is(value, "UNDO")) {
+                if (history_.empty()) return Step::failed("nothing to undo");
+                Applied& last = history_.back();
+                // Anything the trim split off goes first, then the original is
+                // put back under its own handle.
+                for (const Handle h : last.added) ctx.db.erase(h);
+                if (ctx.db.get(last.target)) {
+                    ctx.db.replace(last.target, std::move(last.before));
+                } else {
+                    // It was trimmed away entirely, so it has to be restored
+                    // rather than replaced.
+                    ctx.db.add(std::move(last.before));
+                }
+                history_.pop_back();
+                if (changed_ > 0) --changed_;
+                return Step::ask(pick_prompt());
+            }
+
+            if (value.kind != InputKind::Entity) return Step::failed("select an object");
+            if (!value.has_point) {
+                // Without a location there is no answer: a line crossing three
+                // edges has four pieces, and which one was meant is exactly
+                // what the pick point says.
+                return Step::failed(extend_ ? "point at the end to extend"
+                                            : "point at the piece to trim");
+            }
+            return act_on(ctx, value.entity, value.point);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
 // --- BLOCK ------------------------------------------------------------------
 
 Step BlockCommand::start(CommandContext&) {
@@ -3630,6 +3808,8 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "PAN") return std::make_unique<PanCommand>();
     if (upper == "BASE") return std::make_unique<BaseCommand>();
     if (upper == "BREAK") return std::make_unique<BreakCommand>();
+    if (upper == "TRIM") return std::make_unique<TrimCommand>(false);
+    if (upper == "EXTEND") return std::make_unique<TrimCommand>(true);
     if (upper == "BLOCK") return std::make_unique<BlockCommand>();
     if (upper == "EXPLODE") return std::make_unique<ExplodeCommand>();
     if (upper == "INSERT") return std::make_unique<InsertCommand>(false);
@@ -3660,7 +3840,7 @@ const std::vector<std::string>& command_names() {
         "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
-        "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "INSERT", "MINSERT", "WBLOCK",
+        "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
         "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;
@@ -3686,6 +3866,8 @@ const std::vector<CommandAlias>& command_aliases() {
         {"PE", "PEDIT"},
         {"B", "BLOCK"},
         {"BR", "BREAK"},
+        {"TR", "TRIM"},
+        {"EX", "EXTEND"},
         {"I", "INSERT"},
         {"X", "EXPLODE"},
         {"W", "WBLOCK"},
