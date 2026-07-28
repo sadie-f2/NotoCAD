@@ -162,6 +162,22 @@ rather than guessing — the interface hides which one it is.
 
 ---
 
+## Known issues — reported, not yet diagnosed
+
+**TAN snaps to a circle that is not in the drawing plane.** Reported from the viewport,
+2026-07-28. It only fails when the circle is *perfectly orthogonal* to the drawing
+plane. Not investigated and not fixed.
+
+Two readings, and which one it is has not been decided: it may be defensible behaviour
+for a 3D kernel, since a tangent to an edge-on circle is a real construction in space.
+But it is definitively not what AutoCAD does, and matching R12 is the project's
+standard. Settle the intent before touching the code — this could as easily end as a
+documented divergence as a bug fix.
+
+Start here: `tangent_points()` in `osnap_derived.hpp` projects the reference point into
+the entity's plane before solving, which is exactly the step that degenerates when the
+plane is edge-on. That is a lead, not a diagnosis.
+
 ## Open architectural questions
 
 Recorded so they get decided rather than drifted into.
