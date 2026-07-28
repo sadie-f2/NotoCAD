@@ -416,9 +416,20 @@ Recorded so they get decided rather than drifted into.
    `CLAUDE.md`'s "rendering the same database two ways is a correctness check worth
    having". Gates phase 7 and anything dimension-adjacent.
 
-3. **Where dash generation lives.** In the core, so QPainter and a future GL backend
-   share one path, or in each backend. The former matches the flattening rationale
-   already stated in `render.hpp`.
+3. **Where dash generation lives — settled: a wrapper `Renderer` in the core.**
+
+   `Entity::draw()` keeps emitting solid polylines. A `DashRenderer` sits between
+   `draw_database()` and the real backend, cutting runs into dashes and passing them
+   through, so QPainter and a future GL backend share one implementation.
+
+   The reason it is a wrapper rather than something `draw()` does: hit-testing and
+   region selection both run through `Entity::draw()` —`entity_pick_distance` and
+   `entity_crosses_region` each drive it with their own probe. If `draw()` emitted
+   dashes, the probes would see the gaps, and a dashed line could not be picked
+   between its dashes or caught by a crossing window through one. AutoCAD picks a
+   dashed line anywhere along it. A wrapper gets this right by construction, because
+   the probes simply do not wrap; a flag on `DrawContext` would get it right only as
+   long as every probe remembered to set it.
 
 4. **`CommandContext` widening.** It stays narrow through 4a and 4b. The selection set
    is the first legitimate new member, in phase 5 — which is what its own header
