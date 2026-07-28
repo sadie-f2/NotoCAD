@@ -115,6 +115,35 @@ private:
     SelectionPrompter select_;
 };
 
+// MOVE and COPY: select, then a base point, then a displacement.
+//
+// One class for both, because they differ in exactly one line -- whether the
+// entity is transformed in place or a transformed clone is added. Writing them
+// twice would be writing the selection and displacement handling twice, and the
+// second copy is where they would drift apart.
+//
+// The second prompt takes R12's "<displacement>" shortcut: Enter at the second
+// point means the first point WAS the displacement vector, measured from the
+// origin. It is a real R12 idiom and costs one branch.
+class MoveCommand : public Command {
+public:
+    explicit MoveCommand(bool copy = false) : copy_(copy) {}
+
+    const char* name() const override { return copy_ ? "COPY" : "MOVE"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Selecting, Base, Displacement };
+
+    Step apply(CommandContext& ctx, const Vec3& delta);
+
+    bool copy_;
+    State state_{State::Selecting};
+    SelectionPrompter select_;
+    Vec3 base_{};
+};
+
 // DXFOUT: prompt for a file name and write the drawing. In R12 this is a
 // command, and it only lived as a LISP function because the command layer did
 // not exist yet. The (dxfout ...) function stays -- scripts want it -- but this

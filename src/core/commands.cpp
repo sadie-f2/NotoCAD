@@ -362,6 +362,83 @@ Step RedoCommand::next(CommandContext&, const InputValue&) {
     return Step::failed("REDO takes no input");
 }
 
+// --- MOVE / COPY ------------------------------------------------------------
+
+Step MoveCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
+
+Step MoveCommand::apply(CommandContext& ctx, const Vec3& delta) {
+    const Mat4 m = Mat4::translation(delta);
+
+    // Snapshotted, because COPY adds to the database while iterating it and a
+    // fresh clone must not then be copied again.
+    const std::vector<Handle> handles = ctx.selection.handles();
+
+    std::size_t n = 0;
+    for (const Handle h : handles) {
+        const Entity* e = ctx.db.get(h);
+        if (!e) continue;  // erased since selection; skip rather than fail
+
+        EntityPtr moved = e->clone();
+        moved->transform(m);
+
+        // The one line that differs. MOVE replaces in place so the handle
+        // survives -- AutoLISP may be holding it, and undo records the swap.
+        if (copy_) {
+            ctx.db.add(std::move(moved));
+        } else {
+            ctx.db.replace(h, std::move(moved));
+        }
+        ++n;
+    }
+
+    return Step::done(std::to_string(n) + (copy_ ? " copied" : " moved"));
+}
+
+Step MoveCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Selecting: {
+            switch (select_.feed(ctx, value)) {
+                case SelectionPrompter::Result::Selecting:
+                    return Step::ask(select_.prompt(ctx));
+                case SelectionPrompter::Result::Rejected:
+                    return Step::failed("an entity is required");
+                case SelectionPrompter::Result::Finished:
+                    break;
+            }
+            if (ctx.selection.empty()) return Step::done("Nothing selected");
+
+            state_ = State::Base;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Base point or displacement";
+            return Step::ask(p);
+        }
+
+        case State::Base: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            base_ = value.point;
+            state_ = State::Displacement;
+
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Second point of displacement";
+            p.allow_empty = true;  // Enter means the base point was the vector
+            p.base = base_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::Displacement: {
+            // R12's "<displacement>": Enter here means the first point was the
+            // vector itself, measured from the origin.
+            if (value.kind == InputKind::None) return apply(ctx, base_);
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            return apply(ctx, value.point - base_);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
 // --- DXFOUT -----------------------------------------------------------------
 
 Step DxfOutCommand::start(CommandContext&) {
@@ -392,14 +469,16 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "CIRCLE") return std::make_unique<CircleCommand>();
     if (upper == "ERASE") return std::make_unique<EraseCommand>();
     if (upper == "DXFOUT") return std::make_unique<DxfOutCommand>();
+    if (upper == "MOVE") return std::make_unique<MoveCommand>(false);
+    if (upper == "COPY") return std::make_unique<MoveCommand>(true);
     if (upper == "UNDO") return std::make_unique<UndoCommand>();
     if (upper == "REDO") return std::make_unique<RedoCommand>();
     return nullptr;
 }
 
 const std::vector<std::string>& command_names() {
-    static const std::vector<std::string> names = {"CIRCLE", "DXFOUT", "ERASE",
-                                                  "LINE",   "REDO",   "UNDO"};
+    static const std::vector<std::string> names = {"CIRCLE", "COPY", "DXFOUT", "ERASE",
+                                                  "LINE",   "MOVE", "REDO",   "UNDO"};
     return names;
 }
 
@@ -408,7 +487,9 @@ const std::vector<CommandAlias>& command_aliases() {
     static const std::vector<CommandAlias> aliases = {
         {"C", "CIRCLE"},
         {"E", "ERASE"},
+        {"CP", "COPY"},
         {"L", "LINE"},
+        {"M", "MOVE"},
         {"U", "UNDO"},
     };
     return aliases;
