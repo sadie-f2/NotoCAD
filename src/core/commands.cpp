@@ -49,6 +49,20 @@ bool angle_from(const InputValue& v, const Vec3& base, double& out) {
     return false;
 }
 
+// Like distance_from, but keeps the sign of a typed number. ARRAY needs it:
+// a negative row distance arrays downward rather than upward.
+bool signed_distance_from(const InputValue& v, const Vec3& base, double& out) {
+    if (v.kind == InputKind::Real || v.kind == InputKind::Integer) {
+        out = (v.kind == InputKind::Real) ? v.real : static_cast<double>(v.integer);
+        return true;
+    }
+    if (v.kind == InputKind::Point) {
+        out = length(v.point - base);
+        return true;
+    }
+    return false;
+}
+
 bool distance_from(const InputValue& v, const Vec3& base, double& out) {
     if (v.kind == InputKind::Real || v.kind == InputKind::Integer) {
         out = (v.kind == InputKind::Real) ? v.real : static_cast<double>(v.integer);
@@ -644,6 +658,239 @@ Step TransformCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- ARRAY ------------------------------------------------------------------
+
+Step ArrayCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
+
+std::size_t ArrayCommand::place(CommandContext& ctx, const Mat4& m) {
+    // Snapshotted: this adds to the database while walking the selection, and a
+    // fresh copy must not become an item of the array in its own right.
+    const std::vector<Handle> handles = ctx.selection.handles();
+
+    std::size_t n = 0;
+    for (const Handle h : handles) {
+        const Entity* e = ctx.db.get(h);
+        if (!e) continue;
+        EntityPtr copy = e->clone();
+        copy->transform(m);
+        ctx.db.add(std::move(copy));
+        ++n;
+    }
+    return n;
+}
+
+Step ArrayCommand::ask_rows() {
+    state_ = State::Rows;
+    Prompt p;
+    p.kind = PromptKind::Integer;
+    p.message = "Number of rows (---) <1>";
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step ArrayCommand::ask_columns() {
+    state_ = State::Columns;
+    Prompt p;
+    p.kind = PromptKind::Integer;
+    p.message = "Number of columns (|||) <1>";
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step ArrayCommand::ask_spacing(bool rows) {
+    state_ = rows ? State::RowSpacing : State::ColumnSpacing;
+    Prompt p;
+    p.kind = PromptKind::Distance;
+    p.message = rows ? "Distance between rows (---)" : "Distance between columns (|||)";
+    return Step::ask(p);
+}
+
+Step ArrayCommand::build_rectangular(CommandContext& ctx) {
+    std::size_t n = 0;
+    for (std::int32_t r = 0; r < rows_; ++r) {
+        for (std::int32_t c = 0; c < columns_; ++c) {
+            // The original is the item at (0,0); it is already in the drawing.
+            if (r == 0 && c == 0) continue;
+            const Vec3 delta{column_spacing_ * c, row_spacing_ * r, 0.0};
+            n += place(ctx, Mat4::translation(delta));
+        }
+    }
+    return Step::done(std::to_string(n) + " added");
+}
+
+Step ArrayCommand::build_polar(CommandContext& ctx) {
+    // Spacing between items. A full circle divides by the count so the last item
+    // does not land on the first; a partial fill divides by one less so the
+    // first and last sit on the ends of the arc.
+    //
+    // NOTE: that rule is the sensible reading and is not verified against the
+    // R12 documentation -- flagged in SF_todo.md.
+    const double two_pi = 2.0 * std::numbers::pi;
+    const bool full = std::abs(std::abs(fill_) - two_pi) < 1e-9;
+    const double step =
+        full ? fill_ / count_ : (count_ > 1 ? fill_ / (count_ - 1) : 0.0);
+
+    std::size_t n = 0;
+    for (std::int32_t i = 1; i < count_; ++i) {
+        n += place(ctx, Mat4::rotation(centre_, kWorldZ, step * i));
+    }
+    return Step::done(std::to_string(n) + " added");
+}
+
+Step ArrayCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Selecting: {
+            switch (select_.feed(ctx, value)) {
+                case SelectionPrompter::Result::Selecting:
+                    return Step::ask(select_.prompt(ctx));
+                case SelectionPrompter::Result::Rejected:
+                    return Step::failed("an entity is required");
+                case SelectionPrompter::Result::Finished:
+                    break;
+            }
+            if (ctx.selection.empty()) return Step::done("Nothing selected");
+
+            state_ = State::Type;
+            Prompt p;
+            p.kind = PromptKind::String;
+            p.message = "Rectangular or Polar array (R/P) <R>";
+            p.keywords = {"Rectangular", "Polar"};
+            p.allow_empty = true;
+            return Step::ask(p);
+        }
+
+        case State::Type: {
+            if (keyword_is(value, "POLAR")) {
+                state_ = State::Centre;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Center point of array";
+                return Step::ask(p);
+            }
+            // Enter or R: rectangular, which is R12's default.
+            if (value.kind != InputKind::None && !keyword_is(value, "RECTANGULAR")) {
+                return Step::failed("answer R or P");
+            }
+            return ask_rows();
+        }
+
+        case State::Rows: {
+            rows_ = (value.kind == InputKind::None) ? 1 : value.integer;
+            if (value.kind != InputKind::None && value.kind != InputKind::Integer) {
+                return Step::failed("a number is required");
+            }
+            if (rows_ < 1) return Step::failed("row count must be positive");
+            return ask_columns();
+        }
+
+        case State::Columns: {
+            columns_ = (value.kind == InputKind::None) ? 1 : value.integer;
+            if (value.kind != InputKind::None && value.kind != InputKind::Integer) {
+                return Step::failed("a number is required");
+            }
+            if (columns_ < 1) return Step::failed("column count must be positive");
+            // One row by one column is the drawing as it stands.
+            if (rows_ == 1 && columns_ == 1) return Step::done("0 added");
+            // R12 skips a spacing it cannot use.
+            if (rows_ == 1) return ask_spacing(false);
+            return ask_spacing(true);
+        }
+
+        case State::RowSpacing: {
+            // Signed: a negative distance arrays downward, which is how you
+            // array below the original rather than above it.
+            if (!signed_distance_from(value, Vec3{0, 0, 0}, row_spacing_)) {
+                return Step::failed("a distance is required");
+            }
+            if (columns_ == 1) return build_rectangular(ctx);
+            return ask_spacing(false);
+        }
+
+        case State::ColumnSpacing: {
+            if (!signed_distance_from(value, Vec3{0, 0, 0}, column_spacing_)) {
+                return Step::failed("a distance is required");
+            }
+            return build_rectangular(ctx);
+        }
+
+        case State::Centre: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            centre_ = value.point;
+            state_ = State::Count;
+
+            Prompt p;
+            p.kind = PromptKind::Integer;
+            p.message = "Number of items";
+            return Step::ask(p);
+        }
+
+        case State::Count: {
+            if (value.kind != InputKind::Integer) return Step::failed("a number is required");
+            count_ = value.integer;
+            if (count_ < 1) return Step::failed("item count must be positive");
+            state_ = State::Fill;
+
+            Prompt p;
+            p.kind = PromptKind::Angle;
+            p.message = "Angle to fill (+=ccw, -=cw) <360>";
+            p.allow_empty = true;
+            p.base = centre_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::Fill: {
+            if (value.kind == InputKind::None) {
+                fill_ = 2.0 * std::numbers::pi;
+            } else if (!angle_from(value, centre_, fill_)) {
+                return Step::failed("an angle is required");
+            }
+            if (fill_ == 0.0) return Step::failed("angle to fill cannot be zero");
+
+            state_ = State::RotateItems;
+            Prompt p;
+            p.kind = PromptKind::String;
+            p.message = "Rotate objects as they are copied? <Y>";
+            p.keywords = {"Yes", "No"};
+            p.allow_empty = true;
+            return Step::ask(p);
+        }
+
+        case State::RotateItems: {
+            const bool rotate = (value.kind == InputKind::None) || keyword_is(value, "YES");
+            if (!rotate && !keyword_is(value, "NO")) return Step::failed("answer Yes or No");
+            if (rotate) return build_polar(ctx);
+
+            // Not rotating: each item keeps its orientation while its position
+            // travels the arc. The point that follows the arc is the selection's
+            // bounding-box centre -- R12 uses an object base point, which for
+            // these entity types amounts to the same idea.
+            //
+            // NOTE: which reference point R12 actually uses is unverified; see
+            // SF_todo.md.
+            BBox extent;
+            for (const Handle h : ctx.selection.handles()) {
+                const Entity* e = ctx.db.get(h);
+                if (e) extent.expand(e->bbox());
+            }
+            if (!extent.valid()) return Step::done("0 added");
+            const Vec3 ref = extent.center();
+
+            const double two_pi = 2.0 * std::numbers::pi;
+            const bool full = std::abs(std::abs(fill_) - two_pi) < 1e-9;
+            const double step = full ? fill_ / count_ : (count_ > 1 ? fill_ / (count_ - 1) : 0.0);
+
+            std::size_t n = 0;
+            for (std::int32_t i = 1; i < count_; ++i) {
+                const Mat4 r = Mat4::rotation(centre_, kWorldZ, step * i);
+                n += place(ctx, Mat4::translation(r.transform_point(ref) - ref));
+            }
+            return Step::done(std::to_string(n) + " added");
+        }
+    }
+    return Step::failed("internal state error");
+}
+
 // --- DXFOUT -----------------------------------------------------------------
 
 Step DxfOutCommand::start(CommandContext&) {
@@ -674,6 +921,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "CIRCLE") return std::make_unique<CircleCommand>();
     if (upper == "ERASE") return std::make_unique<EraseCommand>();
     if (upper == "DXFOUT") return std::make_unique<DxfOutCommand>();
+    if (upper == "ARRAY") return std::make_unique<ArrayCommand>();
     if (upper == "MOVE") return std::make_unique<MoveCommand>(false);
     if (upper == "ROTATE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Rotate);
     if (upper == "SCALE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Scale);
@@ -685,9 +933,9 @@ CommandPtr make_command(std::string_view name) {
 }
 
 const std::vector<std::string>& command_names() {
-    static const std::vector<std::string> names = {"CIRCLE", "COPY",   "DXFOUT", "ERASE",
-                                                  "LINE",   "MIRROR", "MOVE",   "REDO",
-                                                  "ROTATE", "SCALE",  "UNDO"};
+    static const std::vector<std::string> names = {"ARRAY",  "CIRCLE", "COPY",  "DXFOUT",
+                                                  "ERASE",  "LINE",   "MIRROR", "MOVE",
+                                                  "REDO",   "ROTATE", "SCALE", "UNDO"};
     return names;
 }
 
@@ -696,6 +944,7 @@ const std::vector<CommandAlias>& command_aliases() {
     static const std::vector<CommandAlias> aliases = {
         {"C", "CIRCLE"},
         {"E", "ERASE"},
+        {"AR", "ARRAY"},
         {"CP", "COPY"},
         {"L", "LINE"},
         {"M", "MOVE"},

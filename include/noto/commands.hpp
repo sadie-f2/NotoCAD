@@ -186,6 +186,54 @@ private:
     Vec3 mirror_second_{};
 };
 
+// ARRAY: rectangular or polar, following R12's prompt sequence.
+//
+// The longest command here by some way, and it is all prompt sequencing --
+// every item is one transform of the selection, so the geometry is the same
+// translate-or-rotate the other editing commands use.
+class ArrayCommand final : public Command {
+public:
+    const char* name() const override { return "ARRAY"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t {
+        Selecting,
+        Type,
+        Rows,
+        Columns,
+        RowSpacing,
+        ColumnSpacing,
+        Centre,
+        Count,
+        Fill,
+        RotateItems,
+    };
+
+    Step ask_rows();
+    Step ask_columns();
+    Step ask_spacing(bool rows);
+    Step build_rectangular(CommandContext& ctx);
+    Step build_polar(CommandContext& ctx);
+
+    // One copy of the whole selection, transformed. The originals are left
+    // alone; the item at index zero of an array is the original itself.
+    std::size_t place(CommandContext& ctx, const Mat4& m);
+
+    State state_{State::Selecting};
+    SelectionPrompter select_;
+
+    std::int32_t rows_{1};
+    std::int32_t columns_{1};
+    double row_spacing_{0.0};
+    double column_spacing_{0.0};
+
+    Vec3 centre_{};
+    std::int32_t count_{0};
+    double fill_{0.0};
+};
+
 // DXFOUT: prompt for a file name and write the drawing. In R12 this is a
 // command, and it only lived as a LISP function because the command layer did
 // not exist yet. The (dxfout ...) function stays -- scripts want it -- but this

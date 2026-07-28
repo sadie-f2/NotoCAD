@@ -23,6 +23,7 @@ add_executable(noto_tests
   test_selection.cpp
   test_move.cpp
   test_transform.cpp
+  test_array.cpp
   test_render.cpp
   test_viewport.cpp
 )

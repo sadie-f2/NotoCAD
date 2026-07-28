@@ -222,6 +222,21 @@ forwarding, where the current no-feedback behaviour is *faster*. Whatever is dra
 should be cheap — outline only, no fill — and probably switchable, since the remote
 case is a real working mode rather than an edge case.
 
+## ARRAY details taken from reasoning, not from the R12 manual
+
+Two behaviours in polar ARRAY were implemented as the sensible reading and want
+checking against the documentation:
+
+- **Item spacing.** A full 360° fill divides the angle by the item count, so the last
+  item does not land on the first. A partial fill divides by one less, so the first and
+  last sit on the ends of the arc. Both are defensible; whether R12 does the second is
+  unverified.
+- **The reference point when items are not rotated.** Each item keeps its orientation
+  while its position travels the arc, and the point that follows the arc is the
+  selection's bounding-box centre. R12 uses an object base point, which for LINE,
+  CIRCLE and ARC amounts to much the same thing but will diverge for TEXT and INSERT,
+  where the base point is a defined property rather than a derived one.
+
 ## Known issues — reported, not yet diagnosed
 
 ## Known issues — reported, not yet diagnosed
