@@ -1038,8 +1038,8 @@ Step StretchCommand::next(CommandContext& ctx, const InputValue& value) {
 namespace {
 
 // R12 takes comma-separated names and wildcards at these prompts. Only the
-// comma-separated part is here; wildcards want a matcher that LTYPE and PURGE
-// will both want too, so they wait until there is a second caller.
+// comma-separated part is here; wildcards want a matcher that PURGE will want
+// too, so they wait until there is a second caller.
 std::vector<std::string> split_names(const std::string& text) {
     std::vector<std::string> out;
     std::string current;
@@ -1229,6 +1229,174 @@ Step LayerCommand::next(CommandContext& ctx, const InputValue& value) {
             return apply_to_names(ctx, value.text);
         }
     }
+}
+
+// --- LTYPE ------------------------------------------------------------------
+
+bool builtin_linetype(std::string_view name, std::string& description,
+                      std::vector<double>& pattern) {
+    // Straight out of R12's acad.lin. Positive is a dash, negative a gap, zero
+    // a dot -- the same convention the file uses and that Linetype stores.
+    struct Def {
+        const char* name;
+        const char* description;
+        std::initializer_list<double> pattern;
+    };
+    static const Def kDefs[] = {
+        {"CONTINUOUS", "Solid line", {}},
+        {"DASHED", "Dashed __ __ __ __ __ __ __ __ __ __", {0.5, -0.25}},
+        {"HIDDEN", "Hidden __ __ __ __ __ __ __ __ __ __", {0.25, -0.125}},
+        {"CENTER", "Center ____ _ ____ _ ____ _ ____", {1.25, -0.25, 0.25, -0.25}},
+        {"PHANTOM", "Phantom ____ _ _ ____ _ _ ____", {1.25, -0.25, 0.25, -0.25, 0.25, -0.25}},
+        {"DOT", "Dot . . . . . . . . . . . . . . . .", {0.0, -0.25}},
+        {"DASHDOT", "Dash dot __ . __ . __ . __ . __", {0.5, -0.25, 0.0, -0.25}},
+        {"DIVIDE", "Divide __ . . __ . . __ . . __", {0.5, -0.25, 0.0, -0.25, 0.0, -0.25}},
+        {"BORDER", "Border __ __ . __ __ . __ __", {0.5, -0.25, 0.5, -0.25, 0.0, -0.25}},
+    };
+
+    const std::string upper = upcase(name);
+    for (const Def& d : kDefs) {
+        if (upper == d.name) {
+            description = d.description;
+            pattern.assign(d.pattern.begin(), d.pattern.end());
+            return true;
+        }
+    }
+    return false;
+}
+
+Step LtypeCommand::ask_option(CommandContext&) {
+    state_ = State::Option;
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "?/Create/Load/Set";
+    p.keywords = {"?", "Create", "Load", "Set"};
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step LtypeCommand::start(CommandContext& ctx) { return ask_option(ctx); }
+
+Step LtypeCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Option: {
+            if (value.kind == InputKind::None) return Step::done(report_);
+
+            if (keyword_is(value, "?")) {
+                std::string list;
+                for (const Linetype& lt : ctx.db.linetypes()) {
+                    if (!list.empty()) list += "\n";
+                    list += lt.name + "  " + lt.description;
+                }
+                report_ = list;
+                return ask_option(ctx);
+            }
+            if (keyword_is(value, "LOAD")) {
+                state_ = State::LoadName;
+                Prompt p;
+                p.kind = PromptKind::String;
+                p.message = "Linetype(s) to load";
+                return Step::ask(p);
+            }
+            if (keyword_is(value, "SET")) {
+                state_ = State::SetName;
+                Prompt p;
+                p.kind = PromptKind::String;
+                p.message = "New entity linetype (or ?) <BYLAYER>";
+                p.allow_empty = true;
+                return Step::ask(p);
+            }
+            if (keyword_is(value, "CREATE")) {
+                state_ = State::CreateName;
+                Prompt p;
+                p.kind = PromptKind::String;
+                p.message = "Name of linetype to create";
+                return Step::ask(p);
+            }
+            return Step::failed("unknown option");
+        }
+
+        case State::LoadName: {
+            if (value.kind != InputKind::String) return Step::failed("a linetype name is required");
+            std::size_t loaded = 0;
+            for (const std::string& name : split_names(value.text)) {
+                std::string description;
+                std::vector<double> pattern;
+                if (!builtin_linetype(name, description, pattern)) {
+                    report_ = "Linetype " + name + " is not defined";
+                    continue;
+                }
+                ctx.db.add_linetype(name, description, std::move(pattern));
+                ++loaded;
+            }
+            if (loaded != 0) report_ = std::to_string(loaded) + " loaded";
+            return ask_option(ctx);
+        }
+
+        case State::SetName: {
+            // Enter or BYLAYER means new entities follow their layer, which is
+            // the default and the thing you go back to.
+            if (value.kind == InputKind::None) {
+                ctx.db.sysvars().set_string(Sysvar::CELtype, "BYLAYER");
+                return ask_option(ctx);
+            }
+            if (value.kind != InputKind::String) return Step::failed("a linetype name is required");
+
+            const std::string name = upcase(value.text);
+            if (name == "BYLAYER" || name == "BYBLOCK") {
+                ctx.db.sysvars().set_string(Sysvar::CELtype, name);
+                return ask_option(ctx);
+            }
+            if (ctx.db.find_linetype(name) == kInvalidLinetype) {
+                report_ = "Linetype " + name + " not loaded";
+                return ask_option(ctx);
+            }
+            ctx.db.sysvars().set_string(Sysvar::CELtype, name);
+            return ask_option(ctx);
+        }
+
+        case State::CreateName: {
+            if (value.kind != InputKind::String) return Step::failed("a linetype name is required");
+            pending_name_ = upcase(value.text);
+            state_ = State::CreatePattern;
+
+            Prompt p;
+            p.kind = PromptKind::String;
+            p.message = "Pattern (e.g. .5,-.25)";
+            return Step::ask(p);
+        }
+
+        case State::CreatePattern: {
+            if (value.kind != InputKind::String) return Step::failed("a pattern is required");
+
+            std::vector<double> pattern;
+            std::string token;
+            const std::string text = value.text + ",";
+            for (const char c : text) {
+                if (c == ',' || c == ' ') {
+                    if (!token.empty()) {
+                        try {
+                            pattern.push_back(std::stod(token));
+                        } catch (...) {
+                            // Exceptions are not control flow in this program;
+                            // this one is caught at the boundary and turned
+                            // into a status, which is the rule.
+                            return Step::failed("pattern must be numbers separated by commas");
+                        }
+                        token.clear();
+                    }
+                } else {
+                    token.push_back(c);
+                }
+            }
+            if (pattern.empty()) return Step::failed("pattern must not be empty");
+
+            ctx.db.add_linetype(pending_name_, "Created by LTYPE", std::move(pattern));
+            report_ = pending_name_ + " created";
+            return ask_option(ctx);
+        }
+    }
+    return Step::failed("internal state error");
 }
 
 // --- PLAN -------------------------------------------------------------------
@@ -1582,6 +1750,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "ID") return std::make_unique<IdCommand>();
     if (upper == "LAYER") return std::make_unique<LayerCommand>();
     if (upper == "LIST") return std::make_unique<ListCommand>();
+    if (upper == "LTYPE") return std::make_unique<LtypeCommand>();
     if (upper == "PAN") return std::make_unique<PanCommand>();
     if (upper == "PLAN") return std::make_unique<PlanCommand>();
     if (upper == "ZOOM") return std::make_unique<ZoomCommand>();
@@ -1599,7 +1768,7 @@ CommandPtr make_command(std::string_view name) {
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
         "AREA", "ARRAY", "CIRCLE",  "COPY", "DIST",    "DXFOUT",  "ERASE", "ID",
-        "LAYER", "LINE", "LIST",  "MIRROR",  "MOVE", "PAN",    "PLAN",   "REDO",   "ROTATE",
+        "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PLAN",  "REDO",  "ROTATE",
         "SCALE", "STRETCH", "UNDO", "ZOOM"};
     return names;
 }
@@ -1615,6 +1784,7 @@ const std::vector<CommandAlias>& command_aliases() {
         {"P", "PAN"},
         {"Z", "ZOOM"},
         {"LA", "LAYER"},
+        {"LT", "LTYPE"},
         {"LI", "LIST"},
         {"CP", "COPY"},
         {"L", "LINE"},

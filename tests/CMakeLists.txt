@@ -30,6 +30,7 @@ add_executable(noto_tests
   test_view.cpp
   test_polyline.cpp
   test_layer.cpp
+  test_dash.cpp
   test_render.cpp
   test_viewport.cpp
 )

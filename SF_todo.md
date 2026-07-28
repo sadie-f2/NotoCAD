@@ -329,6 +329,19 @@ core stays headless either way.
 
 Also not implemented: `ssget` fence mode `"F"`, and filter lists on `"X"`.
 
+## CONTINUOUS currently doubles as BYLAYER
+
+`EntityProps::linetype` defaults to `kLinetypeContinuous`, and `DashRenderer` treats
+that as "take the layer's linetype". Nothing can yet express an entity that is
+explicitly continuous while sitting on a dashed layer, because there is no BYLAYER
+marker distinct from the CONTINUOUS table entry.
+
+It matters as soon as DXF read lands: an R12 file records the string `BYLAYER` in group
+6, and an entity that says `CONTINUOUS` means it. The fix is a reserved id — a
+`kLinetypeByLayer` sentinel that resolves at render time — and it is small, but it
+changes what a default-constructed `EntityProps` means, so it wants doing deliberately
+rather than in passing.
+
 ## Known issues — reported, not yet diagnosed
 
 ## Known issues — reported, not yet diagnosed

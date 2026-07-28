@@ -3,6 +3,7 @@
 
 #include "viewport_widget.hpp"
 
+#include "noto/dash.hpp"
 #include "noto/database.hpp"
 #include "noto/pick.hpp"
 #include "noto/scene.hpp"
@@ -339,10 +340,14 @@ void ViewportWidget::paintEvent(QPaintEvent*) {
     painter.setRenderHint(QPainter::Antialiasing, true);
 
     QPainterRenderer renderer(painter, viewport_, db_);
+    // Dashes are cut here, between the scene walk and the backend, so QPainter
+    // and a future GL backend share one implementation -- and so the hit-test
+    // probes, which drive Entity::draw() directly, never see the gaps.
+    DashRenderer dashed(renderer, db_, db_.sysvars().get_real(Sysvar::LtScale));
     // The tolerance comes from the viewport, so tessellation tracks zoom: the
     // same circle costs eight segments across three pixels and hundreds across
     // the whole window.
-    draw_database(db_, viewport_.draw_context(), renderer);
+    draw_database(db_, viewport_.draw_context(), dashed);
 
     draw_rubber_band(painter);
     draw_osnap_marker(painter);

@@ -301,6 +301,33 @@ private:
     std::string report_;
 };
 
+// LTYPE: ?/Create/Load/Set.
+//
+// R12's Load reads definitions out of acad.lin. There is no such file here, so
+// Load draws from a small built-in table of the standard R12 patterns instead --
+// honest about what it is, and a .lin parser can replace it without the command
+// changing. Create defines one inline from a pattern the user types.
+class LtypeCommand final : public Command {
+public:
+    const char* name() const override { return "LTYPE"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Option, LoadName, SetName, CreateName, CreatePattern };
+
+    Step ask_option(CommandContext& ctx);
+
+    State state_{State::Option};
+    std::string pending_name_;
+    std::string report_;
+};
+
+// The standard R12 linetype definitions, as `acad.lin` would supply them.
+// Returns false for a name that is not one of them.
+bool builtin_linetype(std::string_view name, std::string& description,
+                      std::vector<double>& pattern);
+
 // PLAN: look straight down at the construction plane.
 //
 // R12 asks <Current UCS>/Ucs/World. Until UCS exists all three answers name the
