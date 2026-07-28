@@ -100,10 +100,12 @@ bool distance_from(const InputValue& v, const Vec3& base, double& out) {
     return false;
 }
 
-// The normal of the current construction plane. World Z until UCS exists; this
-// is the single place that has to learn about UCS later.
-Vec3 construction_normal() {
-    return kWorldZ;
+// The normal of the current construction plane.
+//
+// This was the seam CLAUDE.md named, and it turned out to be exactly that: it
+// returned world Z, it now asks the drawing, and no caller changed.
+Vec3 construction_normal(const CommandContext& ctx) {
+    return ctx.db.construction_normal();
 }
 
 // Signed angle from `a` to `b` measured about `n`, in (-pi, pi]. The sign is
@@ -228,7 +230,12 @@ Step CircleCommand::next(CommandContext& ctx, const InputValue& value) {
             const double radius = diameter_ ? d * 0.5 : d;
             if (radius <= 0.0) return Step::failed("radius must be positive");
 
-            ctx.db.add(with_current_props(ctx.db, std::make_unique<Circle>(centre_, radius)));
+            // In the construction plane, not world XY. Without this a circle
+            // drawn in a tilted UCS would look right on screen and serialise
+            // with the wrong extrusion -- which is the failure that shows up
+            // only when the file is opened somewhere else.
+            ctx.db.add(with_current_props(
+                ctx.db, std::make_unique<Circle>(centre_, radius, construction_normal(ctx))));
             return Step::done();
         }
     }
@@ -293,6 +300,9 @@ void PlineCommand::flush(CommandContext& ctx) {
 
     auto poly = std::make_unique<Polyline>();
     poly->vertices() = vertices_;
+    // The bulge arithmetic is measured in this plane, so it has to be the one
+    // the arcs were computed against.
+    poly->props().normal = construction_normal(ctx);
 
     if (handle_ == kNullHandle) {
         handle_ = ctx.db.add(with_current_props(ctx.db, std::move(poly)));
@@ -318,7 +328,7 @@ Step PlineCommand::add_vertex(CommandContext& ctx, const Vec3& p, double include
     // than kink at every vertex.
     if (is_arc) {
         const Vec3 t = have_tangent_ ? tangent_ : normalize(p - from);
-        tangent_ = normalize(rotate_about(t, construction_normal(), included));
+        tangent_ = normalize(rotate_about(t, construction_normal(ctx), included));
     } else {
         const Vec3 d = p - from;
         if (!is_zero(d)) tangent_ = normalize(d);
@@ -338,7 +348,7 @@ Step PlineCommand::close_it(CommandContext& ctx, bool with_arc) {
     if (with_arc && have_tangent_) {
         const Vec3 chord = to - from;
         if (!is_zero(chord)) {
-            included = 2.0 * signed_angle(tangent_, normalize(chord), construction_normal());
+            included = 2.0 * signed_angle(tangent_, normalize(chord), construction_normal(ctx));
         }
     }
     vertices_.back().bulge = with_arc ? bulge_from_included(included) : 0.0;
@@ -347,6 +357,7 @@ Step PlineCommand::close_it(CommandContext& ctx, bool with_arc) {
 
     auto poly = std::make_unique<Polyline>();
     poly->vertices() = vertices_;
+    poly->props().normal = construction_normal(ctx);
     poly->set_closed(true);
     if (handle_ == kNullHandle) {
         ctx.db.add(with_current_props(ctx.db, std::move(poly)));
@@ -485,7 +496,7 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
             if (is_zero(chord)) return Step::failed("zero-length arc");
             double included = 0.0;
             if (have_tangent_) {
-                included = 2.0 * signed_angle(tangent_, normalize(chord), construction_normal());
+                included = 2.0 * signed_angle(tangent_, normalize(chord), construction_normal(ctx));
             }
             // With no previous segment there is no tangent to continue, so the
             // arc degenerates to a straight segment rather than guessing.
@@ -575,7 +586,7 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
             // endpoint for when the major arc is wanted; the minor arc is what
             // an endpoint alone means.
             const double included =
-                signed_angle(normalize(from), normalize(to), construction_normal());
+                signed_angle(normalize(from), normalize(to), construction_normal(ctx));
             if (std::abs(included) < 1e-12) return Step::failed("degenerate arc");
             return add_vertex(ctx, value.point, included, true);
         }
@@ -607,7 +618,7 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
             // Which of the two ways round: follow the current tangent when
             // there is one, so a run of arcs keeps its sense.
             if (have_tangent_ &&
-                signed_angle(tangent_, normalize(chord), construction_normal()) < 0.0) {
+                signed_angle(tangent_, normalize(chord), construction_normal(ctx)) < 0.0) {
                 included = -included;
             }
             return add_vertex(ctx, value.point, included, true);
@@ -634,7 +645,7 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
             const Vec3 a = pending_second_ - current();
             const Vec3 b = value.point - pending_second_;
             if (is_zero(a) || is_zero(b)) return Step::failed("degenerate arc");
-            const Vec3 n = construction_normal();
+            const Vec3 n = construction_normal(ctx);
             const double turn = signed_angle(normalize(a), normalize(b), n);
             if (std::abs(turn) < 1e-12) return Step::failed("three points are collinear");
             // The inscribed-angle relation: the turn between the two chords is
@@ -645,7 +656,7 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
         case State::ArcDirection: {
             double dir = 0.0;
             if (!angle_from(value, current(), dir)) return Step::failed("an angle is required");
-            tangent_ = normalize(rotate_about(Vec3{1, 0, 0}, construction_normal(), dir));
+            tangent_ = normalize(rotate_about(Vec3{1, 0, 0}, construction_normal(ctx), dir));
             have_tangent_ = true;
             state_ = State::ArcDirectionEnd;
             Prompt p;
@@ -661,7 +672,7 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
             const Vec3 chord = value.point - current();
             if (is_zero(chord)) return Step::failed("zero-length arc");
             const double included =
-                2.0 * signed_angle(tangent_, normalize(chord), construction_normal());
+                2.0 * signed_angle(tangent_, normalize(chord), construction_normal(ctx));
             return add_vertex(ctx, value.point, included, true);
         }
     }
@@ -696,6 +707,10 @@ Prompt SolidCommand::ask(const char* message, bool allow_empty) const {
 void SolidCommand::emit(CommandContext& ctx) {
     auto e = std::make_unique<Face>(face3d_ ? EntityType::Face3d : EntityType::Solid);
     for (int i = 0; i < 4; ++i) e->set_corner(i, corner_[i]);
+    // A SOLID is a filled shape in its own plane and stores ECS coordinates; a
+    // 3DFACE is a face in space and stores world ones. Only the first has a
+    // construction plane to inherit.
+    if (!face3d_) e->props().normal = construction_normal(ctx);
     ctx.db.add(with_current_props(ctx.db, std::move(e)));
     ++emitted_;
 }
@@ -825,6 +840,7 @@ Step TextCommand::build(CommandContext& ctx, const std::string& value) {
     if (value.empty()) return Step::done();  // R12 draws nothing for empty text
 
     auto text = std::make_unique<Text>(start_, value, height_);
+    text->props().normal = construction_normal(ctx);
     text->set_rotation(rotation_);
     text->set_align(h_align_, v_align_);
     if (text->is_justified()) text->set_align_point(start_);
@@ -1078,6 +1094,336 @@ Step BreakCommand::next(CommandContext& ctx, const InputValue& value) {
         }
     }
     return Step::failed("internal state error");
+}
+
+// --- UCS --------------------------------------------------------------------
+
+namespace {
+
+// The UCS a previous UCS command left behind. R12 remembers one per drawing,
+// which is what its Prev option restores.
+//
+// A file-scope value rather than a member of CommandContext or the engine: it
+// is the same shape of problem ROTATE3D's Last axis has, and it wants the same
+// decision rather than two different ones. Recorded in SF_todo.md.
+Ucs& previous_ucs_slot() {
+    static Ucs previous;
+    return previous;
+}
+
+}  // namespace
+
+Step UcsCommand::ask_option(CommandContext&) {
+    state_ = State::Option;
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Origin/ZAxis/3point/Entity/View/X/Y/Z/Prev/Restore/Save/Del/?/<World>";
+    p.allow_empty = true;  // Enter is World
+    p.keywords = {"Origin", "ZAxis", "3point", "Entity", "View",    "X",   "Y",
+                  "Z",      "Prev",  "Restore", "Save",   "Delete", "?",   "World"};
+    return Step::ask(p);
+}
+
+// `u` is taken BY VALUE deliberately. The Prev option passes the remembered
+// frame, and the first thing this does is overwrite that same slot -- through a
+// reference the argument would alias it and Prev would restore the frame it was
+// leaving rather than the one before it.
+Step UcsCommand::adopt(CommandContext& ctx, Ucs u, const std::string& name) {
+    previous_ucs_slot() = ctx.db.current_ucs();
+    ctx.db.set_current_ucs(u, name);
+
+    // UCSFOLLOW: switch to a plan view of the new system automatically. Only
+    // possible where there is a view at all, which `ncad` has not.
+    if (ctx.db.sysvars().get_int(Sysvar::UcsFollow) != 0 && ctx.view) {
+        ctx.view->set_plan_view(ctx.db.construction_normal());
+    }
+    return Step::done();
+}
+
+Step UcsCommand::start(CommandContext& ctx) { return ask_option(ctx); }
+
+Step UcsCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Option: {
+            // Enter is World, which is R12's default answer and the one you
+            // want most often -- getting back to a known frame.
+            if (value.kind == InputKind::None || keyword_is(value, "WORLD")) {
+                return adopt(ctx, Ucs{}, "");
+            }
+
+            if (keyword_is(value, "PREV")) {
+                return adopt(ctx, previous_ucs_slot(), "");
+            }
+
+            if (keyword_is(value, "VIEW")) {
+                if (!ctx.view) return Step::failed("no view");
+                // A frame facing the viewer, with its X axis across the screen.
+                // What it is FOR is annotation: text placed in it reads flat
+                // however the model is oriented.
+                const Basis b = ctx.view->view_basis();
+                Ucs u;
+                u.origin = ctx.db.current_ucs().origin;
+                u.xdir = b.ax;
+                u.ydir = b.ay;
+                return adopt(ctx, u, "");
+            }
+
+            if (keyword_is(value, "ORIGIN")) {
+                state_ = State::OriginPoint;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Origin point";
+                return Step::ask(p);
+            }
+
+            if (keyword_is(value, "ZAXIS")) {
+                state_ = State::ZAxisOrigin;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Origin point";
+                return Step::ask(p);
+            }
+
+            if (keyword_is(value, "3POINT")) {
+                state_ = State::ThreeOrigin;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Origin point";
+                return Step::ask(p);
+            }
+
+            if (keyword_is(value, "ENTITY")) {
+                state_ = State::EntityPick;
+                Prompt p;
+                p.kind = PromptKind::Entity;
+                p.message = "Select object to align UCS";
+                return Step::ask(p);
+            }
+
+            if (keyword_is(value, "X") || keyword_is(value, "Y") || keyword_is(value, "Z")) {
+                const Ucs current = ctx.db.current_ucs();
+                if (keyword_is(value, "X")) rotate_axis_ = current.xdir;
+                else if (keyword_is(value, "Y")) rotate_axis_ = current.ydir;
+                else rotate_axis_ = current.zdir();
+
+                state_ = State::RotateAngle;
+                Prompt p;
+                p.kind = PromptKind::Angle;
+                p.message = "Rotation angle about axis";
+                return Step::ask(p);
+            }
+
+            if (keyword_is(value, "SAVE")) {
+                state_ = State::SaveName;
+                Prompt p;
+                p.kind = PromptKind::String;
+                p.message = "Name to save current UCS";
+                return Step::ask(p);
+            }
+
+            if (keyword_is(value, "RESTORE")) {
+                state_ = State::RestoreName;
+                Prompt p;
+                p.kind = PromptKind::String;
+                p.message = "Name of UCS to restore";
+                return Step::ask(p);
+            }
+
+            if (keyword_is(value, "DELETE")) {
+                state_ = State::DeleteName;
+                Prompt p;
+                p.kind = PromptKind::String;
+                p.message = "Name of UCS to delete";
+                return Step::ask(p);
+            }
+
+            if (keyword_is(value, "?")) {
+                std::string report;
+                for (const UcsDef& def : ctx.db.ucs_table()) {
+                    if (def.name.empty()) continue;  // deleted
+                    report += def.name + "  origin " + fmt(def.ucs.origin.x) + "," +
+                              fmt(def.ucs.origin.y) + "," + fmt(def.ucs.origin.z) + "\n";
+                }
+                if (report.empty()) report = "no named coordinate systems\n";
+                const std::string& name = ctx.db.sysvars().get_string(Sysvar::UcsName);
+                report += "current: " + (name.empty() ? std::string("*NO NAME*") : name);
+                return Step::done(report);
+            }
+
+            return Step::failed("unknown option");
+        }
+
+        case State::OriginPoint: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            // Moves the current frame without reorienting it.
+            Ucs u = ctx.db.current_ucs();
+            u.origin = value.point;
+            return adopt(ctx, u);
+        }
+
+        case State::ZAxisOrigin: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            origin_ = value.point;
+            state_ = State::ZAxisPoint;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Point on positive portion of Z axis";
+            p.base = origin_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::ZAxisPoint: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            const Vec3 z = value.point - origin_;
+            if (is_zero(z)) return Step::failed("the two points are the same");
+
+            // Only the normal is given, so X is chosen the same way the
+            // arbitrary axis algorithm chooses it for an entity's extrusion.
+            // Using the same rule means a UCS defined this way and an entity
+            // with that extrusion agree about which way X points.
+            const Basis b = arbitrary_axis(normalize(z));
+            Ucs u;
+            u.origin = origin_;
+            u.xdir = b.ax;
+            u.ydir = b.ay;
+            return adopt(ctx, u);
+        }
+
+        case State::ThreeOrigin: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            origin_ = value.point;
+            state_ = State::ThreeXPoint;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Point on positive portion of the X axis";
+            p.base = origin_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::ThreeXPoint: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            if (is_zero(value.point - origin_)) return Step::failed("that is the origin");
+            xpoint_ = value.point;
+            state_ = State::ThreeYPoint;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Point on positive-Y portion of the UCS XY plane";
+            p.base = origin_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::ThreeYPoint: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            Ucs u;
+            u.origin = origin_;
+            u.xdir = xpoint_ - origin_;
+            u.ydir = value.point - origin_;
+            // Collinear points give no plane. normalized() would invent one
+            // rather than fail, so the degenerate case is caught here where it
+            // can still be reported.
+            if (is_zero(cross(u.xdir, u.ydir))) {
+                return Step::failed("the three points are collinear");
+            }
+            return adopt(ctx, u);
+        }
+
+        case State::EntityPick: {
+            if (value.kind != InputKind::Entity) return Step::failed("select an object");
+            const Entity* e = ctx.db.get(value.entity);
+            if (!e) return Step::failed("no such entity");
+
+            // The entity's own plane becomes the UCS. That is exactly what the
+            // ECS already is, so this option is where the two coordinate
+            // systems meet -- and it is the reason arbitrary_axis() is shared
+            // rather than reimplemented here.
+            const Basis b = arbitrary_axis(e->props().normal);
+            Ucs u;
+            u.xdir = b.ax;
+            u.ydir = b.ay;
+
+            // The origin is a defining point of the entity, which for most
+            // kinds is where it starts.
+            std::vector<OsnapPoint> snaps;
+            e->osnap_points(snaps);
+            u.origin = snaps.empty() ? e->bbox().min : snaps.front().pos;
+            return adopt(ctx, u);
+        }
+
+        case State::RotateAngle: {
+            double radians = 0.0;
+            if (!angle_from(value, Vec3{}, radians)) return Step::failed("an angle is required");
+
+            const Ucs current = ctx.db.current_ucs();
+            const Mat4 r = Mat4::rotation(current.origin, rotate_axis_, radians);
+            Ucs u;
+            u.origin = current.origin;
+            u.xdir = r.transform_vector(current.xdir);
+            u.ydir = r.transform_vector(current.ydir);
+            return adopt(ctx, u);
+        }
+
+        case State::SaveName: {
+            if (value.kind != InputKind::String || value.text.empty()) {
+                return Step::failed("a name is required");
+            }
+            const std::string name = upcase(value.text);
+            ctx.db.add_ucs(name, ctx.db.current_ucs());
+            // Saving names the current system; it does not change it.
+            ctx.db.set_current_ucs(ctx.db.current_ucs(), name);
+            return Step::done(name + " saved");
+        }
+
+        case State::RestoreName: {
+            if (value.kind != InputKind::String) return Step::failed("a name is required");
+            const std::string name = upcase(value.text);
+            const UcsId id = ctx.db.find_ucs(name);
+            if (id == kInvalidUcs) return Step::failed("no UCS named " + name);
+            return adopt(ctx, ctx.db.ucs(id).ucs, name);
+        }
+
+        case State::DeleteName: {
+            if (value.kind != InputKind::String) return Step::failed("a name is required");
+            const std::string name = upcase(value.text);
+            const UcsId id = ctx.db.find_ucs(name);
+            if (id == kInvalidUcs) return Step::failed("no UCS named " + name);
+            ctx.db.erase_ucs(id);
+            return Step::done(name + " deleted");
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- UCSICON ----------------------------------------------------------------
+
+Step UcsIconCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "ON/OFF/All/Noorigin/ORigin";
+    p.allow_empty = true;
+    p.keywords = {"ON", "OFF", "All", "Noorigin", "ORigin"};
+    return Step::ask(p);
+}
+
+Step UcsIconCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind == InputKind::None) return Step::done();
+
+    // R12 packs two answers into one variable: whether the icon is shown, and
+    // whether it sits at the origin rather than in the corner.
+    const std::int32_t current = ctx.db.sysvars().get_int(Sysvar::UcsIcon);
+
+    std::int32_t next = current;
+    if (keyword_is(value, "ON")) next = (current == 2) ? 2 : 1;
+    else if (keyword_is(value, "OFF")) next = 0;
+    else if (keyword_is(value, "ORIGIN")) next = 2;
+    else if (keyword_is(value, "NOORIGIN")) next = (current == 0) ? 0 : 1;
+    else if (keyword_is(value, "ALL")) next = current;  // one viewport, so a no-op
+    else return Step::failed("unknown option");
+
+    ctx.db.sysvars().set_int(Sysvar::UcsIcon, next);
+    return Step::done();
 }
 
 // --- TRIM and EXTEND --------------------------------------------------------
@@ -1373,7 +1719,7 @@ Step InsertCommand::place(CommandContext& ctx) {
     p.insertion = point_;
     p.scale = scale_;
     p.rotation = rotation_;
-    p.normal = construction_normal();
+    p.normal = construction_normal(ctx);
 
     auto e = std::make_unique<Insert>(def, compose_placement(p, def->base));
     if (multiple_) e->set_array(rows_, columns_, row_spacing_, column_spacing_);
@@ -2364,7 +2710,7 @@ Step TransformCommand::next(CommandContext& ctx, const InputValue& value) {
             if (kind_ == Kind::Rotate) {
                 double radians = 0.0;
                 if (!angle_from(value, base_, radians)) return Step::failed("an angle is required");
-                return apply(ctx, Mat4::rotation(base_, construction_normal(), radians), true);
+                return apply(ctx, Mat4::rotation(base_, construction_normal(ctx), radians), true);
             }
 
             double factor = 0.0;
@@ -2404,7 +2750,7 @@ Step TransformCommand::next(CommandContext& ctx, const InputValue& value) {
             // The mirror plane contains the line and the plane normal, so its
             // own normal is perpendicular to both.
             const Vec3 along = mirror_second_ - base_;
-            const Vec3 normal = cross(along, construction_normal());
+            const Vec3 normal = cross(along, construction_normal(ctx));
             if (is_zero(normal)) return Step::failed("the mirror line has no direction");
 
             return apply(ctx, Mat4::mirror(base_, normalize(normal)), erase_originals);
@@ -3433,8 +3779,17 @@ Step PlanCommand::next(CommandContext& ctx, const InputValue& value) {
     // not happen. `ncad` is a real way to drive this program, not a degraded one.
     if (!ctx.view) return Step::failed("no view to change");
 
-    // All three answers name world XY until UCS exists.
-    ctx.view->set_plan_view(kWorldZ);
+    // The three answers finally differ. World is world XY whatever is current;
+    // the other two are the current construction plane -- which the prompt has
+    // said since the command was written, and which was a promise rather than a
+    // description until now.
+    //
+    // R12's Ucs option names a SAVED system to look down, and takes a name;
+    // that is not built, so Ucs means the current one, as Current does.
+    const Vec3 normal =
+        keyword_is(value, "WORLD") ? kWorldZ : ctx.db.construction_normal();
+
+    ctx.view->set_plan_view(normal);
     return Step::done("Regenerating drawing.");
 }
 
@@ -3808,6 +4163,8 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "PAN") return std::make_unique<PanCommand>();
     if (upper == "BASE") return std::make_unique<BaseCommand>();
     if (upper == "BREAK") return std::make_unique<BreakCommand>();
+    if (upper == "UCS") return std::make_unique<UcsCommand>();
+    if (upper == "UCSICON") return std::make_unique<UcsIconCommand>();
     if (upper == "TRIM") return std::make_unique<TrimCommand>(false);
     if (upper == "EXTEND") return std::make_unique<TrimCommand>(true);
     if (upper == "BLOCK") return std::make_unique<BlockCommand>();
@@ -3840,7 +4197,7 @@ const std::vector<std::string>& command_names() {
         "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
-        "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "INSERT", "MINSERT", "WBLOCK",
+        "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "UCS", "UCSICON", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
         "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;

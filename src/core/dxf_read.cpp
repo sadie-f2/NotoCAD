@@ -136,6 +136,11 @@ private:
     Database& db_;
     DxfReadResult result_;
     std::vector<PendingInsert> pending_inserts_;
+
+    // The current UCS from the HEADER, applied once the whole file is read.
+    Ucs header_ucs_;
+    std::string header_ucs_name_;
+    bool have_header_ucs_{false};
 };
 
 void Reader::apply_common(Entity& e, const EntityGroups& g) {
@@ -362,6 +367,13 @@ void Reader::read_tables(GroupStream& in) {
             }
             db_.add_linetype(name, current.text(3), std::move(pattern));
             ++result_.linetypes;
+        } else if (table == "UCS") {
+            Ucs u;
+            u.origin = current.point(10);
+            u.xdir = current.point(11);
+            u.ydir = current.point(12);
+            db_.add_ucs(name, u);
+            ++result_.coordinate_systems;
         }
     };
 
@@ -379,7 +391,7 @@ void Reader::read_tables(GroupStream& in) {
             }
             current = EntityGroups{};
             current.name = value;
-            in_entry = (value == "LAYER" || value == "LTYPE");
+            in_entry = (value == "LAYER" || value == "LTYPE" || value == "UCS");
             continue;
         }
         if (code == 2 && table.empty() && !in_entry) {
@@ -600,9 +612,38 @@ DxfReadResult Reader::run(std::string text) {
             }
             continue;
         }
+
+        // The current UCS. The rest of the HEADER section is still ignored --
+        // see SF_todo.md -- but a drawing saved in a tilted construction plane
+        // that reopens in world XY is a change to what typing a coordinate
+        // means, which is too surprising to leave.
+        if (code == 9 && (value == "$UCSORG" || value == "$UCSXDIR" || value == "$UCSYDIR")) {
+            const std::string which = value;
+            Vec3 p{};
+            // Three coordinate groups follow, in order.
+            for (int i = 0; i < 3; ++i) {
+                if (!in.next(code, value)) break;
+                const double d = to_double(value);
+                if (code == 10) p.x = d;
+                else if (code == 20) p.y = d;
+                else if (code == 30) p.z = d;
+            }
+            if (which == "$UCSORG") header_ucs_.origin = p;
+            else if (which == "$UCSXDIR") header_ucs_.xdir = p;
+            else header_ucs_.ydir = p;
+            have_header_ucs_ = true;
+            continue;
+        }
+        if (code == 9 && value == "$UCSNAME") {
+            if (in.next(code, value) && code == 2) header_ucs_name_ = value;
+            continue;
+        }
     }
 
     resolve_inserts();
+    // Applied after the tables, so that a named current UCS is set from the
+    // header rather than from whichever table entry happened to be read last.
+    if (have_header_ucs_) db_.set_current_ucs(header_ucs_, header_ucs_name_);
     result_.ok = true;
     return result_;
 }

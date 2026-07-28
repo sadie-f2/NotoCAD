@@ -223,6 +223,78 @@ LayerId Database::find_layer(const std::string& name) const {
     return kInvalidLayer;
 }
 
+UcsId Database::add_ucs(const std::string& name, const Ucs& value) {
+    const UcsId existing = find_ucs(name);
+    if (existing != kInvalidUcs) {
+        // UCS Save onto an existing name redefines it, as R12 does.
+        UcsDef next{name, value.normalized()};
+        set_ucs(existing, next);
+        return existing;
+    }
+
+    ucs_table_.push_back(UcsDef{name, value.normalized()});
+    const UcsId id = static_cast<UcsId>(ucs_table_.size() - 1);
+    journal_.record_ucs_add(id, ucs_table_.back());
+    return id;
+}
+
+UcsId Database::find_ucs(const std::string& name) const {
+    for (std::size_t i = 0; i < ucs_table_.size(); ++i) {
+        if (ucs_table_[i].name == name) return static_cast<UcsId>(i);
+    }
+    return kInvalidUcs;
+}
+
+bool Database::set_ucs(UcsId id, const UcsDef& value) {
+    if (id >= ucs_table_.size()) return false;
+    const UcsDef before = ucs_table_[id];
+    ucs_table_[id] = value;
+    journal_.record_ucs_modify(id, before, ucs_table_[id]);
+    return true;
+}
+
+bool Database::erase_ucs(UcsId id) {
+    if (id >= ucs_table_.size()) return false;
+    // Erasing from the middle would shift every later id, and the journal
+    // records ids. UCS Delete is rare enough that emptying the name is an
+    // honest answer: the entry stops being findable and nothing else moves.
+    UcsDef cleared = ucs_table_[id];
+    cleared.name.clear();
+    return set_ucs(id, cleared);
+}
+
+void Database::pop_ucs() {
+    if (!ucs_table_.empty()) ucs_table_.pop_back();
+}
+
+void Database::restore_ucs(UcsId id, const UcsDef& value) {
+    if (id < ucs_table_.size()) {
+        ucs_table_[id] = value;
+        return;
+    }
+    if (id == ucs_table_.size()) ucs_table_.push_back(value);
+}
+
+Ucs Database::current_ucs() const {
+    Ucs u;
+    u.origin = sysvars_.get_point(Sysvar::UcsOrg);
+    u.xdir = sysvars_.get_point(Sysvar::UcsXDir);
+    u.ydir = sysvars_.get_point(Sysvar::UcsYDir);
+    // Orthonormalised on the way out rather than trusted on the way in: these
+    // are system variables, and a frame with non-perpendicular axes would put
+    // geometry somewhere no transform could undo.
+    return u.normalized();
+}
+
+void Database::set_current_ucs(const Ucs& value, const std::string& name) {
+    const Ucs n = value.normalized();
+    sysvars_.set_owned(Sysvar::UcsOrg, SysvarValue::of_point(n.origin));
+    sysvars_.set_owned(Sysvar::UcsXDir, SysvarValue::of_point(n.xdir));
+    sysvars_.set_owned(Sysvar::UcsYDir, SysvarValue::of_point(n.ydir));
+    sysvars_.set_owned(Sysvar::UcsName, SysvarValue::of_string(name));
+    sysvars_.set_owned(Sysvar::WorldUcs, SysvarValue::of_int(n.is_world() ? 1 : 0));
+}
+
 BlockId Database::add_block(BlockDef def) {
     const BlockId existing = find_block(def.name);
     if (existing != kInvalidBlock) {

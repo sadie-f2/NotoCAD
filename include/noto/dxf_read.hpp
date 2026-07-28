@@ -33,6 +33,7 @@ struct DxfReadResult {
     std::size_t layers{0};
     std::size_t linetypes{0};
     std::size_t blocks{0};
+    std::size_t coordinate_systems{0};
 
     // INSERTs naming a block the file never defined. They are kept, with no
     // definition, so the drawing is not silently short an entity -- but the

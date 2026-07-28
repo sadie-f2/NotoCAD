@@ -176,7 +176,7 @@ rather than guessing — the interface hides which one it is.
 | 9 | DXF read and OPEN | *Done.* `dxf_read.hpp`, the `Proxy` entity, and DXFIN with OPEN as its alias. LINE, CIRCLE, ARC, POLYLINE and INSERT become real entities; everything else becomes a proxy that writes back unchanged. **The BLOCKS gap is closed** — definitions are read, and an INSERT naming a block defined later still resolves, because inserts are fixed up in a second pass. **Still not read:** the HEADER section's system variables (only `$ACADVER` is looked at), so a file's OSMODE, LIMITS and INSBASE are ignored on the way in even though they are now written on the way out. |
 | 10 | Geometry editing | *Paused deliberately, not abandoned.* The kernel (`intersect.hpp`) and the cutting primitives (`curve_edit.hpp`) are built, and **BREAK, TRIM and EXTEND are done**. **OFFSET, FILLET and CHAMFER are deferred** — rarely used in Sadie's workflow and UCS-neutral, so they cost nothing to do later. **CHANGE/CHPROP is deferred on purpose until after UCS**: CHANGE's change point is interpreted in the current UCS, so writing it against WCS now would need revisiting rather than extending — the same trap VPOINT is held back from. |
 | 11 | Blocks | *Done.* BLOCK, INSERT, MINSERT, EXPLODE, WBLOCK and BASE, plus the BLOCKS section both ways. Open question 7 is answered below. **Not built:** ATTDEF/ATTRIB, and EXPLODE of a polyline. |
-| 12 | UCS | `CLAUDE.md` notes ECS is foundational and already in the kernel, but that UCS "has nowhere to live". This gives it one. |
+| 12 | UCS | *Done.* `Ucs` in `tables.hpp`, the named table on `Database`, the current one in system variables, and the UCS/UCSICON commands. PLAN's three answers finally differ. **Not built:** VPOINT (still deferred, see below), and the UCS icon itself, which is viewport drawing rather than kernel work. |
 | 13 | Meshes and surfaces | PFACE, 3DMESH, RULESURF, TABSURF, REVSURF, EDGESURF; AutoLISP file I/O (`open`, `read-line` — `file_subrs.cpp` currently holds only `dxfout`); suppressed-regen batch mode for LISP loops. **The project's stated purpose.** |
 | 14 | Performance | A spatial index — none exists, and 4a's mouse-move path is the first thing to feel the linear scan. `QOpenGLWidget` migration behind the same `draw()`. |
 | 15 | macOS port | Stated goal in `CLAUDE.md`. |
@@ -489,6 +489,82 @@ Decisions worth not re-litigating:
 Not yet done: no spatial index, so `intersect` over a selection set is O(n^2) in
 the set's size. That is open question 5's problem and slots in behind this
 without changing the signature.
+
+## UCS — where it lives, and the three bugs it exposed
+
+**DXF answered the storage question.** R12 splits UCS exactly the way it splits
+layers: named systems are a `UCS` table in the TABLES section, and the *current*
+system is HEADER state — `$UCSORG`, `$UCSXDIR`, `$UCSYDIR`, `$UCSNAME`,
+`$WORLDUCS`. So named systems went on `Database` beside layers, linetypes and
+blocks, and the current one went into system variables, where it inherits
+journalling, `getvar`, and header round-tripping from machinery that already
+existed.
+
+**The blast radius was smaller than expected, and the format is why.** Entities
+do not reference a UCS — they carry an extrusion (group 210) and nothing else.
+The ECS is per-entity and permanent; the UCS is global and momentary. They meet
+at exactly one instant, when a command creates geometry. So UCS changed no entity
+record, no transform, and no DXF entity. What it changed is the *input* path and
+the creation commands.
+
+`construction_normal()` was the seam `CLAUDE.md` named, and it was exactly that:
+it returned world Z, it now asks the drawing, and not one caller changed.
+
+**Coordinates are converted at the parser, not in the engine.** A typed
+coordinate is in the UCS; a clicked one is already world, because the viewport
+unprojected it. Those two are indistinguishable by the time they reach
+`CommandEngine::supply`, so the conversion belongs at the text boundary where
+they are still telling apart. A relative coordinate has its offset transformed as
+a VECTOR — applying the origin to a displacement from a base that is already
+world would move the point twice.
+
+### Three bugs it exposed, two of them older than it
+
+1. **Undo could not restore a read-only system variable.** The replay path went
+   through `Sysvars::set()`, which honours the read-only flag — so UCSORG could
+   be set by the UCS command and never put back. It replays through `set_owned`
+   now. This was latent from the moment read-only variables existed; UCS is
+   simply the first one that anything writes.
+
+2. **`UcsCommand::adopt` took its frame by const reference**, and the first thing
+   it does is overwrite the slot that Prev passes it from. Prev restored the
+   frame it was leaving rather than the one before that. Taken by value now, with
+   the reason written down.
+
+3. **No creation command consulted the construction plane.** CIRCLE, PLINE, TEXT
+   and SOLID all built geometry with the default world-Z extrusion. A circle drawn
+   in a tilted UCS looked right on screen and serialised with the wrong plane —
+   the failure that appears only when the file is opened somewhere else, which is
+   precisely the failure `CLAUDE.md` names as the reason ECS is foundational.
+   3DFACE is deliberately excluded: it stores world coordinates by definition and
+   has no plane to inherit.
+
+### Decisions worth not re-litigating
+
+- **The frame is stored in world**, never relative to the previous one, which is
+  what DXF does and means there is no chain to walk and nothing to drift.
+- **Axes are orthonormalised on the way out of the database**, not trusted on the
+  way in. They arrive through system variables, and a sheared frame would put
+  geometry somewhere no transform could undo.
+- **UCS ZAxis derives its X axis with `arbitrary_axis()`** — the same rule
+  entities use for their extrusion. A UCS built from a normal and an entity with
+  that extrusion therefore agree about which way X points.
+- **UCS Entity adopts the entity'"'"'s own plane**, which is the one place UCS and
+  ECS are literally the same thing.
+
+### Still open
+
+**`UCS Prev` remembers one frame in a file-scope static.** It is the same problem
+ROTATE3D'"'"'s `Last` axis has, and it now has two instances rather than one —
+state that must outlive the command that set it, with nowhere on `CommandContext`
+to live. Worth one decision covering both rather than two different bodges.
+
+**VPOINT is still not built**, and is now unblocked: it is interpreted in the
+current CS, and there is finally a current CS to interpret it against.
+
+**The rest of the HEADER is still not read.** The UCS variables are, because a
+drawing that reopens in world XY when it was saved tilted changes what typing a
+coordinate means. OSMODE, LIMITS and INSBASE are still written but not read.
 
 ## TRIM and EXTEND — and the carrier rule they refined
 

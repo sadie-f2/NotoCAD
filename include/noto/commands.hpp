@@ -744,6 +744,65 @@ private:
     std::size_t changed_{0};
 };
 
+// UCS: define the frame that typed coordinates are read in.
+//
+// R12's options are Origin, ZAxis, 3point, Entity, View, X, Y, Z, Prev,
+// Restore, Save, Del, ? and World. All of them resolve to the same thing -- an
+// origin and two axes, in WORLD terms -- which is why the command is long but
+// not deep: every option is a different way of arriving at one frame, and the
+// frame is stored the same way whichever route it came by.
+//
+// Storing in world rather than relative to the previous UCS is what DXF does
+// and is what keeps this honest: there is never a chain of frames to walk, and
+// no way for one to drift out of step with another.
+//
+// X, Y and Z rotate the CURRENT system about its own axis, which is what makes
+// them useful -- "now tilt this by 30 degrees" rather than "define a frame".
+// Origin likewise moves the current one without reorienting it.
+class UcsCommand final : public Command {
+public:
+    const char* name() const override { return "UCS"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t {
+        Option,
+        OriginPoint,
+        ZAxisOrigin,
+        ZAxisPoint,
+        ThreeOrigin,
+        ThreeXPoint,
+        ThreeYPoint,
+        EntityPick,
+        RotateAngle,
+        SaveName,
+        RestoreName,
+        DeleteName,
+    };
+
+    Step ask_option(CommandContext& ctx);
+    Step adopt(CommandContext& ctx, Ucs u, const std::string& name = {});
+
+    State state_{State::Option};
+    // Which of X/Y/Z the pending rotation is about.
+    Vec3 rotate_axis_{};
+    Vec3 origin_{};
+    Vec3 xpoint_{};
+};
+
+// UCSICON: whether the coordinate-system icon is shown, and where.
+//
+// The icon itself is a viewport concern and is not drawn yet. The variable is
+// still worth setting, because it is drawing state that DXF carries and a
+// setting silently dropped on save is worse than one not yet honoured.
+class UcsIconCommand final : public Command {
+public:
+    const char* name() const override { return "UCSICON"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
 // LAYER: R12's table editor, as one prompt that loops until Enter.
 //
 // ?/Make/Set/New/ON/OFF/Color/Ltype/Freeze/Thaw. Most options take a layer name

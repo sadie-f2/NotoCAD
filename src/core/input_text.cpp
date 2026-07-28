@@ -98,7 +98,7 @@ bool parse_polar(std::string_view text, const Vec3& base, Vec3& out) {
 //
 // Without the relative forms, drawing anything by hand is arithmetic homework.
 bool parse_coordinate(const Prompt& prompt, std::string_view text, Vec3& out,
-                      std::string& error) {
+                      std::string& error, const Mat4* ucs_to_world) {
     const bool relative = !text.empty() && text.front() == '@';
     if (relative && !prompt.has_last_point) {
         error = "no last point to measure from";
@@ -114,10 +114,16 @@ bool parse_coordinate(const Prompt& prompt, std::string_view text, Vec3& out,
     const std::string_view body = relative ? text.substr(1) : text;
 
     if (body.find('<') != std::string_view::npos) {
-        if (!parse_polar(body, base, out)) {
+        // Polar is solved about the origin, then placed, so that the angle is
+        // measured in the UCS's own plane rather than in world XY.
+        Vec3 polar;
+        if (!parse_polar(body, Vec3{0.0, 0.0, 0.0}, polar)) {
             error = "expected a distance and angle like 30<45";
             return false;
         }
+        const Vec3 offset = ucs_to_world ? ucs_to_world->transform_vector(polar) : polar;
+        out = relative ? base + offset
+                       : (ucs_to_world ? ucs_to_world->transform_point(polar) : polar);
         return true;
     }
 
@@ -127,7 +133,15 @@ bool parse_coordinate(const Prompt& prompt, std::string_view text, Vec3& out,
                          : "expected a point like 1,2 or 1,2,3";
         return false;
     }
-    out = relative ? base + coordinates : coordinates;
+    // The UCS is applied here, at the one place a typed coordinate becomes a
+    // point. An absolute coordinate is a location and transforms as one; a
+    // relative one is a displacement from a base that is already in world, so
+    // only its direction and scale are the UCS's business.
+    if (relative) {
+        out = base + (ucs_to_world ? ucs_to_world->transform_vector(coordinates) : coordinates);
+    } else {
+        out = ucs_to_world ? ucs_to_world->transform_point(coordinates) : coordinates;
+    }
     return true;
 }
 
@@ -153,7 +167,7 @@ bool match_keyword(const Prompt& prompt, std::string_view token, std::string& ou
 }  // namespace
 
 bool parse_input(const Prompt& prompt, std::string_view token, InputValue& out,
-                 std::string& error) {
+                 std::string& error, const Mat4* ucs_to_world) {
     error.clear();
 
     // An empty token is Enter.
@@ -191,7 +205,7 @@ bool parse_input(const Prompt& prompt, std::string_view token, InputValue& out,
                 return true;
             }
             Vec3 p;
-            if (!parse_coordinate(prompt, token, p, error)) return false;
+            if (!parse_coordinate(prompt, token, p, error, ucs_to_world)) return false;
             out = InputValue::of_point(p);
             return true;
         }
@@ -208,7 +222,8 @@ bool parse_input(const Prompt& prompt, std::string_view token, InputValue& out,
             }
             std::string ignored;
             Vec3 p;
-            if (prompt_takes_point(prompt.kind) && parse_coordinate(prompt, token, p, ignored)) {
+            if (prompt_takes_point(prompt.kind) &&
+                parse_coordinate(prompt, token, p, ignored, ucs_to_world)) {
                 out = InputValue::of_point(p);
                 return true;
             }
@@ -293,7 +308,16 @@ bool TextInputSource::next_value(const Prompt& prompt, InputValue& out) {
     if (pos_ >= tokens_.size()) return false;
 
     const std::string& token = tokens_[pos_];
-    if (!parse_input(prompt, token, out, error_)) {
+    // Read fresh each time: a script that runs UCS half way through must have
+    // everything after it read in the new frame.
+    Mat4 frame = Mat4::identity();
+    const Mat4* ucs = nullptr;
+    if (db_) {
+        frame = db_->current_ucs().to_world();
+        ucs = &frame;
+    }
+
+    if (!parse_input(prompt, token, out, error_, ucs)) {
         // Consume it anyway: leaving a token that cannot be parsed in place
         // would spin forever.
         ++pos_;

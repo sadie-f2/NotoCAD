@@ -47,6 +47,22 @@ constexpr SysvarDef kTable[] = {
     {"LIMCHECK", Sysvar::LimCheck, SysvarType::Int, false, true, 0, 0, 1, 0.0, "", {}},
     {"INSBASE", Sysvar::InsBase, SysvarType::Point, false, true, 0, 0, 0, 0.0, "",
      {0.0, 0.0, 0.0}},
+
+    // The current UCS. Read-only to the user, as R12 has them: the UCS command
+    // owns them and writes through Sysvars::set_owned.
+    {"UCSORG", Sysvar::UcsOrg, SysvarType::Point, true, true, 0, 0, 0, 0.0, "",
+     {0.0, 0.0, 0.0}},
+    {"UCSXDIR", Sysvar::UcsXDir, SysvarType::Point, true, true, 0, 0, 0, 0.0, "",
+     {1.0, 0.0, 0.0}},
+    {"UCSYDIR", Sysvar::UcsYDir, SysvarType::Point, true, true, 0, 0, 0, 0.0, "",
+     {0.0, 1.0, 0.0}},
+    {"UCSNAME", Sysvar::UcsName, SysvarType::String, true, true, 0, 0, 0, 0.0, "", {}},
+    {"WORLDUCS", Sysvar::WorldUcs, SysvarType::Int, true, true, 1, 0, 1, 0.0, "", {}},
+
+    // These two the user does set.
+    {"UCSFOLLOW", Sysvar::UcsFollow, SysvarType::Int, false, true, 0, 0, 1, 0.0, "", {}},
+    // 0 off, 1 on, 2 on and at the origin -- R12 packs both answers into one.
+    {"UCSICON", Sysvar::UcsIcon, SysvarType::Int, false, true, 1, 0, 2, 0.0, "", {}},
 };
 
 static_assert(sizeof(kTable) / sizeof(kTable[0]) == static_cast<std::size_t>(Sysvar::kCount),
@@ -196,6 +212,16 @@ Sysvars::SetStatus Sysvars::set_point(Sysvar id, const Vec3& p) {
     if (d.type != SysvarType::Point) return SetStatus::WrongType;
     const SysvarValue before = values_[index_of(id)];
     values_[index_of(id)] = SysvarValue::of_point(p);
+    journal_write(id, before);
+    return SetStatus::Ok;
+}
+
+Sysvars::SetStatus Sysvars::set_owned(Sysvar id, const SysvarValue& v) {
+    const SysvarDef& d = sysvar_def(id);
+    if (d.type != v.type) return SetStatus::WrongType;
+
+    const SysvarValue before = values_[index_of(id)];
+    values_[index_of(id)] = v;
     journal_write(id, before);
     return SetStatus::Ok;
 }

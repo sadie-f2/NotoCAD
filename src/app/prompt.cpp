@@ -38,8 +38,8 @@ std::string trim(const std::string& s) {
 // `!name` substitutes a variable and `(expr)` evaluates in place.
 class PromptLineSource final : public InputSource {
 public:
-    PromptLineSource(std::vector<std::string> tokens, lisp::Interp& in)
-        : tokens_(std::move(tokens)), in_(in) {}
+    PromptLineSource(std::vector<std::string> tokens, lisp::Interp& in, const Database* db)
+        : tokens_(std::move(tokens)), in_(in), db_(db) {}
 
     bool next_value(const Prompt& prompt, InputValue& out) override;
 
@@ -55,6 +55,9 @@ public:
 private:
     // Evaluates `source` and converts the result for `prompt`.
     bool from_lisp(const Prompt& prompt, const std::string& source, InputValue& out);
+
+    // The drawing, for the current UCS. Typed coordinates are read in it.
+    const Database* db_{nullptr};
 
     std::vector<std::string> tokens_;
     std::string transparent_;
@@ -113,7 +116,16 @@ bool PromptLineSource::next_value(const Prompt& prompt, InputValue& out) {
         return true;
     }
 
-    if (!parse_input(prompt, token, out, error_)) return false;
+    // Read fresh, because a UCS command earlier on the same line changes what
+    // everything after it means.
+    Mat4 frame = Mat4::identity();
+    const Mat4* ucs = nullptr;
+    if (db_) {
+        frame = db_->current_ucs().to_world();
+        ucs = &frame;
+    }
+
+    if (!parse_input(prompt, token, out, error_, ucs)) return false;
     return true;
 }
 
@@ -285,7 +297,7 @@ bool PromptSession::feed_line(const std::string& line) {
         // answer instead.
         if (tokens.empty()) tokens.emplace_back();
 
-        PromptLineSource source(std::move(tokens), in_);
+        PromptLineSource source(std::move(tokens), in_, &engine_.db());
         run_with_transparent(engine_, out_, source);
         if (source.failed()) out_.write_error("; " + source.error() + "\n");
         if (!engine_.active()) report_finished();
@@ -339,7 +351,8 @@ bool PromptSession::feed_line(const std::string& line) {
 
     // Anything after the command name on the same line answers its prompts.
     if (tokens.size() > 1) {
-        PromptLineSource source(std::vector<std::string>(tokens.begin() + 1, tokens.end()), in_);
+        PromptLineSource source(std::vector<std::string>(tokens.begin() + 1, tokens.end()),
+                                in_, &engine_.db());
         run_with_transparent(engine_, out_, source);
         if (source.failed()) out_.write_error("; " + source.error() + "\n");
     }

@@ -53,6 +53,8 @@ enum class ChangeKind : std::uint8_t {
     ModifyLayer,
     AddLinetype,
     ModifyLinetype,
+    AddUcs,
+    ModifyUcs,
     AddBlock,
     // A block redefined in place. Every insertion of it changes at once, since
     // they all hold the definition's address -- which is exactly why this has
@@ -74,6 +76,10 @@ struct TableChange {
     LinetypeId linetype_id{0};
     Linetype linetype_before;
     Linetype linetype_after;
+
+    UcsId ucs_id{0};
+    UcsDef ucs_before;
+    UcsDef ucs_after;
 
     BlockId block_id{0};
     BlockDef block_before;
@@ -129,6 +135,8 @@ public:
     void record_layer_modify(LayerId id, const Layer& before, const Layer& after);
     void record_linetype_add(LinetypeId id, const Linetype& added);
     void record_linetype_modify(LinetypeId id, const Linetype& before, const Linetype& after);
+    void record_ucs_add(UcsId id, const UcsDef& added);
+    void record_ucs_modify(UcsId id, const UcsDef& before, const UcsDef& after);
     void record_block_add(BlockId id, const BlockDef& added);
     void record_block_modify(BlockId id, const BlockDef& before, const BlockDef& after);
 

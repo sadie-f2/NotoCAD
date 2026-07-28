@@ -36,6 +36,7 @@ add_executable(noto_tests
   test_blocks.cpp
   test_break.cpp
   test_trim.cpp
+  test_ucs.cpp
   test_layer.cpp
   test_dash.cpp
   test_dxf_read.cpp

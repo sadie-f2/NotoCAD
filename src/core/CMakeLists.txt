@@ -16,6 +16,7 @@ add_library(noto_core STATIC
   insert.cpp
   curve_edit.cpp
   intersect.cpp
+  ucs.cpp
   osnap_derived.cpp
   selection.cpp
   sysvar.cpp

@@ -132,16 +132,20 @@ TEST_CASE("dxf: required tables are present") {
 
     CHECK(has_pair(p, 2, "LTYPE"));
     CHECK(has_pair(p, 2, "LAYER"));
+    CHECK(has_pair(p, 2, "UCS"));
     CHECK(has_pair(p, 2, "STYLE"));
     CHECK(has_pair(p, 2, "APPID"));
     CHECK(has_pair(p, 2, "CONTINUOUS"));
     CHECK(has_pair(p, 2, "0"));  // layer "0" must exist
 
+    // Five now that named coordinate systems have a table of their own. It is
+    // written even when empty, because a reader expecting the table and not
+    // finding it fails worse than one finding it empty.
     int endtabs = 0;
     for (const Pair& q : p) {
         if (q.code == 0 && q.value == "ENDTAB") ++endtabs;
     }
-    CHECK(endtabs == 4);
+    CHECK(endtabs == 5);
 }
 
 TEST_CASE("dxf: LINE stores world coordinates") {

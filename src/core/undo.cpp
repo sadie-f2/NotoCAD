@@ -161,6 +161,27 @@ const std::string& UndoJournal::redo_name() const {
     return redo_.empty() ? empty_name() : redo_.back().name;
 }
 
+void UndoJournal::record_ucs_add(UcsId id, const UcsDef& added) {
+    if (replaying_) return;
+    Change c;
+    c.kind = ChangeKind::AddUcs;
+    c.table = std::make_unique<TableChange>();
+    c.table->ucs_id = id;
+    c.table->ucs_after = added;
+    push(std::move(c));
+}
+
+void UndoJournal::record_ucs_modify(UcsId id, const UcsDef& before, const UcsDef& after) {
+    if (replaying_) return;
+    Change c;
+    c.kind = ChangeKind::ModifyUcs;
+    c.table = std::make_unique<TableChange>();
+    c.table->ucs_id = id;
+    c.table->ucs_before = before;
+    c.table->ucs_after = after;
+    push(std::move(c));
+}
+
 void UndoJournal::record_block_add(BlockId id, const BlockDef& added) {
     if (replaying_) return;
     Change c;
@@ -206,7 +227,13 @@ bool UndoJournal::undo(Database& db) {
                     db.replace(c.entity, c.before->clone());
                     break;
                 case ChangeKind::SetSysvar:
-                    db.sysvars().set(sysvar_def(c.sysvar).name, c.sysvar_before);
+                    // set_owned, not set: replaying is by definition the
+                    // owner's business, and the read-only flag exists to stop
+                    // the USER writing a variable. Going through the public
+                    // door here would make every read-only variable
+                    // un-undoable, which is a hole in undo rather than a
+                    // safety measure.
+                    db.sysvars().set_owned(c.sysvar, c.sysvar_before);
                     break;
                 case ChangeKind::AddLayer:
                     // Adds append, so the one being undone is the last, and
@@ -222,6 +249,12 @@ bool UndoJournal::undo(Database& db) {
                     break;
                 case ChangeKind::ModifyLinetype:
                     db.restore_linetype(c.table->linetype_id, c.table->linetype_before);
+                    break;
+                case ChangeKind::AddUcs:
+                    db.pop_ucs();
+                    break;
+                case ChangeKind::ModifyUcs:
+                    db.restore_ucs(c.table->ucs_id, c.table->ucs_before);
                     break;
                 case ChangeKind::AddBlock:
                     db.pop_block();
@@ -258,7 +291,7 @@ bool UndoJournal::redo(Database& db) {
                     db.replace(c.entity, c.after->clone());
                     break;
                 case ChangeKind::SetSysvar:
-                    db.sysvars().set(sysvar_def(c.sysvar).name, c.sysvar_after);
+                    db.sysvars().set_owned(c.sysvar, c.sysvar_after);
                     break;
                 case ChangeKind::AddLayer:
                     db.restore_layer(c.table->layer_id, c.table->layer_after);
@@ -271,6 +304,10 @@ bool UndoJournal::redo(Database& db) {
                     break;
                 case ChangeKind::ModifyLinetype:
                     db.restore_linetype(c.table->linetype_id, c.table->linetype_after);
+                    break;
+                case ChangeKind::AddUcs:
+                case ChangeKind::ModifyUcs:
+                    db.restore_ucs(c.table->ucs_id, c.table->ucs_after);
                     break;
                 case ChangeKind::AddBlock:
                 case ChangeKind::ModifyBlock:

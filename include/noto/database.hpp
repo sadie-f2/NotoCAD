@@ -90,6 +90,43 @@ public:
     bool set_layer_linetype(LayerId id, LinetypeId linetype);
     const std::vector<Layer>& layers() const { return layers_; }
 
+    // --- coordinate systems -------------------------------------------------
+
+    // Named UCSs, the table half. DXF keeps these in the TABLES section beside
+    // LAYER and LTYPE, and they get the same treatment here for the same
+    // reasons: journalled, and reached through the database commands already
+    // hold.
+    UcsId add_ucs(const std::string& name, const Ucs& value);
+    UcsId find_ucs(const std::string& name) const;
+    const UcsDef& ucs(UcsId id) const { return ucs_table_[id]; }
+    const std::vector<UcsDef>& ucs_table() const { return ucs_table_; }
+    bool set_ucs(UcsId id, const UcsDef& value);
+    bool erase_ucs(UcsId id);
+    void pop_ucs();
+    void restore_ucs(UcsId id, const UcsDef& value);
+
+    // The CURRENT UCS, the header half. Carried in system variables because
+    // that is what it is -- DXF stores it as $UCSORG/$UCSXDIR/$UCSYDIR, exactly
+    // as it stores the current layer as $CLAYER -- so it inherits journalling,
+    // getvar, and header round-tripping from machinery that already exists.
+    //
+    // Always returned orthonormalised: the variables are reachable from LISP,
+    // and a frame whose axes are not perpendicular would put geometry somewhere
+    // no transform could undo.
+    Ucs current_ucs() const;
+
+    // Sets it, and the name and $WORLDUCS with it. An unnamed system -- one
+    // built by UCS Origin or 3point rather than restored from the table --
+    // takes an empty name, which is what R12 reports as "*NO NAME*".
+    void set_current_ucs(const Ucs& value, const std::string& name = {});
+
+    // The construction plane's normal: the current UCS's Z axis.
+    //
+    // The single seam CLAUDE.md named. Every command that needed a plane went
+    // through a free function returning world Z; they go through here now, and
+    // nothing else had to change.
+    Vec3 construction_normal() const { return current_ucs().zdir(); }
+
     // --- blocks -------------------------------------------------------------
 
     // Takes ownership of the definition and returns its id. A name that already
@@ -159,6 +196,7 @@ private:
 
     std::vector<Layer> layers_;
     std::vector<Linetype> linetypes_;
+    std::vector<UcsDef> ucs_table_;
     // unique_ptr rather than by value: an Insert holds the definition's
     // address, so growing this vector must not move what it points at.
     std::vector<std::unique_ptr<BlockDef>> blocks_;

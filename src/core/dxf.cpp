@@ -117,6 +117,26 @@ void DxfWriter::write_header() {
     code(9, "$INSBASE");
     point(10, db_.sysvars().get_point(Sysvar::InsBase));
 
+    // The current UCS, exactly as DXF carries it: three points in world terms
+    // plus a name and a flag. This is the header half of the split -- named
+    // systems are a table, the current one is header state, the same division
+    // $CLAYER and the LAYER table use.
+    const Ucs ucs = db_.current_ucs();
+    code(9, "$UCSNAME");
+    code(2, db_.sysvars().get_string(Sysvar::UcsName));
+    code(9, "$UCSORG");
+    point(10, ucs.origin);
+    code(9, "$UCSXDIR");
+    point(10, ucs.xdir);
+    code(9, "$UCSYDIR");
+    point(10, ucs.ydir);
+    code(9, "$WORLDUCS");
+    code(70, ucs.is_world() ? 1 : 0);
+    code(9, "$UCSFOLLOW");
+    code(70, static_cast<int>(db_.sysvars().get_int(Sysvar::UcsFollow)));
+    code(9, "$UCSICON");
+    code(70, static_cast<int>(db_.sysvars().get_int(Sysvar::UcsIcon)));
+
     BBox ext = db_.extents();
     if (!ext.valid()) ext = BBox{Vec3{}, Vec3{}};
     code(9, "$EXTMIN");
@@ -169,6 +189,24 @@ void DxfWriter::write_tables() {
         code(62, static_cast<int>(ly.color));
         code(6, ly.linetype < db_.linetypes().size() ? db_.linetype(ly.linetype).name
                                                      : std::string("CONTINUOUS"));
+    }
+    code(0, "ENDTAB");
+
+    // Named coordinate systems. Written even when empty, because a reader that
+    // expects the table and does not find it is a worse failure than an empty
+    // one -- and because an empty table is the honest report for a drawing
+    // that has saved none.
+    code(0, "TABLE");
+    code(2, "UCS");
+    code(70, static_cast<int>(db_.ucs_table().size()));
+    for (const UcsDef& def : db_.ucs_table()) {
+        if (def.name.empty()) continue;  // deleted by UCS Del
+        code(0, "UCS");
+        code(2, def.name);
+        code(70, 0);
+        point(10, def.ucs.origin);
+        point(11, def.ucs.xdir);
+        point(12, def.ucs.ydir);
     }
     code(0, "ENDTAB");
 

@@ -65,6 +65,19 @@ enum class Sysvar : std::uint16_t {
     // a whole drawing. It is written to DXF regardless, because a drawing whose
     // base point is silently dropped inserts wrong in the program that opens it.
     InsBase,
+
+    // The current user coordinate system, carried as DXF carries it: three
+    // points in world terms, plus a name and a flag. Read-only to the user
+    // because the UCS command owns them, exactly as R12 has it.
+    UcsOrg,
+    UcsXDir,
+    UcsYDir,
+    UcsName,
+    WorldUcs,
+    // Whether changing the UCS automatically switches to a plan view of it.
+    UcsFollow,
+    // Whether the UCS icon is shown, and whether at the origin. UCSICON sets it.
+    UcsIcon,
     kCount,
 };
 
@@ -113,6 +126,17 @@ public:
     SetStatus set_real(Sysvar id, double v);
     SetStatus set_string(Sysvar id, std::string v);
     SetStatus set_point(Sysvar id, const Vec3& p);
+
+    // Writes a variable the USER may not write.
+    //
+    // R12 marks UCSORG and its siblings read-only because a command owns them,
+    // not because nothing may change them -- something has to, or the UCS
+    // command could not do its job. This is that owner's door.
+    //
+    // It bypasses the read-only flag and nothing else. In particular it still
+    // journals, because a write that escapes the journal is how undo grows
+    // holes, and that reasoning does not care who is doing the writing.
+    SetStatus set_owned(Sysvar id, const SysvarValue& v);
 
     // The name-driven path, for getvar and setvar. get() is false for an unknown
     // name, which is how getvar knows to return nil.
