@@ -10,8 +10,10 @@
 // when the click actually happens. There is a test pinning that the engine
 // suspends rather than blocking on exactly this kind of source.
 //
-// The widget stays thin: it converts a click into a world point and hands it
-// over. It decides nothing about what the point means.
+// The widget stays thin. It turns a click into whatever the running prompt
+// asked for -- a world point, or the handle of the entity under the pick box --
+// and hands it over. Every judgement behind that is a core call with its own
+// headless test; what is left here is routing.
 #pragma once
 
 #include "noto/command.hpp"
@@ -70,9 +72,18 @@ protected:
 private:
     enum class Drag { None, Pan, Orbit };
 
-    // True when the running command wants a point, so a click means something
-    // and a rubber band is worth drawing.
+    // What a left click would mean right now. These are separate because the
+    // answers differ: a point prompt takes a coordinate, an entity prompt takes
+    // a handle, and supplying the wrong one fails the command.
     bool wants_point() const;
+    bool wants_entity() const;
+    bool wants_pick() const { return wants_point() || wants_entity(); }
+
+    // R12 draws the pick box when selecting objects and the larger aperture
+    // when snapping, so the cursor says which question is being asked. Both are
+    // half-heights in pixels: the box is twice the value on a side.
+    double pickbox_px() const;
+    double aperture_px() const;
 
     // Screen to world, on the construction plane. Without a UCS the plane is
     // world XY, at the elevation of the rubber-band base when there is one --

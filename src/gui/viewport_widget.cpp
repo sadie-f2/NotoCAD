@@ -4,7 +4,9 @@
 #include "viewport_widget.hpp"
 
 #include "noto/database.hpp"
+#include "noto/pick.hpp"
 #include "noto/scene.hpp"
+#include "noto/sysvar.hpp"
 #include "qpainter_renderer.hpp"
 
 #include <QKeyEvent>
@@ -59,8 +61,20 @@ void ViewportWidget::set_plan_view() {
 
 bool ViewportWidget::wants_point() const {
     if (!engine_ || !engine_->active()) return false;
-    const PromptKind kind = engine_->prompt().kind;
-    return kind == PromptKind::Point || kind == PromptKind::Entity;
+    return engine_->prompt().kind == PromptKind::Point;
+}
+
+bool ViewportWidget::wants_entity() const {
+    if (!engine_ || !engine_->active()) return false;
+    return engine_->prompt().kind == PromptKind::Entity;
+}
+
+double ViewportWidget::pickbox_px() const {
+    return static_cast<double>(db_.sysvars().get_int(Sysvar::PickBox));
+}
+
+double ViewportWidget::aperture_px() const {
+    return static_cast<double>(db_.sysvars().get_int(Sysvar::Aperture));
 }
 
 Vec3 ViewportWidget::pick_point(const QPoint& pos) const {
@@ -101,22 +115,22 @@ void ViewportWidget::leaveEvent(QEvent* event) {
 }
 
 void ViewportWidget::draw_rubber_band(QPainter& painter) const {
-    if (!cursor_inside_ || !wants_point()) return;
+    if (!cursor_inside_ || !wants_pick()) return;
 
     const ScreenPoint cursor{static_cast<double>(cursor_pos_.x()),
                              static_cast<double>(cursor_pos_.y())};
 
-    // The aperture: a small box at the cursor, which is R12's pick indicator
-    // and the anchor the osnap marker will attach to in phase 4.
+    // R12's pick indicator, sized by the variable that governs the query it
+    // stands for: the pick box when selecting objects, the aperture when
+    // snapping. Seeing the box change size is how you know which one is live.
+    const double half = wants_entity() ? pickbox_px() : aperture_px();
     QPen pen(kCrosshair);
     pen.setWidth(0);
     painter.setPen(pen);
     painter.setBrush(Qt::NoBrush);
-    constexpr double kAperture = 5.0;
-    painter.drawRect(QRectF(cursor.x - kAperture, cursor.y - kAperture, kAperture * 2.0,
-                            kAperture * 2.0));
+    painter.drawRect(QRectF(cursor.x - half, cursor.y - half, half * 2.0, half * 2.0));
 
-    if (!engine_->prompt().has_base) return;
+    if (!wants_point() || !engine_->prompt().has_base) return;
 
     // Rubber band from wherever the command says it starts. Prompt::base exists
     // for this and nothing else -- the engine never reads it.
@@ -155,6 +169,29 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event) {
         return;
     }
 
+    if (event->button() == Qt::LeftButton && wants_entity()) {
+        const QString asked = QString::fromStdString(engine_->prompt().text());
+        const ScreenPoint sp{static_cast<double>(event->pos().x()),
+                             static_cast<double>(event->pos().y())};
+
+        const PickResult r = pick_entity(db_, viewport_, sp, pickbox_px());
+        if (!r.hit()) {
+            // A miss is silent, as in R12: nothing is said and the prompt
+            // stands. Announcing every empty click would be noise, since
+            // missing is how you decide you have finished selecting.
+            event->accept();
+            return;
+        }
+
+        engine_->supply(InputValue::of_entity(r.entity));
+        update();
+        // The bare handle, which is exactly what could have been typed at this
+        // prompt -- input_text.cpp parses a decimal handle here.
+        emit pointPicked(asked, QString::number(r.entity));
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton && wants_point()) {
         // Captured before supply(): afterwards the prompt is the next one, and
         // the transcript would attribute the answer to the wrong question.
@@ -183,7 +220,7 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event) {
     if (drag_ == Drag::None) {
         // Repaint only when something actually follows the cursor, so an idle
         // mouse over a large drawing costs nothing.
-        if (wants_point()) update();
+        if (wants_pick()) update();
         QWidget::mouseMoveEvent(event);
         return;
     }
