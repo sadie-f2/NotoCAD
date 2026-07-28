@@ -79,14 +79,30 @@ struct OsnapQuery {
     // It bounds which entities are considered, not which points -- see above.
     double aperture_px{10.0};
 
-    // Where the cursor unprojected to. PER, TAN and NEA are all defined
-    // relative to a point, and this is it. Without one they are skipped.
+    // Where the cursor unprojected to. NEAREST is defined relative to it: the
+    // point on the entity closest to where you are pointing.
     //
-    // Its quality bounds theirs: it is a point on the construction plane, not
-    // a true ray hit, which is the same simplification the viewport already
-    // makes when a click answers a point prompt.
+    // Its quality bounds NEA's: it is a point on the construction plane, not a
+    // true ray hit, which is the same simplification the viewport already makes
+    // when a click answers a point prompt.
     Vec3 reference{};
     bool has_reference{false};
+
+    // Where the point being placed is measured FROM -- the rubber-band base,
+    // which is the previous point of the line being drawn.
+    //
+    // PERPENDICULAR and TANGENT need this and not the cursor, and the
+    // distinction is the whole difference between them working and not. "Snap
+    // perpendicular" means perpendicular to the target as seen from where this
+    // segment starts. Measured from the cursor instead, the foot of the
+    // perpendicular is just the closest point on the target -- so PER silently
+    // becomes NEA, and TAN likewise collapses.
+    //
+    // Absent at the first point of a command, since there is nothing to be
+    // perpendicular or tangent from yet; PER and TAN are simply not offered
+    // then. R12 defers them to a second pick, which is not modelled here.
+    Vec3 from_point{};
+    bool has_from_point{false};
 };
 
 // A dense drawing can put hundreds of entities under one aperture, and the

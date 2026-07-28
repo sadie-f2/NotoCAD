@@ -354,3 +354,82 @@ TEST_CASE("osnap search: priority breaks an exact distance tie") {
     CHECK(h.type == OsnapType::Endpoint);
     CHECK_VEC(h.pos, 0.0, 0.0, 0.0, 1e-9);
 }
+
+TEST_CASE("osnap search: PER and TAN measure from the base point, not the cursor") {
+    Database db;
+    // A vertical target line, and a base point off to the left of it.
+    const Handle target = db.add(std::make_unique<Line>(Vec3{100, -200, 0}, Vec3{100, 200, 0}));
+    const Viewport v = plan_800x600();
+
+    OsnapQuery q;
+    q.mask = kOsnapPerpendicular;
+    q.aperture_px = 10.0;
+    q.reference = Vec3{100, 150, 0};  // where the cursor is: high up the line
+    q.has_reference = true;
+    q.from_point = Vec3{0, 0, 0};  // where the segment being drawn starts
+    q.has_from_point = true;
+
+    const OsnapHit h = osnap_search(db, v, at(100, 150), q);
+    CHECK(h.valid);
+    CHECK(h.type == OsnapType::Perpendicular);
+    CHECK(h.entity == target);
+
+    // The foot of the perpendicular from the ORIGIN is (100, 0) -- not (100,
+    // 150), which is what measuring from the cursor would have given. That
+    // difference is the whole bug this pins: from the cursor, the foot of the
+    // perpendicular is just the nearest point on the target, so PER silently
+    // becomes NEA.
+    CHECK_VEC(h.pos, 100.0, 0.0, 0.0, 1e-9);
+}
+
+TEST_CASE("osnap search: PER and TAN are not offered without a base point") {
+    Database db;
+    db.add(std::make_unique<Line>(Vec3{100, -200, 0}, Vec3{100, 200, 0}));
+    db.add(std::make_unique<Circle>(Vec3{100, 0, 0}, 50.0));
+    const Viewport v = plan_800x600();
+
+    // At the first point of a command there is nothing to be perpendicular or
+    // tangent from yet, so neither is offered rather than being computed from
+    // some other point and landing somewhere arbitrary.
+    OsnapQuery q;
+    q.mask = kOsnapPerpendicular | kOsnapTangent;
+    q.aperture_px = 10.0;
+    q.reference = Vec3{100, 150, 0};
+    q.has_reference = true;
+    q.has_from_point = false;
+
+    CHECK(!osnap_search(db, v, at(100, 150), q).valid);
+
+    // NEAREST is unaffected: it is the one derived snap that genuinely wants
+    // the cursor rather than the base point.
+    q.mask = kOsnapNearest;
+    CHECK(osnap_search(db, v, at(100, 150), q).valid);
+}
+
+TEST_CASE("osnap search: TAN is measured from the base point too") {
+    Database db;
+    // Circle of radius 50 centred at the origin; base point well outside it.
+    db.add(std::make_unique<Circle>(Vec3{0, 0, 0}, 50.0));
+    const Viewport v = plan_800x600();
+
+    OsnapQuery q;
+    q.mask = kOsnapTangent;
+    q.aperture_px = 10.0;
+    q.reference = Vec3{50, 0, 0};
+    q.has_reference = true;
+    q.from_point = Vec3{0, 100, 0};
+    q.has_from_point = true;
+
+    std::vector<OsnapHit> all;
+    osnap_candidates(db, v, at(50, 0), q, all);
+    CHECK(!all.empty());
+
+    // Every tangent point must be on the circle, and the segment from the base
+    // point to it must be perpendicular to the radius there -- which is what
+    // being a tangent means, and is false for anything measured from the cursor.
+    for (const OsnapHit& h : all) {
+        CHECK(h.type == OsnapType::Tangent);
+        CHECK_NEAR(length(h.pos), 50.0, 1e-9);
+        CHECK_NEAR(dot(normalize(h.pos - q.from_point), normalize(h.pos)), 0.0, 1e-9);
+    }
+}

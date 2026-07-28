@@ -86,8 +86,13 @@ void MainWindow::on_line_entered(const QString& line) {
     // A command may have drawn something, and the prompt has almost certainly
     // changed. Both are cheap to refresh unconditionally, and working out which
     // commands modify the database is exactly the coupling to avoid.
+    //
+    // The snap goes with them. A typed osnap override changes what the cursor
+    // is over without the mouse having moved, and a plain repaint would redraw
+    // the marker found under the previous mask -- so the override would look
+    // like it had been ignored until the mouse was jiggled.
     refresh_prompt();
-    view_->update();
+    view_->refresh_osnap();
 }
 
 void MainWindow::on_point_picked(const QString& prompt, const QString& answer) {

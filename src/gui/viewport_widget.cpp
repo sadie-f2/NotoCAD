@@ -218,6 +218,11 @@ void ViewportWidget::draw_rubber_band(QPainter& painter) const {
     painter.drawLine(QPointF(base.x, base.y), QPointF(cursor.x, cursor.y));
 }
 
+void ViewportWidget::refresh_osnap() {
+    update_osnap();
+    update();
+}
+
 void ViewportWidget::update_osnap() {
     snap_ = OsnapHit{};
     if (!cursor_inside_ || !wants_point()) return;
@@ -232,10 +237,21 @@ void ViewportWidget::update_osnap() {
     if (q.mask == kOsnapNone) return;
 
     q.aperture_px = aperture_px();
-    // The construction-plane point the cursor is over. PER, TAN and NEA are all
-    // defined relative to it, and it is the same point a click would produce.
+    // The construction-plane point under the cursor -- what NEAREST measures to,
+    // and the same point a click would produce.
     q.reference = pick_point(cursor_pos_);
     q.has_reference = true;
+
+    // Where this segment starts. PER and TAN are measured from here, not from
+    // the cursor. Prompt::base is the rubber-band origin, which is exactly the
+    // point "perpendicular to that, from here" means.
+    if (engine_->prompt().has_base) {
+        q.from_point = engine_->prompt().base;
+        q.has_from_point = true;
+    } else if (engine_->has_last_point()) {
+        q.from_point = engine_->last_point();
+        q.has_from_point = true;
+    }
 
     const ScreenPoint sp{static_cast<double>(cursor_pos_.x()),
                          static_cast<double>(cursor_pos_.y())};

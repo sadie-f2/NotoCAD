@@ -83,19 +83,27 @@ void collect_static(std::vector<OsnapHit>& out, const Candidate& c, const Viewpo
 
 void collect_derived(std::vector<OsnapHit>& out, const Candidate& c, const Viewport& vp,
                      const ScreenPoint& cursor, const OsnapQuery& q) {
-    if (!q.has_reference) return;  // all three are defined relative to a point
-
     Vec3 p{};
-    if (osnap_enabled(q.mask, OsnapType::Nearest) && nearest_point(*c.entity, q.reference, &p)) {
+
+    // NEAREST is the one that genuinely wants the cursor: the point on the
+    // entity closest to where you are pointing.
+    if (q.has_reference && osnap_enabled(q.mask, OsnapType::Nearest) &&
+        nearest_point(*c.entity, q.reference, &p)) {
         add_hit(out, vp, cursor, p, OsnapType::Nearest, c.handle, kNullHandle);
     }
+
+    // PER and TAN are measured from the rubber-band base, not the cursor.
+    // Using the cursor makes the foot of the perpendicular the closest point on
+    // the target, which is NEAREST wearing a different marker.
+    if (!q.has_from_point) return;
+
     if (osnap_enabled(q.mask, OsnapType::Perpendicular) &&
-        perpendicular_point(*c.entity, q.reference, &p)) {
+        perpendicular_point(*c.entity, q.from_point, &p)) {
         add_hit(out, vp, cursor, p, OsnapType::Perpendicular, c.handle, kNullHandle);
     }
     if (osnap_enabled(q.mask, OsnapType::Tangent)) {
         Vec3 tan[kMaxTangents];
-        const int n = tangent_points(*c.entity, q.reference, tan);
+        const int n = tangent_points(*c.entity, q.from_point, tan);
         for (int i = 0; i < n; ++i) {
             add_hit(out, vp, cursor, tan[i], OsnapType::Tangent, c.handle, kNullHandle);
         }

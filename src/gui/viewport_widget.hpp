@@ -46,6 +46,12 @@ public:
     void zoom_extents();
     void set_plan_view();
 
+    // Re-runs the snap search under the stationary cursor and repaints. The
+    // command line calls this after every entered line: typing an override, or
+    // a command that draws something, both change what the cursor is over
+    // without the mouse having moved.
+    void refresh_osnap();
+
 signals:
     // A click answered a prompt, so the command line needs to catch up. Carries
     // the prompt as it read before the click and the point that answered it:
