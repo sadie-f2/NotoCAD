@@ -26,6 +26,7 @@ add_executable(noto_tests
   test_array.cpp
   test_stretch.cpp
   test_ssget.cpp
+  test_inquiry.cpp
   test_render.cpp
   test_viewport.cpp
 )

@@ -509,8 +509,17 @@ TEST_CASE("commands: abbreviations resolve, exact names win") {
     // What R12 users expect: type enough to be unambiguous and press Enter.
     CHECK(resolve_command_name("LINE").name == "LINE");
     CHECK(resolve_command_name("line").name == "LINE");
-    CHECK(resolve_command_name("LI").name == "LINE");
-    CHECK(resolve_command_name("D").name == "DXFOUT");
+    // LI is LIST's acad.pgp alias, and an alias beats a prefix -- so it does
+    // not resolve to LINE even though LINE is the older command.
+    CHECK(resolve_command_name("LI").name == "LIST");
+    CHECK(resolve_command_name("LIN").name == "LINE");
+
+    // D used to mean DXFOUT, when that was the only command starting with it.
+    // DIST changed that, and the shortest-wins rule hands D to DIST -- which is
+    // also what a user typing one letter most likely wants.
+    CHECK(resolve_command_name("D").name == "DIST");
+    CHECK(resolve_command_name("DX").name == "DXFOUT");
+    CHECK(resolve_command_name("DIS").name == "DIST");
     // acad.pgp short forms.
     CHECK(resolve_command_name("C").name == "CIRCLE");
     CHECK(resolve_command_name("E").name == "ERASE");

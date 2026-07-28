@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <cmath>
+#include <cstdio>
 #include <numbers>
 #include <string>
 
@@ -1019,6 +1020,189 @@ Step StretchCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- inquiry: DIST, ID, AREA, LIST ------------------------------------------
+
+namespace {
+
+// R12 prints coordinates and distances to four places by default. Fixed rather
+// than %g, because a column of numbers that switches to exponent form part way
+// down is much harder to read back.
+std::string fmt(double v) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.4f", v);
+    return buf;
+}
+
+std::string fmt_point(const Vec3& p) {
+    return "X = " + fmt(p.x) + "  Y = " + fmt(p.y) + "  Z = " + fmt(p.z);
+}
+
+std::string fmt_degrees(double radians) {
+    return fmt(radians * 180.0 / std::numbers::pi);
+}
+
+Prompt ask_point(const char* message, const Vec3* base) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = message;
+    if (base) {
+        p.base = *base;
+        p.has_base = true;
+    }
+    return p;
+}
+
+}  // namespace
+
+Step DistCommand::start(CommandContext&) { return Step::ask(ask_point("First point", nullptr)); }
+
+Step DistCommand::next(CommandContext&, const InputValue& value) {
+    if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+    if (!have_first_) {
+        first_ = value.point;
+        have_first_ = true;
+        return Step::ask(ask_point("Second point", &first_));
+    }
+
+    const Vec3 d = value.point - first_;
+    const double planar = std::sqrt(d.x * d.x + d.y * d.y);
+
+    // R12 reports both angles: in the XY plane, and up from it. The second is
+    // the one that tells you a line is not flat when you thought it was.
+    std::string out = "Distance = " + fmt(length(d));
+    out += ",  Angle in X-Y Plane = " + fmt_degrees(std::atan2(d.y, d.x));
+    out += ",  Angle from X-Y Plane = " + fmt_degrees(std::atan2(d.z, planar));
+    out += "\nDelta X = " + fmt(d.x) + "   Delta Y = " + fmt(d.y) + "   Delta Z = " + fmt(d.z);
+    return Step::done(out);
+}
+
+Step IdCommand::start(CommandContext&) { return Step::ask(ask_point("Point", nullptr)); }
+
+Step IdCommand::next(CommandContext&, const InputValue& value) {
+    if (value.kind != InputKind::Point) return Step::failed("a point is required");
+    return Step::done(fmt_point(value.point));
+}
+
+Prompt AreaCommand::point_prompt() const {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = points_.empty() ? "First point" : "Next point";
+    p.keywords = {"Entity"};
+    p.allow_empty = !points_.empty();
+    if (!points_.empty()) {
+        p.base = points_.back();
+        p.has_base = true;
+    }
+    return p;
+}
+
+Step AreaCommand::start(CommandContext&) { return Step::ask(point_prompt()); }
+
+Step AreaCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (state_ == State::Entity) {
+        if (value.kind != InputKind::Entity) return Step::failed("an entity is required");
+        const Entity* e = ctx.db.get(value.entity);
+        if (!e) return Step::failed("no such entity");
+
+        // Only closed entities enclose an area. A line does not, and reporting
+        // zero for one would look like an answer rather than a refusal.
+        if (e->type() == EntityType::Circle) {
+            const double r = static_cast<const Circle*>(e)->radius();
+            const double area = std::numbers::pi * r * r;
+            return Step::done("Area = " + fmt(area) +
+                              ",  Circumference = " + fmt(2.0 * std::numbers::pi * r));
+        }
+        return Step::failed("that entity encloses no area");
+    }
+
+    if (keyword_is(value, "ENTITY")) {
+        state_ = State::Entity;
+        Prompt p;
+        p.kind = PromptKind::Entity;
+        p.message = "Select circle or closed entity";
+        return Step::ask(p);
+    }
+
+    if (value.kind == InputKind::None) {
+        if (points_.size() < 3) return Step::failed("at least three points are needed");
+
+        // The shoelace formula, in the XY plane. A sequence of picked points is
+        // implicitly closed, as R12 closes it.
+        double twice = 0.0;
+        double perimeter = 0.0;
+        for (std::size_t i = 0; i < points_.size(); ++i) {
+            const Vec3& a = points_[i];
+            const Vec3& b = points_[(i + 1) % points_.size()];
+            twice += a.x * b.y - b.x * a.y;
+            perimeter += length(b - a);
+        }
+        return Step::done("Area = " + fmt(std::abs(twice) * 0.5) +
+                          ",  Perimeter = " + fmt(perimeter));
+    }
+
+    if (value.kind != InputKind::Point) return Step::failed("a point is required");
+    points_.push_back(value.point);
+    state_ = State::Next;
+    return Step::ask(point_prompt());
+}
+
+Step ListCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
+
+Step ListCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (select_.feed(ctx, value)) {
+        case SelectionPrompter::Result::Selecting:
+            return Step::ask(select_.prompt(ctx));
+        case SelectionPrompter::Result::Rejected:
+            return Step::failed("an entity is required");
+        case SelectionPrompter::Result::Finished:
+            break;
+    }
+    if (ctx.selection.empty()) return Step::done("Nothing selected");
+
+    std::string out;
+    for (const Handle h : ctx.selection.handles()) {
+        const Entity* e = ctx.db.get(h);
+        if (!e) continue;
+
+        if (!out.empty()) out += "\n";
+        out += std::string(e->type_name()) + "  Handle = " + std::to_string(h);
+
+        const LayerId layer = e->props().layer;
+        if (layer < ctx.db.layers().size()) out += "  Layer: " + ctx.db.layer(layer).name;
+
+        switch (e->type()) {
+            case EntityType::Line: {
+                const Line* l = static_cast<const Line*>(e);
+                out += "\n  from  " + fmt_point(l->start());
+                out += "\n  to    " + fmt_point(l->end());
+                out += "\n  Length = " + fmt(l->length());
+                break;
+            }
+            case EntityType::Circle: {
+                const Circle* c = static_cast<const Circle*>(e);
+                out += "\n  center  " + fmt_point(c->center());
+                out += "\n  radius " + fmt(c->radius());
+                out += "\n  circumference " + fmt(2.0 * std::numbers::pi * c->radius());
+                out += "\n  area " + fmt(std::numbers::pi * c->radius() * c->radius());
+                break;
+            }
+            case EntityType::Arc: {
+                const Arc* a = static_cast<const Arc*>(e);
+                out += "\n  center  " + fmt_point(a->center());
+                out += "\n  radius " + fmt(a->radius());
+                out += "\n  start angle " + fmt_degrees(a->start_angle());
+                out += "\n  end angle " + fmt_degrees(a->end_angle());
+                out += "\n  length " + fmt(a->radius() * a->sweep());
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return Step::done(out);
+}
+
 // --- DXFOUT -----------------------------------------------------------------
 
 Step DxfOutCommand::start(CommandContext&) {
@@ -1049,7 +1233,11 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "CIRCLE") return std::make_unique<CircleCommand>();
     if (upper == "ERASE") return std::make_unique<EraseCommand>();
     if (upper == "DXFOUT") return std::make_unique<DxfOutCommand>();
+    if (upper == "AREA") return std::make_unique<AreaCommand>();
     if (upper == "ARRAY") return std::make_unique<ArrayCommand>();
+    if (upper == "DIST") return std::make_unique<DistCommand>();
+    if (upper == "ID") return std::make_unique<IdCommand>();
+    if (upper == "LIST") return std::make_unique<ListCommand>();
     if (upper == "MOVE") return std::make_unique<MoveCommand>(false);
     if (upper == "ROTATE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Rotate);
     if (upper == "SCALE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Scale);
@@ -1062,10 +1250,10 @@ CommandPtr make_command(std::string_view name) {
 }
 
 const std::vector<std::string>& command_names() {
-    static const std::vector<std::string> names = {"ARRAY",  "CIRCLE", "COPY",  "DXFOUT",
-                                                  "ERASE",  "LINE",   "MIRROR", "MOVE",
-                                                  "REDO",   "ROTATE", "SCALE", "STRETCH",
-                                                  "UNDO"};
+    static const std::vector<std::string> names = {
+        "AREA", "ARRAY", "CIRCLE",  "COPY", "DIST",    "DXFOUT",  "ERASE", "ID",
+        "LINE", "LIST",  "MIRROR",  "MOVE", "REDO",    "ROTATE",  "SCALE", "STRETCH",
+        "UNDO"};
     return names;
 }
 
@@ -1074,7 +1262,10 @@ const std::vector<CommandAlias>& command_aliases() {
     static const std::vector<CommandAlias> aliases = {
         {"C", "CIRCLE"},
         {"E", "ERASE"},
+        {"AA", "AREA"},
         {"AR", "ARRAY"},
+        {"DI", "DIST"},
+        {"LI", "LIST"},
         {"CP", "COPY"},
         {"L", "LINE"},
         {"M", "MOVE"},

@@ -264,6 +264,62 @@ private:
     Vec3 base_{};
 };
 
+// The inquiry commands: DIST, ID, AREA and LIST.
+//
+// They ask questions rather than change anything, which makes them the only
+// commands here that write no undo entry -- and the quickest way to check that
+// the geometry kernel agrees with what is on screen.
+//
+// The view commands they normally sit beside -- ZOOM, PAN, PLAN, VPOINT -- are
+// not here: they need a Viewport, and CommandContext deliberately holds none.
+// See SF_todo.md.
+class DistCommand final : public Command {
+public:
+    const char* name() const override { return "DIST"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    bool have_first_{false};
+    Vec3 first_{};
+};
+
+class IdCommand final : public Command {
+public:
+    const char* name() const override { return "ID"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
+// AREA: a sequence of points, or a single entity.
+//
+// R12 also has Add and Subtract modes for accumulating; those are not here.
+class AreaCommand final : public Command {
+public:
+    const char* name() const override { return "AREA"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { First, Next, Entity };
+
+    Prompt point_prompt() const;
+
+    State state_{State::First};
+    std::vector<Vec3> points_;
+};
+
+// LIST: dump what the database holds for the selected entities.
+class ListCommand final : public Command {
+public:
+    const char* name() const override { return "LIST"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    SelectionPrompter select_;
+};
+
 // DXFOUT: prompt for a file name and write the drawing. In R12 this is a
 // command, and it only lived as a LISP function because the command layer did
 // not exist yet. The (dxfout ...) function stays -- scripts want it -- but this
