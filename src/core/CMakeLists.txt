@@ -8,6 +8,7 @@ add_library(noto_core STATIC
   entities_dxf.cpp
   entities_draw.cpp
   entities_grip.cpp
+  polyline.cpp
   osnap_derived.cpp
   selection.cpp
   sysvar.cpp

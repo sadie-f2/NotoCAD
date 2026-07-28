@@ -43,6 +43,11 @@ public:
     // Entity type marker, handle, layer, colour, linetype and thickness.
     void write_common(const Entity& e);
 
+    // For entities that write more than one record -- POLYLINE emits VERTEX and
+    // SEQEND after itself, and each needs the same handle and layer.
+    std::string handle_text(Handle h) const;
+    std::string layer_name(const Entity& e) const;
+
     // Group 210/220/230, emitted only when the extrusion is not world Z.
     void write_extrusion(const Vec3& normal);
 

@@ -82,6 +82,13 @@ void DxfWriter::write_common(const Entity& e) {
     }
 }
 
+std::string DxfWriter::handle_text(Handle h) const { return to_hex(h); }
+
+std::string DxfWriter::layer_name(const Entity& e) const {
+    const LayerId lid = e.props().layer;
+    return lid < db_.layers().size() ? db_.layer(lid).name : std::string("0");
+}
+
 void DxfWriter::write_extrusion(const Vec3& normal) {
     if (is_default_normal(normal)) return;  // 0,0,1 is the implied default
     code(210, normal.x);

@@ -15,6 +15,8 @@
 
 #include "noto/entity.hpp"
 
+#include <vector>
+
 namespace noto {
 
 class Line final : public Entity {
@@ -126,6 +128,68 @@ private:
     double radius_{0.0};
     double start_angle_{0.0};
     double end_angle_{0.0};
+};
+
+// A vertex of a polyline. `bulge` is R12's DXF group 42: the tangent of a
+// quarter of the included angle of the arc leading to the NEXT vertex, signed
+// counterclockwise. Zero is a straight segment, which is the common case.
+//
+// Bulge rather than an explicit arc because that is what the file format
+// stores, and because it is the representation that survives editing: moving a
+// vertex keeps the arc's relationship to its neighbours without recomputing a
+// centre that might no longer exist.
+struct PolyVertex {
+    Vec3 pos{};
+    double bulge{0.0};
+};
+
+// POLYLINE.
+//
+// Vertices are owned here rather than being separate database entities, which
+// is the decision recorded in SF_todo.md: a 20,000-face mesh stored the R12 way
+// is 20,000 entities, 20,000 undo clones, and an O(n^2) entnext walk. The DXF
+// layer synthesises VERTEX and SEQEND records at the boundary, and R14's
+// LWPOLYLINE went the same way.
+class Polyline final : public Entity {
+public:
+    Polyline() : Entity(EntityType::Polyline) {}
+
+    const std::vector<PolyVertex>& vertices() const { return vertices_; }
+    std::vector<PolyVertex>& vertices() { return vertices_; }
+
+    void add(const Vec3& p, double bulge = 0.0) { vertices_.push_back({p, bulge}); }
+
+    std::size_t size() const { return vertices_.size(); }
+    bool empty() const { return vertices_.empty(); }
+
+    // A closed polyline has a segment from the last vertex back to the first.
+    bool closed() const { return closed_; }
+    void set_closed(bool c) { closed_ = c; }
+
+    // How many segments it draws: one per vertex when closed, one fewer when
+    // not. Zero for anything with fewer than two vertices.
+    std::size_t segment_count() const;
+
+    // The arc through segment `i`, if it has one. False for a straight segment
+    // or an out-of-range index. Angles are in the polyline's own plane.
+    bool segment_arc(std::size_t i, Vec3* centre, double* radius, double* start_angle,
+                     double* end_angle) const;
+
+    // Total length along the polyline, arcs included.
+    double length() const;
+
+    EntityPtr clone() const override;
+    void transform(const Mat4& m) override;
+    BBox bbox() const override;
+    void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
+    void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
+
+private:
+    std::vector<PolyVertex> vertices_;
+    bool closed_{false};
 };
 
 }  // namespace noto
