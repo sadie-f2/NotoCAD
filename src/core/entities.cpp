@@ -92,6 +92,15 @@ const char* osnap_name(OsnapType t) {
     return "???";
 }
 
+const char* grip_kind_name(GripKind k) {
+    switch (k) {
+        case GripKind::Stretch: return "STRETCH";
+        case GripKind::Move: return "MOVE";
+        case GripKind::Radius: return "RADIUS";
+    }
+    return "???";
+}
+
 // Written out rather than shifted: R12's OSMODE bit order is not this enum's
 // declaration order. See the comment in osnap.hpp.
 OsnapMask osnap_bit(OsnapType t) {

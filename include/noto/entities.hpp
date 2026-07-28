@@ -35,6 +35,8 @@ public:
     void transform(const Mat4& m) override;
     BBox bbox() const override;
     void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
     void dxf_write(DxfWriter& w) const override;
     void draw(const DrawContext& ctx, Renderer& r) const override;
 
@@ -63,6 +65,8 @@ public:
     void transform(const Mat4& m) override;
     BBox bbox() const override;
     void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
     void dxf_write(DxfWriter& w) const override;
     void draw(const DrawContext& ctx, Renderer& r) const override;
 
@@ -112,6 +116,8 @@ public:
     void transform(const Mat4& m) override;
     BBox bbox() const override;
     void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
     void dxf_write(DxfWriter& w) const override;
     void draw(const DrawContext& ctx, Renderer& r) const override;
 

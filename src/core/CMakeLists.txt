@@ -7,6 +7,7 @@ add_library(noto_core STATIC
   entities.cpp
   entities_dxf.cpp
   entities_draw.cpp
+  entities_grip.cpp
   osnap_derived.cpp
   sysvar.cpp
   pick.cpp

@@ -43,12 +43,26 @@ glyph instead. Both become phase 6 and 8 work.
 
 ## Phase 4b — the grip/stretch vtable
 
-- [ ] Decide the interface: expose defining points, and move a named subset of them
-- [ ] Grips carry *behaviour*, not just position — dragging a circle's quadrant grip
-      changes its radius, dragging its centre moves it. Same coordinates as
-      `osnap_points()` in several cases, different meaning, so it cannot reuse them
-- [ ] Implement across Line, Circle, Arc; headless tests
-- [ ] No interactive dragging yet — that needs phase 5
+*Done.*
+
+- [x] The interface: `grips()` reports defining points, `stretch(delta, indices, n)`
+      moves a named subset. An index list rather than a bitmask, so a polyline with
+      hundreds of vertices fits the same signature
+- [x] Grips carry *behaviour*, not just position — `GripKind::Stretch` / `Move` /
+      `Radius`. A circle's quadrant and centre grips are both points on the same
+      circle and mean different things, which is why this is not `osnap_points()`
+- [x] Implemented across Line, Circle, Arc; headless tests
+- [x] No interactive dragging yet — that needs phase 5
+
+The property worth keeping as entities are added: naming *every* Stretch grip must
+equal translating the entity. That is what makes STRETCH degenerate into MOVE rather
+than into nonsense when the selection was not a crossing window, and it is tested.
+
+*To verify before phase 5:* R12's exact rule for stretching an **arc** endpoint is not
+established. The current behaviour slides the endpoint along the arc's own circle,
+preserving centre and radius — predictable, but chosen for that rather than proven
+faithful. Check it against the R12 documentation alongside the crossing-window
+question below.
 
 **Why now, before the command flood.** The only mutator on the entity vtable today is
 `transform(const Mat4&)`, which moves the *whole* entity. STRETCH moves some defining

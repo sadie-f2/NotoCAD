@@ -9,6 +9,7 @@
 #pragma once
 
 #include "noto/bbox.hpp"
+#include "noto/grip.hpp"
 #include "noto/mat4.hpp"
 #include "noto/osnap.hpp"
 #include "noto/vec3.hpp"
@@ -86,6 +87,21 @@ public:
 
     // Appends this entity's static snap points (END/MID/CEN/QUA/...).
     virtual void osnap_points(std::vector<OsnapPoint>& out) const = 0;
+
+    // Appends this entity's grips: its defining points, each carrying what
+    // dragging it means. Deliberately separate from osnap_points() -- the
+    // coordinates frequently coincide and the semantics do not.
+    virtual void grips(std::vector<Grip>& out) const = 0;
+
+    // Moves the defining points named by `indices` (grip indices, in any order)
+    // by `delta`, leaving the rest where they are. This is what transform()
+    // cannot express, and it is what both STRETCH and grip dragging are built
+    // from.
+    //
+    // Indices that name no grip are ignored rather than raising: STRETCH hands
+    // over whatever fell inside a window, and a caller working from a stale
+    // grip list should get nothing rather than an error.
+    virtual void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) = 0;
 
     virtual void dxf_write(DxfWriter& w) const = 0;
 

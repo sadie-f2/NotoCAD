@@ -17,6 +17,7 @@ add_executable(noto_tests
   test_sysvar.cpp
   test_pick.cpp
   test_osnap_search.cpp
+  test_grip.cpp
   test_render.cpp
   test_viewport.cpp
 )
