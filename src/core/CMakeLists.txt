@@ -10,6 +10,7 @@ add_library(noto_core STATIC
   osnap_derived.cpp
   sysvar.cpp
   pick.cpp
+  osnap_search.cpp
   render.cpp
   scene.cpp
   viewport.cpp

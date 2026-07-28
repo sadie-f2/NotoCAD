@@ -1,0 +1,184 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
+#include "noto/osnap_search.hpp"
+
+#include "noto/database.hpp"
+#include "noto/osnap_derived.hpp"
+#include "noto/scene.hpp"
+
+#include <algorithm>
+#include <cmath>
+
+namespace noto {
+namespace {
+
+struct Candidate {
+    const Entity* entity{nullptr};
+    Handle handle{kNullHandle};
+};
+
+// Distance from the cursor to a world point, in pixels. False when the point
+// does not project finitely.
+bool screen_distance(const Viewport& vp, const ScreenPoint& cursor, const Vec3& p, double* out) {
+    const ScreenPoint sp = vp.project(p);
+    if (!std::isfinite(sp.x) || !std::isfinite(sp.y)) return false;
+    const double dx = sp.x - cursor.x;
+    const double dy = sp.y - cursor.y;
+    *out = std::sqrt(dx * dx + dy * dy);
+    return true;
+}
+
+void add_hit(std::vector<OsnapHit>& out, const Viewport& vp, const ScreenPoint& cursor,
+             double aperture_px, const Vec3& pos, OsnapType type, Handle a, Handle b) {
+    double d = 0.0;
+    if (!screen_distance(vp, cursor, pos, &d)) return;
+    if (d > aperture_px) return;
+
+    OsnapHit h;
+    h.pos = pos;
+    h.type = type;
+    h.entity = a;
+    h.entity2 = b;
+    h.distance_px = d;
+    h.valid = true;
+    out.push_back(h);
+}
+
+// Strict weak ordering, and deliberately no epsilon anywhere in it. Letting
+// priority break near-ties -- `if (fabs(da - db) > eps) return da < db;` -- is
+// the obvious-looking way to write this and it is not transitive, which makes
+// std::sort undefined rather than merely differently ordered. Distances compare
+// exactly; the handle tiebreak is what makes the result deterministic.
+bool better(const OsnapHit& a, const OsnapHit& b) {
+    const bool a_discrete = osnap_is_discrete(a.type);
+    const bool b_discrete = osnap_is_discrete(b.type);
+    if (a_discrete != b_discrete) return a_discrete;
+
+    if (a.distance_px != b.distance_px) return a.distance_px < b.distance_px;
+
+    const int pa = osnap_priority(a.type);
+    const int pb = osnap_priority(b.type);
+    if (pa != pb) return pa < pb;
+
+    if (a.entity != b.entity) return a.entity < b.entity;
+    return a.entity2 < b.entity2;
+}
+
+void collect_static(std::vector<OsnapHit>& out, const Candidate& c, const Viewport& vp,
+                    const ScreenPoint& cursor, const OsnapQuery& q,
+                    std::vector<OsnapPoint>& scratch) {
+    scratch.clear();
+    c.entity->osnap_points(scratch);
+    for (const OsnapPoint& p : scratch) {
+        if (!osnap_enabled(q.mask, p.type)) continue;
+        add_hit(out, vp, cursor, q.aperture_px, p.pos, p.type, c.handle, kNullHandle);
+    }
+}
+
+void collect_derived(std::vector<OsnapHit>& out, const Candidate& c, const Viewport& vp,
+                     const ScreenPoint& cursor, const OsnapQuery& q) {
+    if (!q.has_reference) return;  // all three are defined relative to a point
+
+    Vec3 p{};
+    if (osnap_enabled(q.mask, OsnapType::Nearest) && nearest_point(*c.entity, q.reference, &p)) {
+        add_hit(out, vp, cursor, q.aperture_px, p, OsnapType::Nearest, c.handle, kNullHandle);
+    }
+    if (osnap_enabled(q.mask, OsnapType::Perpendicular) &&
+        perpendicular_point(*c.entity, q.reference, &p)) {
+        add_hit(out, vp, cursor, q.aperture_px, p, OsnapType::Perpendicular, c.handle,
+                kNullHandle);
+    }
+    if (osnap_enabled(q.mask, OsnapType::Tangent)) {
+        Vec3 tan[kMaxTangents];
+        const int n = tangent_points(*c.entity, q.reference, tan);
+        for (int i = 0; i < n; ++i) {
+            add_hit(out, vp, cursor, q.aperture_px, tan[i], OsnapType::Tangent, c.handle,
+                    kNullHandle);
+        }
+    }
+}
+
+void collect_intersections(std::vector<OsnapHit>& out, const std::vector<Candidate>& set,
+                           const Viewport& vp, const ScreenPoint& cursor, const OsnapQuery& q) {
+    Vec3 pts[kMaxIntersections];
+    for (std::size_t i = 0; i < set.size(); ++i) {
+        for (std::size_t j = i + 1; j < set.size(); ++j) {
+            const int n = intersect_entities(*set[i].entity, *set[j].entity, pts);
+            for (int k = 0; k < n; ++k) {
+                // Both handles recorded, in drawing order, so the pair is
+                // reported the same way whichever side it was found from.
+                add_hit(out, vp, cursor, q.aperture_px, pts[k], OsnapType::Intersection,
+                        set[i].handle, set[j].handle);
+            }
+        }
+    }
+}
+
+}  // namespace
+
+int osnap_priority(OsnapType t) {
+    switch (t) {
+        case OsnapType::Endpoint: return 0;
+        case OsnapType::Midpoint: return 1;
+        case OsnapType::Center: return 2;
+        case OsnapType::Node: return 3;
+        case OsnapType::Quadrant: return 4;
+        case OsnapType::Intersection: return 5;
+        case OsnapType::Insert: return 6;
+        case OsnapType::Perpendicular: return 7;
+        case OsnapType::Tangent: return 8;
+        case OsnapType::Nearest: return 9;
+    }
+    return 99;
+}
+
+bool osnap_is_discrete(OsnapType t) {
+    switch (t) {
+        case OsnapType::Perpendicular:
+        case OsnapType::Tangent:
+        case OsnapType::Nearest: return false;
+        default: return true;
+    }
+}
+
+void osnap_candidates(const Database& db, const Viewport& vp, const ScreenPoint& cursor,
+                      const OsnapQuery& q, std::vector<OsnapHit>& out) {
+    out.clear();
+    if (q.mask == kOsnapNone) return;  // the default state of a drawing
+
+    // The aperture set: visible entities whose padded screen box contains the
+    // cursor. Gathered backwards so that capping keeps the topmost entities,
+    // which are the ones being pointed at.
+    std::vector<Candidate> set;
+    const std::vector<Handle>& order = db.order();
+    for (std::size_t i = order.size(); i-- > 0 && set.size() < kMaxApertureEntities;) {
+        const Entity* e = db.get(order[i]);
+        if (!e) continue;
+        if (!entity_visible(db, *e)) continue;
+        if (!entity_near_cursor(*e, vp, cursor, q.aperture_px)) continue;
+        set.push_back(Candidate{e, order[i]});
+    }
+    if (set.empty()) return;
+
+    std::vector<OsnapPoint> scratch;
+    for (const Candidate& c : set) {
+        collect_static(out, c, vp, cursor, q, scratch);
+        collect_derived(out, c, vp, cursor, q);
+    }
+
+    if (osnap_enabled(q.mask, OsnapType::Intersection)) {
+        collect_intersections(out, set, vp, cursor, q);
+    }
+
+    std::sort(out.begin(), out.end(), better);
+}
+
+OsnapHit osnap_search(const Database& db, const Viewport& vp, const ScreenPoint& cursor,
+                      const OsnapQuery& q) {
+    std::vector<OsnapHit> candidates;
+    osnap_candidates(db, vp, cursor, q, candidates);
+    return candidates.empty() ? OsnapHit{} : candidates.front();
+}
+
+}  // namespace noto
