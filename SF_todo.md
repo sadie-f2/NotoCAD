@@ -235,6 +235,11 @@ checking against the documentation:
 
 ## STRETCH details taken from reasoning, not from the R12 manual
 
+*Confirmed correct and not to be "fixed": STRETCH will happily pull an object out of
+the construction plane, because the displacement is a full 3D vector and the grip
+mechanism applies it as one. Modern AutoCAD does the same. Whether R12 did is untested
+and does not matter — this is the behaviour we want.*
+
 - **An arc caught by its centre alone does nothing.** Only Stretch-kind grips are
   eligible, which for an arc means its endpoints; the centre is a Move grip. Whether
   R12 moves an arc whose centre falls inside the crossing window is unverified.
@@ -242,6 +247,32 @@ checking against the documentation:
   to its Move grip. That matches R12's behaviour of moving a circle when its centre is
   inside, and it also means the crossing box has to cross the rim *and* contain the
   centre — crossing the rim alone selects the circle but moves nothing.
+
+## View commands — what is known before they are written
+
+Recorded from Sadie's daily AutoCAD use, so the design does not have to be guessed at
+when phase 6 starts.
+
+**VPOINT is interpreted in the current coordinate system** — UCS when one is active,
+WCS otherwise. So VPOINT is not a world-space direction that happens to be typed in;
+it is a direction in the current CS, and the same numbers mean different views under
+different UCSs. This ties phase 6 to phase 12 more tightly than the table suggests:
+VPOINT written against WCS only would need revisiting rather than extending. Same
+`construction_normal()` seam the transform commands already isolated.
+
+**ZOOM's options are All, Center, Dynamic, Extents, Left, Previous, Window, and a
+scale factor.** Previous is the interesting one.
+
+*Open:* whether ZOOM Previous also restores a view direction changed by VPOINT.
+AutoCAD 2026 does; R12 is unverified.
+
+**The design consequence, which removes the risk either way:** the previous-view stack
+should hold a complete `Viewport` state — target, view height, azimuth, elevation — and
+not a zoom rectangle. Then "does VPOINT push onto the stack" is a one-line policy
+decision that can be changed after testing against real drawings, rather than a change
+to what the stack is made of. Storing only a zoom extent would bake the answer in.
+
+Worth deciding the stack depth at the same time: R12 remembered ten previous views.
 
 ## One decision now blocks three things
 
