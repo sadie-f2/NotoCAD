@@ -45,6 +45,11 @@ public:
 
     bool failed() const { return !error_.empty(); }
     const std::string& error() const { return error_; }
+
+    // Non-empty when the last next_value() stopped because it met an
+    // apostrophe. The caller runs that command and then pulls again.
+    const std::string& transparent() const { return transparent_; }
+    void clear_transparent() { transparent_.clear(); }
     bool exhausted() const { return pos_ >= tokens_.size(); }
 
 private:
@@ -52,6 +57,7 @@ private:
     bool from_lisp(const Prompt& prompt, const std::string& source, InputValue& out);
 
     std::vector<std::string> tokens_;
+    std::string transparent_;
     lisp::Interp& in_;
     std::size_t pos_{0};
     std::string error_;
@@ -92,6 +98,15 @@ bool PromptLineSource::next_value(const Prompt& prompt, InputValue& out) {
         return from_lisp(prompt, token, out);
     }
 
+    // 'ZOOM and friends: an apostrophe runs a command inside this one and
+    // hands the question back. Handled here rather than in parse_input because
+    // it is not an answer to the prompt at all -- the prompt is about to be
+    // asked again, unchanged.
+    if (token.size() > 1 && token[0] == '\'') {
+        transparent_ = token.substr(1);
+        return false;  // no value: the caller sees the request and runs it
+    }
+
     // R12 has no Escape key over a pipe, so the word is accepted too.
     if (upcase(token) == "CANCEL") {
         out = InputValue::cancel();
@@ -100,6 +115,33 @@ bool PromptLineSource::next_value(const Prompt& prompt, InputValue& out) {
 
     if (!parse_input(prompt, token, out, error_)) return false;
     return true;
+}
+
+// Drives a line of answers into the engine, stopping to run any transparent
+// command it meets and then carrying on. Without the loop, 'ZOOM would eat the
+// rest of the line: the source stops at the apostrophe, and whatever followed
+// it would never be pulled.
+void run_with_transparent(CommandEngine& engine, PromptOutput& out, PromptLineSource& source) {
+    for (;;) {
+        engine.run(source);
+        if (source.transparent().empty()) break;
+
+        const std::string typed = source.transparent();
+        source.clear_transparent();
+
+        const CommandMatch match = resolve_command_name(upcase(typed));
+        if (!match.ok()) {
+            out.write_error("Unknown command \"" + upcase(typed) + "\".\n");
+            continue;
+        }
+        if (!command_is_transparent(match.name)) {
+            // R12 says so rather than running it and destroying the outer
+            // command's state behind the user's back.
+            out.write_error("** " + match.name + " cannot be used transparently **\n");
+            continue;
+        }
+        engine.begin_transparent(make_command(match.name));
+    }
 }
 
 // Writes a session's output to the standard streams, which is what a terminal
@@ -244,7 +286,7 @@ bool PromptSession::feed_line(const std::string& line) {
         if (tokens.empty()) tokens.emplace_back();
 
         PromptLineSource source(std::move(tokens), in_);
-        engine_.run(source);
+        run_with_transparent(engine_, out_, source);
         if (source.failed()) out_.write_error("; " + source.error() + "\n");
         if (!engine_.active()) report_finished();
         return true;
@@ -298,7 +340,7 @@ bool PromptSession::feed_line(const std::string& line) {
     // Anything after the command name on the same line answers its prompts.
     if (tokens.size() > 1) {
         PromptLineSource source(std::vector<std::string>(tokens.begin() + 1, tokens.end()), in_);
-        engine_.run(source);
+        run_with_transparent(engine_, out_, source);
         if (source.failed()) out_.write_error("; " + source.error() + "\n");
     }
     if (!engine_.active()) report_finished();

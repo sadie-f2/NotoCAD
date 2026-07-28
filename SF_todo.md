@@ -149,7 +149,7 @@ rather than guessing — the interface hides which one it is.
 
 | # | Phase | Why it sits here |
 |---|---|---|
-| 6 | View commands | ZOOM, PAN, VIEW, REGEN, REDRAW. Unblocked: `ViewControl` exists and PLAN is done, so these are commands on top of an interface that is already implemented. **VPOINT is deliberately deferred to phase 12**, since it is interpreted in the current CS and writing it against WCS only would mean writing it twice. The inquiry half (DIST, ID, AREA, LIST) is done. |
+| 6 | View commands | *Mostly done.* ZOOM, PAN, PLAN and the inquiry commands are built, with transparent (`'ZOOM`) support. Still to write: VIEW (named views), REGEN, REDRAW, and ZOOM's Center, Left and Dynamic options. **VPOINT is deferred to phase 12**, since it is interpreted in the current CS and writing it against WCS only would mean writing it twice. |
 | 7 | Entity breadth | PLINE, POINT, SOLID, 3DFACE, TEXT, then PEDIT. Forces the TEXT rendering decision (open question 2). Afterwards, selection, hit-testing, osnap, transforms and DXF are all exercised against a realistic entity set instead of Line/Circle/Arc. |
 | 8 | Tables and settings | LAYER, LTYPE and dash rendering, COLOR, LTSCALE, UNITS, LIMITS. Linetypes touch three layers at once: the DXF table, dash generation in the render path, and LTSCALE — not just a table entry. |
 | 9 | DXF read and OPEN | Closes the write-only gap. `dxf.hpp` has `DxfWriter` and nothing else, so the drawing cannot be reopened — not even our own output — and the "open it in other CAD software" correctness gate runs one way only. Placed after 7–8 so the reader is written once against a fuller entity and table set rather than retrofitted, but see open question 6. |
@@ -287,7 +287,12 @@ scale), **PAN**, **VIEW**, **REGEN**, **REDRAW**. The ViewControl methods for zo
 pan already exist and are implemented in the widget; only the commands are missing.
 
 `SelectionPrompter::set_view_axes()` can now be fed from `ctx.view->view_basis()`,
-which fixes selection windows under orbit. Not done yet.
+which fixes selection windows under orbit. Not done yet — the commands each own a
+prompter privately, so something has to push the basis in when selection starts.
+
+ZOOM's All and Extents are currently the same thing. They diverge once LIMITS exists:
+All shows the limits or the extents, whichever is larger. Offering two words for one
+behaviour is honest only while that is temporary — phase 8.
 
 **Interactive AutoLISP input** — `entsel` and the `get*` family — should follow the
 same shape: an abstract `UserInput` with `bool ask(const Prompt&, InputValue&)`,

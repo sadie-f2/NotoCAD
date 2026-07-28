@@ -1045,6 +1045,113 @@ Step PlanCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::done("Regenerating drawing.");
 }
 
+// --- ZOOM / PAN -------------------------------------------------------------
+
+Step ZoomCommand::start(CommandContext&) {
+    Prompt p;
+    // R12's own wording. Dynamic, Center and Left are not implemented yet and
+    // are deliberately absent from the list rather than offered and refused.
+    p.kind = PromptKind::Distance;
+    p.message = "All/Extents/Previous/Window/<Scale (X)>";
+    p.keywords = {"All", "Extents", "Previous", "Window"};
+    return Step::ask(p);
+}
+
+Step ZoomCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (!ctx.view) return Step::failed("no view to change");
+
+    switch (state_) {
+        case State::Option: {
+            if (keyword_is(value, "EXTENTS") || keyword_is(value, "ALL")) {
+                // All and Extents differ only once LIMITS exists: All shows the
+                // limits or the extents, whichever is larger. Until then they
+                // are the same view, and pretending otherwise would be
+                // decoration.
+                ctx.view->zoom_extents();
+                return Step::done();
+            }
+            if (keyword_is(value, "PREVIOUS")) {
+                if (!ctx.view->zoom_previous()) return Step::done("No previous view");
+                return Step::done();
+            }
+            if (keyword_is(value, "WINDOW")) {
+                state_ = State::WindowFirst;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "First corner";
+                return Step::ask(p);
+            }
+
+            // A bare number is a scale factor, as R12 has it.
+            double factor = 0.0;
+            if (!distance_from(value, Vec3{0, 0, 0}, factor)) {
+                return Step::failed("expected a scale factor or an option");
+            }
+            if (factor <= 0.0) return Step::failed("scale must be positive");
+            ctx.view->zoom_scale(factor);
+            return Step::done();
+        }
+
+        case State::WindowFirst: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            first_ = value.point;
+            state_ = State::WindowSecond;
+
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Other corner";
+            p.base = first_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::WindowSecond: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            ctx.view->zoom_window(first_, value.point);
+            return Step::done();
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+Step PanCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Displacement";
+    return Step::ask(p);
+}
+
+Step PanCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (!ctx.view) return Step::failed("no view to change");
+    if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+    if (!have_first_) {
+        first_ = value.point;
+        have_first_ = true;
+
+        Prompt p;
+        p.kind = PromptKind::Point;
+        p.message = "Second point";
+        p.base = first_;
+        p.has_base = true;
+        return Step::ask(p);
+    }
+
+    // R12 pans by dragging the drawing, so the view moves the other way: the
+    // point you grabbed ends up where you dropped it.
+    ctx.view->pan(first_, value.point);
+    return Step::done();
+}
+
+bool command_is_transparent(std::string_view name) {
+    const std::string upper = upcase(name);
+    // The test is whether it changes drawing state, not whether it is useful
+    // mid-command. ERASE would be very useful mid-command and must never be
+    // transparent, because the outer command may be holding handles.
+    return upper == "ZOOM" || upper == "PAN" || upper == "PLAN" || upper == "REDRAW" ||
+           upper == "ID" || upper == "DIST";
+}
+
 // --- inquiry: DIST, ID, AREA, LIST ------------------------------------------
 
 namespace {
@@ -1263,7 +1370,9 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "DIST") return std::make_unique<DistCommand>();
     if (upper == "ID") return std::make_unique<IdCommand>();
     if (upper == "LIST") return std::make_unique<ListCommand>();
+    if (upper == "PAN") return std::make_unique<PanCommand>();
     if (upper == "PLAN") return std::make_unique<PlanCommand>();
+    if (upper == "ZOOM") return std::make_unique<ZoomCommand>();
     if (upper == "MOVE") return std::make_unique<MoveCommand>(false);
     if (upper == "ROTATE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Rotate);
     if (upper == "SCALE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Scale);
@@ -1278,8 +1387,8 @@ CommandPtr make_command(std::string_view name) {
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
         "AREA", "ARRAY", "CIRCLE",  "COPY", "DIST",    "DXFOUT",  "ERASE", "ID",
-        "LINE", "LIST",  "MIRROR",  "MOVE", "PLAN",    "REDO",    "ROTATE", "SCALE",
-        "STRETCH", "UNDO"};
+        "LINE", "LIST",  "MIRROR",  "MOVE", "PAN",     "PLAN",    "REDO",   "ROTATE",
+        "SCALE", "STRETCH", "UNDO", "ZOOM"};
     return names;
 }
 
@@ -1291,6 +1400,8 @@ const std::vector<CommandAlias>& command_aliases() {
         {"AA", "AREA"},
         {"AR", "ARRAY"},
         {"DI", "DIST"},
+        {"P", "PAN"},
+        {"Z", "ZOOM"},
         {"LI", "LIST"},
         {"CP", "COPY"},
         {"L", "LINE"},

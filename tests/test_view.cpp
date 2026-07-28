@@ -143,3 +143,208 @@ TEST_CASE("view: the context carries the control, and it is optional") {
     engine.set_view_control(nullptr);
     CHECK(engine.view_control() == nullptr);
 }
+
+TEST_CASE("zoom: extents, scale and previous") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("ZOOM"));
+    engine.supply(InputValue::of_keyword("EXTENTS"));
+    CHECK(view.calls.back() == "extents");
+
+    engine.begin(make_command("ZOOM"));
+    engine.supply(InputValue::of_real(2.0));
+    CHECK(view.calls.back() == "scale");
+    CHECK_NEAR(view.factor, 2.0, 1e-12);
+
+    engine.begin(make_command("ZOOM"));
+    engine.supply(InputValue::of_keyword("PREVIOUS"));
+    CHECK(view.calls.back() == "previous");
+}
+
+TEST_CASE("zoom: previous reports when there is nothing to go back to") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    view.has_previous = false;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("ZOOM"));
+    engine.supply(InputValue::of_keyword("PREVIOUS"));
+    CHECK(engine.status() == EngineStatus::Finished);
+    CHECK(engine.message() == "No previous view");
+}
+
+TEST_CASE("zoom: a window takes two corners") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("ZOOM"));
+    engine.supply(InputValue::of_keyword("WINDOW"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    CHECK(engine.prompt().has_base);  // rubber-bands from the first corner
+    engine.supply(InputValue::of_point({10, 5, 0}));
+
+    CHECK(view.calls.back() == "window");
+    CHECK_VEC(view.first, 0.0, 0.0, 0.0, 1e-12);
+    CHECK_VEC(view.second, 10.0, 5.0, 0.0, 1e-12);
+}
+
+TEST_CASE("zoom: a negative or zero scale is refused") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("ZOOM"));
+    engine.supply(InputValue::of_real(0.0));
+    CHECK(engine.status() == EngineStatus::Failed);
+    CHECK(view.calls.empty());
+}
+
+TEST_CASE("pan: two points give a displacement") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("PAN"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({5, 5, 0}));
+
+    CHECK(view.calls.back() == "pan");
+    CHECK_VEC(view.first, 0.0, 0.0, 0.0, 1e-12);
+    CHECK_VEC(view.second, 5.0, 5.0, 0.0, 1e-12);
+}
+
+TEST_CASE("transparent: 'ZOOM inside LINE hands the prompt back") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("LINE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    const std::string outer = engine.prompt().text();
+    CHECK(engine.prompt().has_base);  // LINE is rubber-banding from the first point
+
+    engine.begin_transparent(make_command("ZOOM"));
+    CHECK(engine.in_transparent());
+    CHECK(engine.active());
+    CHECK(engine.prompt().text() != outer);  // ZOOM is asking now
+
+    engine.supply(InputValue::of_keyword("EXTENTS"));
+    CHECK(!engine.in_transparent());
+    CHECK(engine.active());
+
+    // The original question comes back word for word, still rubber-banding.
+    CHECK(engine.prompt().text() == outer);
+    CHECK(engine.prompt().has_base);
+
+    // And LINE finishes as if nothing had happened.
+    engine.supply(InputValue::of_point({10, 0, 0}));
+    engine.supply(InputValue::none());
+    CHECK(engine.status() == EngineStatus::Finished);
+    CHECK(db.size() == 1);
+}
+
+TEST_CASE("transparent: escaping a transparent command spares the outer one") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("LINE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    const std::string outer = engine.prompt().text();
+
+    engine.begin_transparent(make_command("ZOOM"));
+    engine.supply(InputValue::cancel());
+
+    // Escape was about the view, so it must not cost the line.
+    CHECK(!engine.in_transparent());
+    CHECK(engine.active());
+    CHECK(engine.prompt().text() == outer);
+}
+
+TEST_CASE("transparent: a failing transparent command does not take the outer one down") {
+    Database db;
+    CommandEngine engine(db);
+    // No view: ZOOM will fail.
+    engine.begin(make_command("LINE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    const std::string outer = engine.prompt().text();
+
+    engine.begin_transparent(make_command("ZOOM"));
+    engine.supply(InputValue::of_keyword("EXTENTS"));
+
+    CHECK(engine.active());
+    CHECK(engine.prompt().text() == outer);
+}
+
+TEST_CASE("transparent: with nothing running it is just a command") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin_transparent(make_command("ZOOM"));
+    CHECK(!engine.in_transparent());
+    CHECK(engine.active());
+    engine.supply(InputValue::of_keyword("EXTENTS"));
+    CHECK(engine.status() == EngineStatus::Finished);
+}
+
+TEST_CASE("transparent: only commands that change nothing qualify") {
+    CHECK(command_is_transparent("ZOOM"));
+    CHECK(command_is_transparent("PAN"));
+    CHECK(command_is_transparent("PLAN"));
+    CHECK(command_is_transparent("zoom"));
+
+    // ERASE would be very useful mid-command and must never be transparent:
+    // the outer command may be holding handles it would invalidate.
+    CHECK(!command_is_transparent("ERASE"));
+    CHECK(!command_is_transparent("LINE"));
+    CHECK(!command_is_transparent("MOVE"));
+    CHECK(!command_is_transparent("UNDO"));
+}
+
+TEST_CASE("transparent: a transparent command adds no undo step") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("LINE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.begin_transparent(make_command("ZOOM"));
+    engine.supply(InputValue::of_keyword("EXTENTS"));
+    engine.supply(InputValue::of_point({10, 0, 0}));
+    engine.supply(InputValue::none());
+
+    // One LINE, one undo step -- the 'ZOOM sits inside it and records nothing.
+    CHECK(db.journal().undo_depth() == 1);
+    CHECK(db.journal().undo(db));
+    CHECK(db.size() == 0);
+}
+
+TEST_CASE("transparent: nesting is refused rather than stacked") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("LINE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.begin_transparent(make_command("ZOOM"));
+
+    const std::string zoom_prompt = engine.prompt().text();
+    engine.begin_transparent(make_command("PAN"));
+    // Still ZOOM: one level covers what this is for, and a stack would need an
+    // answer for what Escape means at depth three.
+    CHECK(engine.prompt().text() == zoom_prompt);
+}

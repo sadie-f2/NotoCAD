@@ -224,6 +224,19 @@ public:
     // point a GUI event handler calls.
     EngineStatus supply(const InputValue& value);
 
+    // Runs a command *inside* another one, R12's apostrophe form: 'ZOOM at a
+    // point prompt changes the view and hands the original question back
+    // untouched. This is what the resumable design was for -- the outer
+    // command's state is already sitting in the engine rather than on a stack
+    // somewhere, so suspending it costs a saved prompt and nothing else.
+    //
+    // Only safe for commands that change no drawing state, which is why the
+    // registry marks which ones may be used this way rather than leaving it to
+    // whoever types the apostrophe. A transparent command opens no undo group:
+    // it is inside the outer command's, and it has nothing to record anyway.
+    EngineStatus begin_transparent(CommandPtr cmd);
+    bool in_transparent() const { return transparent_ != nullptr; }
+
     // Pulls values from `src` until the command finishes or the source runs dry.
     // Script playback and (command ...) both drive it this way.
     EngineStatus run(InputSource& src);
@@ -275,6 +288,7 @@ public:
 
 private:
     EngineStatus apply(const Step& step);
+    EngineStatus apply_transparent(const Step& step);
     void open_group(const char* name);
     void close_group();
 
@@ -283,6 +297,12 @@ private:
     SelectionSet previous_;
     CommandContext ctx_;
     CommandPtr command_;
+
+    // The command running inside the outer one, if any, and the question the
+    // outer one was asking when it was interrupted.
+    CommandPtr transparent_;
+    Prompt outer_prompt_{};
+
     Prompt prompt_{};
     std::string message_;
     EngineStatus status_{EngineStatus::Idle};

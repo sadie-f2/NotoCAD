@@ -277,6 +277,41 @@ public:
     Step next(CommandContext& ctx, const InputValue& value) override;
 };
 
+// ZOOM and PAN.
+//
+// Both are transparent: R12 lets you type 'ZOOM at any prompt to look somewhere
+// else without abandoning what you were doing. They qualify because they touch
+// no drawing state -- which is the test for transparency, and why the registry
+// decides it rather than whoever typed the apostrophe.
+class ZoomCommand final : public Command {
+public:
+    const char* name() const override { return "ZOOM"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Option, WindowFirst, WindowSecond };
+
+    State state_{State::Option};
+    Vec3 first_{};
+};
+
+class PanCommand final : public Command {
+public:
+    const char* name() const override { return "PAN"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    bool have_first_{false};
+    Vec3 first_{};
+};
+
+// Whether a command may be run inside another with R12's apostrophe form. True
+// only for commands that change no drawing state: the view commands, and the
+// inquiry ones that merely report.
+bool command_is_transparent(std::string_view name);
+
 // The inquiry commands: DIST, ID, AREA and LIST.
 //
 // They ask questions rather than change anything, which makes them the only

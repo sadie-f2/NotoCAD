@@ -148,7 +148,70 @@ EngineStatus CommandEngine::begin(CommandPtr cmd) {
     return apply(command_->start(ctx_));
 }
 
+EngineStatus CommandEngine::begin_transparent(CommandPtr cmd) {
+    if (!cmd) {
+        message_ = "no such command";
+        return status_;
+    }
+    // Nothing to be transparent over: run it as an ordinary command.
+    if (!command_ || status_ != EngineStatus::Waiting) return begin(std::move(cmd));
+
+    // Nested apostrophes are refused rather than stacked. One level covers
+    // 'ZOOM inside LINE, which is the whole of what this is for, and a stack
+    // would need a matching answer for what Escape means at depth three.
+    if (transparent_) {
+        message_ = "a transparent command is already running";
+        return status_;
+    }
+
+    outer_prompt_ = prompt_;
+    transparent_ = std::move(cmd);
+
+    // No open_group(): a transparent command sits inside the outer command's
+    // undo group and changes nothing to record in any case.
+    const Step step = transparent_->start(ctx_);
+    return apply_transparent(step);
+}
+
+EngineStatus CommandEngine::apply_transparent(const Step& step) {
+    switch (step.kind) {
+        case StepKind::Prompt:
+            prompt_ = step.prompt;
+            prompt_.last_point = last_point_;
+            prompt_.has_last_point = has_last_point_;
+            status_ = EngineStatus::Waiting;
+            return status_;
+
+        case StepKind::Done:
+        case StepKind::Cancelled:
+        case StepKind::Failed:
+            // Whatever happened, the outer command gets its question back. A
+            // failed 'ZOOM must not take LINE down with it.
+            transparent_.reset();
+            message_ = step.message;
+            prompt_ = outer_prompt_;
+            status_ = EngineStatus::Waiting;
+            return status_;
+    }
+    return status_;
+}
+
 EngineStatus CommandEngine::supply(const InputValue& value) {
+    // A transparent command owns the prompt while it is running.
+    if (transparent_ && status_ == EngineStatus::Waiting) {
+        if (value.kind == InputKind::Cancel) {
+            // Escape abandons the transparent command only, leaving the outer
+            // one exactly as it was. Cancelling LINE by escaping out of a 'ZOOM
+            // would lose work for a keystroke that was about the view.
+            transparent_.reset();
+            prompt_ = outer_prompt_;
+            status_ = EngineStatus::Waiting;
+            message_.clear();
+            return status_;
+        }
+        return apply_transparent(transparent_->next(ctx_, value));
+    }
+
     if (!command_ || status_ != EngineStatus::Waiting) {
         message_ = "no command is waiting for input";
         status_ = EngineStatus::Failed;
