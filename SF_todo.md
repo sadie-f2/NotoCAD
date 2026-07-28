@@ -181,6 +181,19 @@ Worth separating two things that look alike and are not:
 The second is what "always two solutions" means and what TTR is for. Neither exists.
 Phase 5 or 6, alongside the other construction commands.
 
+## Window and crossing boxes assume plan view
+
+`SelectionPrompter` builds its region on world XY unless told otherwise. That is
+correct in plan view — which is the overwhelming majority of real work — and wrong
+under orbit, where a screen-aligned box is not axis-aligned in world space.
+
+`set_view_axes()` exists and nothing calls it: the viewport widget cannot reach the
+prompter, which is private to each command. Fixing it properly means deciding how view
+information reaches a command, and `CommandContext`'s header is explicit that it holds
+no view. Options are a third context member, or `Prompt` carrying the frame out and the
+answer carrying it back. Worth settling before ROTATE and MIRROR, which have the same
+question about which plane they act in.
+
 ## Known issues — reported, not yet diagnosed
 
 **TAN snaps to a circle that is not in the drawing plane.** Reported from the viewport,

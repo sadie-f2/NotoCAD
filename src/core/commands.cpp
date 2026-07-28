@@ -3,6 +3,7 @@
 
 #include "noto/commands.hpp"
 
+#include "noto/pick.hpp"
 #include "noto/scene.hpp"
 
 #include "noto/dxf.hpp"
@@ -151,109 +152,184 @@ Step CircleCommand::next(CommandContext& ctx, const InputValue& value) {
 
 // --- selection --------------------------------------------------------------
 
-Prompt selection_prompt(const CommandContext& ctx, bool removing) {
+Prompt SelectionPrompter::prompt(const CommandContext& ctx) const {
     Prompt p;
+
+    if (state_ != State::Selecting) {
+        // The corner sub-prompts. R12 words them by mode, so you can tell a
+        // window from a crossing box before you drag it rather than after.
+        p.kind = PromptKind::Point;
+        const char* what = crossing_ ? "crossing" : "window";
+        if (state_ == State::FirstCorner) {
+            p.message = std::string("First corner of ") + what;
+        } else {
+            p.message = "Other corner";
+            // Gives the viewport something to rubber-band the box from.
+            p.base = first_;
+            p.has_base = true;
+        }
+        return p;
+    }
+
     p.kind = PromptKind::Entity;
     const std::size_t n = ctx.selection.size();
-    p.message = removing ? "Remove objects" : "Select objects";
+    p.message = removing_ ? "Remove objects" : "Select objects";
     if (n != 0) p.message += " (" + std::to_string(n) + " found)";
 
     // One vocabulary, written once, so every command that selects offers the
-    // same words. Window and Crossing arrive with the region machinery.
-    p.keywords = {"Last", "Previous", "ALL", "Remove", "Add"};
+    // same words.
+    p.keywords = {"Window", "Crossing", "Last", "Previous", "ALL", "Remove", "Add"};
     p.allow_empty = true;
     return p;
 }
 
-bool apply_selection_keyword(CommandContext& ctx, const InputValue& value, bool& removing,
-                             std::string& note) {
-    if (value.kind != InputKind::Keyword) return false;
-    const std::string& k = value.text;
+void SelectionPrompter::apply_region(CommandContext& ctx, const Vec3& a, const Vec3& b) {
+    // The two corners came back in whatever order they were given, and the
+    // region wants a positive-extent frame -- so build the axes from the
+    // diagonal rather than assuming which corner came first.
+    const Vec3 d = b - a;
 
-    if (k == "REMOVE") {
-        removing = true;
-        return true;
+    SelectionRegion r;
+    r.origin = a;
+
+    // The box is screen-aligned, so its axes are the view's. Flipped below so
+    // the extents come out positive whichever way the drag went; a degenerate
+    // drag then yields a zero-size region that selects nothing, which is the
+    // safe way for it to fail.
+    Vec3 ax = view_ax_;
+    Vec3 ay = view_ay_;
+    if (is_zero(cross(ax, ay))) {
+        ax = Vec3{1, 0, 0};
+        ay = Vec3{0, 1, 0};
     }
-    if (k == "ADD") {
-        removing = false;
-        return true;
+
+    double u = dot(d, ax);
+    double v = dot(d, ay);
+    if (u < 0.0) {
+        ax = ax * -1.0;
+        u = -u;
     }
-    if (k == "LAST") {
-        // The most recently created entity still in the drawing.
-        const Handle h = ctx.db.last();
-        if (h == kNullHandle) {
-            note = "Nothing to select";
-            return true;
+    if (v < 0.0) {
+        ay = ay * -1.0;
+        v = -v;
+    }
+    r.ax = ax;
+    r.ay = ay;
+    r.width = u;
+    r.height = v;
+
+    const std::size_t n = removing_ ? deselect_by_region(ctx.db, draw_, r, crossing_, ctx.selection)
+                                    : select_by_region(ctx.db, draw_, r, crossing_, ctx.selection);
+
+    // STRETCH asks which defining points fell inside the crossing box, so the
+    // box is kept -- and only a crossing one, since a window box is not a
+    // stretch region and keeping it would make STRETCH silently act like MOVE.
+    if (crossing_ && !removing_) ctx.selection.set_region(r);
+
+    note_ = std::to_string(n) + (removing_ ? " removed" : " found");
+}
+
+SelectionPrompter::Result SelectionPrompter::feed(CommandContext& ctx, const InputValue& value) {
+    note_.clear();
+
+    if (state_ != State::Selecting) {
+        if (value.kind != InputKind::Point) return Result::Rejected;
+        if (state_ == State::FirstCorner) {
+            first_ = value.point;
+            state_ = State::SecondCorner;
+            return Result::Selecting;
         }
-        if (removing) {
-            ctx.selection.remove(h);
-        } else {
-            ctx.selection.add(h);
-        }
-        return true;
+        apply_region(ctx, first_, value.point);
+        state_ = State::Selecting;
+        return Result::Selecting;
     }
-    if (k == "PREVIOUS") {
-        for (const Handle h : ctx.previous.handles()) {
-            // Entities erased since then are silently skipped rather than
-            // reselected as dangling handles.
-            if (!ctx.db.get(h)) continue;
-            if (removing) {
-                ctx.selection.remove(h);
-            } else {
-                ctx.selection.add(h);
+
+    if (value.kind == InputKind::None) return Result::Finished;
+
+    if (value.kind == InputKind::Keyword) {
+        const std::string& k = value.text;
+        if (k == "WINDOW" || k == "CROSSING") {
+            crossing_ = (k == "CROSSING");
+            state_ = State::FirstCorner;
+            return Result::Selecting;
+        }
+        if (k == "REMOVE") {
+            removing_ = true;
+            return Result::Selecting;
+        }
+        if (k == "ADD") {
+            removing_ = false;
+            return Result::Selecting;
+        }
+        if (k == "LAST") {
+            const Handle h = ctx.db.last();
+            if (h == kNullHandle) {
+                note_ = "Nothing to select";
+                return Result::Selecting;
             }
-        }
-        return true;
-    }
-    if (k == "ALL") {
-        for (const Handle h : ctx.db.order()) {
-            const Entity* e = ctx.db.get(h);
-            // R12's All skips what is not visible: you cannot erase what you
-            // cannot see without noticing afterwards.
-            if (!e || !entity_visible(ctx.db, *e)) continue;
-            if (removing) {
-                ctx.selection.remove(h);
-            } else {
-                ctx.selection.add(h);
+            if (removing_ ? ctx.selection.remove(h) : ctx.selection.add(h)) {
+                note_ = removing_ ? "1 removed" : "1 found";
             }
+            return Result::Selecting;
         }
-        return true;
+        if (k == "PREVIOUS") {
+            std::size_t n = 0;
+            for (const Handle h : ctx.previous.handles()) {
+                // Entities erased since then are skipped rather than reselected
+                // as dangling handles.
+                if (!ctx.db.get(h)) continue;
+                if (removing_ ? ctx.selection.remove(h) : ctx.selection.add(h)) ++n;
+            }
+            note_ = std::to_string(n) + (removing_ ? " removed" : " found");
+            return Result::Selecting;
+        }
+        if (k == "ALL") {
+            std::size_t n = 0;
+            for (const Handle h : ctx.db.order()) {
+                const Entity* e = ctx.db.get(h);
+                // R12's All skips what is not visible: you cannot erase what you
+                // cannot see without noticing afterwards.
+                if (!e || !entity_visible(ctx.db, *e)) continue;
+                if (removing_ ? ctx.selection.remove(h) : ctx.selection.add(h)) ++n;
+            }
+            note_ = std::to_string(n) + (removing_ ? " removed" : " found");
+            return Result::Selecting;
+        }
+        return Result::Rejected;
     }
-    return false;
+
+    if (value.kind != InputKind::Entity) return Result::Rejected;
+    if (!ctx.db.get(value.entity)) return Result::Rejected;
+
+    if (removing_ ? ctx.selection.remove(value.entity) : ctx.selection.add(value.entity)) {
+        note_ = removing_ ? "1 removed" : "1 found";
+    }
+    return Result::Selecting;
 }
 
 // --- ERASE ------------------------------------------------------------------
 
-Step EraseCommand::start(CommandContext& ctx) { return Step::ask(selection_prompt(ctx, false)); }
+Step EraseCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
 
 Step EraseCommand::next(CommandContext& ctx, const InputValue& value) {
-    // Enter ends the selection. With nothing selected it is a no-op, not an
-    // error -- missing everything is how you decide you are finished.
-    if (value.kind == InputKind::None) {
-        std::size_t n = 0;
-        for (const Handle h : ctx.selection.handles()) {
-            if (ctx.db.erase(h)) ++n;
+    switch (select_.feed(ctx, value)) {
+        case SelectionPrompter::Result::Selecting:
+            return Step::ask(select_.prompt(ctx));
+
+        case SelectionPrompter::Result::Finished: {
+            // Enter with nothing selected is a no-op, not an error -- missing
+            // everything is how you decide you are finished.
+            std::size_t n = 0;
+            for (const Handle h : ctx.selection.handles()) {
+                if (ctx.db.erase(h)) ++n;
+            }
+            return Step::done(std::to_string(n) + " erased");
         }
-        return Step::done(std::to_string(n) + " erased");
-    }
 
-    std::string note;
-    if (apply_selection_keyword(ctx, value, removing_, note)) {
-        Prompt p = selection_prompt(ctx, removing_);
-        if (!note.empty()) p.message = note + ". " + p.message;
-        return Step::ask(p);
+        case SelectionPrompter::Result::Rejected:
+            break;
     }
-
-    if (value.kind != InputKind::Entity) return Step::failed("an entity is required");
-    if (!ctx.db.get(value.entity)) return Step::failed("no such entity");
-
-    // add() dedupes, so picking the same line twice does not erase it twice.
-    if (removing_) {
-        ctx.selection.remove(value.entity);
-    } else {
-        ctx.selection.add(value.entity);
-    }
-    return Step::ask(selection_prompt(ctx, removing_));
+    return Step::failed("an entity is required");
 }
 
 // --- UNDO / REDO ------------------------------------------------------------

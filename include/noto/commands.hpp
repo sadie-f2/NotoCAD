@@ -13,6 +13,7 @@
 #pragma once
 
 #include "noto/command.hpp"
+#include "noto/render.hpp"
 
 #include <string_view>
 
@@ -51,17 +52,57 @@ private:
     bool diameter_{false};
 };
 
-// Collects entities into ctx.selection until Enter. Shared by every editing
-// command, so the selection vocabulary is written once: Last, Previous, All,
-// plus Remove and Add to take things back out.
+// "Select objects:" -- the whole of it, in one place.
 //
-// Returns true when the value was a selection keyword and was handled.
-bool apply_selection_keyword(CommandContext& ctx, const InputValue& value, bool& removing,
-                             std::string& note);
+// A small state machine rather than a helper function, because Window and
+// Crossing are not single answers: each asks for two corners, so the selection
+// prompt has sub-prompts of its own. Every editing command delegates to this,
+// which is what stops MOVE and ERASE quietly disagreeing about what All means
+// or which corner order a crossing box wants.
+//
+// It needs a DrawContext to flatten entities against for the region tests. The
+// tolerance only affects how finely curves are diced before being tested, so a
+// default is fine for text-driven use; the viewport passes its own.
+class SelectionPrompter {
+public:
+    // What to ask right now, given what has been collected so far.
+    Prompt prompt(const CommandContext& ctx) const;
 
-// Builds the "Select objects (N found)" prompt, with the selection keywords
-// attached so every command asking it offers the same ones.
-Prompt selection_prompt(const CommandContext& ctx, bool removing);
+    enum class Result {
+        Selecting,  // still collecting; ask prompt() again
+        Finished,   // Enter: the selection is complete
+        Rejected,   // not something a selection prompt accepts
+    };
+
+    Result feed(CommandContext& ctx, const InputValue& value);
+
+    // Set by the viewport, which knows its own zoom and orientation. A window
+    // is a screen-aligned box, so the axes it is built on are the view's, not
+    // the world's -- these default to world XY, which is right for text-driven
+    // selection and for plan view.
+    void set_draw_context(const DrawContext& ctx) { draw_ = ctx; }
+    void set_view_axes(const Vec3& ax, const Vec3& ay) {
+        view_ax_ = ax;
+        view_ay_ = ay;
+    }
+
+    // Non-empty when the last answer deserves an echo, R12-style "4 found".
+    const std::string& note() const { return note_; }
+
+private:
+    enum class State : std::uint8_t { Selecting, FirstCorner, SecondCorner };
+
+    void apply_region(CommandContext& ctx, const Vec3& a, const Vec3& b);
+
+    State state_{State::Selecting};
+    bool removing_{false};
+    bool crossing_{false};
+    Vec3 first_{};
+    Vec3 view_ax_{1, 0, 0};
+    Vec3 view_ay_{0, 1, 0};
+    DrawContext draw_{};
+    std::string note_;
+};
 
 // ERASE: select entities until Enter, then delete them all.
 class EraseCommand final : public Command {
@@ -71,10 +112,7 @@ public:
     Step next(CommandContext& ctx, const InputValue& value) override;
 
 private:
-    // Remove mode: R12's "Remove objects:" sub-state, entered with R and left
-    // with A. It is a mode rather than a per-pick modifier because that is how
-    // it reads at the prompt.
-    bool removing_{false};
+    SelectionPrompter select_;
 };
 
 // DXFOUT: prompt for a file name and write the drawing. In R12 this is a

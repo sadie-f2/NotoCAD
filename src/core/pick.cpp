@@ -159,4 +159,136 @@ PickResult pick_entity(const Database& db, const Viewport& vp, const ScreenPoint
     return result;
 }
 
+
+// --- window and crossing selection ------------------------------------------
+
+namespace {
+
+// Region coordinates: how far along the region's own two axes a world point
+// lies. Depth is dropped, matching SelectionRegion::contains.
+struct RegionUV {
+    double u, v;
+};
+
+RegionUV region_uv(const SelectionRegion& r, const Vec3& p) {
+    const Vec3 d = p - r.origin;
+    return RegionUV{dot(d, r.ax), dot(d, r.ay)};
+}
+
+bool uv_inside(const SelectionRegion& r, const RegionUV& p) {
+    return p.u >= 0.0 && p.u <= r.width && p.v >= 0.0 && p.v <= r.height;
+}
+
+// Does the segment a-b touch the axis-aligned rectangle [0,w] x [0,h]?
+// Liang-Barsky: clip the segment against the four slabs and see whether any of
+// it survives. Endpoints inside fall out of the same test.
+bool segment_hits_rect(const SelectionRegion& r, const RegionUV& a, const RegionUV& b) {
+    double t0 = 0.0, t1 = 1.0;
+    const double dx = b.u - a.u;
+    const double dy = b.v - a.v;
+
+    const double p[4] = {-dx, dx, -dy, dy};
+    const double q[4] = {a.u, r.width - a.u, a.v, r.height - a.v};
+
+    for (int i = 0; i < 4; ++i) {
+        if (p[i] == 0.0) {
+            // Parallel to this edge: outside it means no overlap at all.
+            if (q[i] < 0.0) return false;
+            continue;
+        }
+        const double t = q[i] / p[i];
+        if (p[i] < 0.0) {
+            if (t > t1) return false;
+            if (t > t0) t0 = t;
+        } else {
+            if (t < t0) return false;
+            if (t < t1) t1 = t;
+        }
+    }
+    return t0 <= t1;
+}
+
+// Walks the flattened wireframe and answers both questions at once, so an
+// entity is tessellated once however it is being tested.
+class RegionProbe : public Renderer {
+public:
+    explicit RegionProbe(const SelectionRegion& r) : r_(r) {}
+
+    void begin_entity(const EntityProps&) override {}
+
+    void polyline(const Vec3* pts, std::size_t count, bool closed) override {
+        if (count == 0) return;
+        any_geometry_ = true;
+
+        RegionUV prev = region_uv(r_, pts[0]);
+        note_point(prev);
+        if (count == 1) return;
+
+        for (std::size_t i = 1; i < count; ++i) {
+            const RegionUV cur = region_uv(r_, pts[i]);
+            note_point(cur);
+            if (segment_hits_rect(r_, prev, cur)) touches_ = true;
+            prev = cur;
+        }
+        if (closed) {
+            const RegionUV first = region_uv(r_, pts[0]);
+            if (segment_hits_rect(r_, prev, first)) touches_ = true;
+        }
+    }
+
+    bool within() const { return any_geometry_ && all_inside_; }
+    bool crosses() const { return any_geometry_ && touches_; }
+
+private:
+    void note_point(const RegionUV& p) {
+        if (uv_inside(r_, p)) {
+            touches_ = true;
+        } else {
+            all_inside_ = false;
+        }
+    }
+
+    const SelectionRegion& r_;
+    bool any_geometry_{false};
+    bool all_inside_{true};
+    bool touches_{false};
+};
+
+bool region_hit(const Entity& e, const DrawContext& ctx, const SelectionRegion& r, bool crossing) {
+    RegionProbe probe(r);
+    e.draw(ctx, probe);
+    return crossing ? probe.crosses() : probe.within();
+}
+
+std::size_t apply_region(const Database& db, const DrawContext& ctx, const SelectionRegion& r,
+                         bool crossing, SelectionSet& out, bool add) {
+    std::size_t n = 0;
+    for (const Handle h : db.order()) {
+        const Entity* e = db.get(h);
+        if (!e || !entity_visible(db, *e)) continue;
+        if (!region_hit(*e, ctx, r, crossing)) continue;
+        if (add ? out.add(h) : out.remove(h)) ++n;
+    }
+    return n;
+}
+
+}  // namespace
+
+bool entity_within_region(const Entity& e, const DrawContext& ctx, const SelectionRegion& r) {
+    return region_hit(e, ctx, r, false);
+}
+
+bool entity_crosses_region(const Entity& e, const DrawContext& ctx, const SelectionRegion& r) {
+    return region_hit(e, ctx, r, true);
+}
+
+std::size_t select_by_region(const Database& db, const DrawContext& ctx, const SelectionRegion& r,
+                             bool crossing, SelectionSet& out) {
+    return apply_region(db, ctx, r, crossing, out, true);
+}
+
+std::size_t deselect_by_region(const Database& db, const DrawContext& ctx,
+                               const SelectionRegion& r, bool crossing, SelectionSet& out) {
+    return apply_region(db, ctx, r, crossing, out, false);
+}
 }  // namespace noto

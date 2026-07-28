@@ -27,6 +27,7 @@
 #pragma once
 
 #include "noto/entity.hpp"
+#include "noto/selection.hpp"
 #include "noto/viewport.hpp"
 
 namespace noto {
@@ -71,5 +72,27 @@ bool entity_screen_box(const Entity& e, const Viewport& vp, double pad_px, doubl
 // every candidate search starts with.
 bool entity_near_cursor(const Entity& e, const Viewport& vp, const ScreenPoint& cursor,
                         double pad_px);
+
+// --- window and crossing selection ------------------------------------------
+//
+// Both work on the entity's flattened wireframe, like the pick does, so they
+// agree with what is drawn and need no per-type geometry. Neither takes a
+// Viewport: SelectionRegion already carries the frame it was dragged in.
+//
+// Window: every part of the entity lies inside the region. Crossing: any part
+// does, whether by a point inside or by an edge cutting through. The difference
+// is the whole difference between the two selection modes, and getting it
+// backwards is the classic way to delete more than you meant to.
+bool entity_within_region(const Entity& e, const DrawContext& ctx, const SelectionRegion& r);
+bool entity_crosses_region(const Entity& e, const DrawContext& ctx, const SelectionRegion& r);
+
+// Adds every visible entity the region selects. `crossing` picks which test.
+// Returns how many were added.
+std::size_t select_by_region(const Database& db, const DrawContext& ctx,
+                             const SelectionRegion& r, bool crossing, SelectionSet& out);
+
+// Removes them instead, for Remove mode.
+std::size_t deselect_by_region(const Database& db, const DrawContext& ctx,
+                               const SelectionRegion& r, bool crossing, SelectionSet& out);
 
 }  // namespace noto

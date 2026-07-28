@@ -265,3 +265,162 @@ TEST_CASE("selection: erasing is one undo step for the whole set") {
     CHECK(db.journal().undo(db));
     CHECK(db.size() == 3);
 }
+
+namespace {
+
+// A drawing of three separated horizontal lines, at y = 0, 10 and 20, each
+// running from x=0 to x=10.
+struct Grid {
+    Database db;
+    CommandEngine engine{db};
+    Handle low, mid, high;
+    Grid() {
+        low = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{10, 0, 0}));
+        mid = db.add(std::make_unique<Line>(Vec3{0, 10, 0}, Vec3{10, 10, 0}));
+        high = db.add(std::make_unique<Line>(Vec3{0, 20, 0}, Vec3{10, 20, 0}));
+    }
+    // Drags a box from (x0,y0) to (x1,y1) at the selection prompt.
+    void box(const char* mode, double x0, double y0, double x1, double y1) {
+        engine.supply(InputValue::of_keyword(mode));
+        engine.supply(InputValue::of_point({x0, y0, 0}));
+        engine.supply(InputValue::of_point({x1, y1, 0}));
+    }
+};
+
+}  // namespace
+
+TEST_CASE("selection: WINDOW takes only what is wholly inside") {
+    Grid g;
+    g.engine.begin(make_command("ERASE"));
+
+    // A box enclosing the y=0 and y=10 lines entirely, and missing y=20.
+    g.box("WINDOW", -1, -1, 11, 11);
+    CHECK(g.engine.selection().size() == 2);
+    CHECK(g.engine.selection().contains(g.low));
+    CHECK(g.engine.selection().contains(g.mid));
+    CHECK(!g.engine.selection().contains(g.high));
+
+    g.engine.selection().clear();
+    // Now a box that only partly covers every line: nothing is wholly inside.
+    g.box("WINDOW", 5, -1, 20, 25);
+    CHECK(g.engine.selection().empty());
+}
+
+TEST_CASE("selection: CROSSING takes anything it touches") {
+    Grid g;
+    g.engine.begin(make_command("ERASE"));
+
+    // The same partial box that WINDOW refused.
+    g.box("CROSSING", 5, -1, 20, 25);
+    CHECK(g.engine.selection().size() == 3);
+}
+
+TEST_CASE("selection: a crossing box catches a line it merely cuts") {
+    Grid g;
+    g.engine.begin(make_command("ERASE"));
+
+    // A tall thin box crossing the middle of all three lines, containing no
+    // endpoint of any of them.
+    g.box("CROSSING", 4, -5, 6, 25);
+    CHECK(g.engine.selection().size() == 3);
+
+    // The same box as a window catches nothing, since nothing is wholly inside.
+    g.engine.selection().clear();
+    g.box("WINDOW", 4, -5, 6, 25);
+    CHECK(g.engine.selection().empty());
+}
+
+TEST_CASE("selection: corner order does not matter") {
+    Grid g;
+    g.engine.begin(make_command("ERASE"));
+    g.box("CROSSING", 6, 25, 4, -5);  // dragged the other way
+    CHECK(g.engine.selection().size() == 3);
+}
+
+TEST_CASE("selection: a box that touches nothing selects nothing") {
+    Grid g;
+    g.engine.begin(make_command("ERASE"));
+    g.box("CROSSING", 100, 100, 110, 110);
+    CHECK(g.engine.selection().empty());
+
+    // A degenerate drag is a zero-size box, which must select nothing rather
+    // than everything.
+    g.box("CROSSING", 5, 5, 5, 5);
+    CHECK(g.engine.selection().empty());
+}
+
+TEST_CASE("selection: the corner sub-prompts are point prompts") {
+    Grid g;
+    g.engine.begin(make_command("ERASE"));
+    CHECK(g.engine.prompt().kind == PromptKind::Entity);
+
+    g.engine.supply(InputValue::of_keyword("CROSSING"));
+    CHECK(g.engine.prompt().kind == PromptKind::Point);
+    CHECK(g.engine.prompt().message.find("crossing") != std::string::npos);
+
+    g.engine.supply(InputValue::of_point({0, 0, 0}));
+    CHECK(g.engine.prompt().kind == PromptKind::Point);
+    // The second corner rubber-bands from the first.
+    CHECK(g.engine.prompt().has_base);
+    CHECK_VEC(g.engine.prompt().base, 0.0, 0.0, 0.0, 1e-12);
+
+    g.engine.supply(InputValue::of_point({11, 11, 0}));
+    // ...and then it is back to selecting.
+    CHECK(g.engine.prompt().kind == PromptKind::Entity);
+}
+
+TEST_CASE("selection: only a crossing box is kept as the stretch region") {
+    Grid g;
+    g.engine.begin(make_command("ERASE"));
+
+    // A window selection is not a stretch region. Keeping it would let STRETCH
+    // run on a window selection, where every point is inside and it silently
+    // degenerates into MOVE.
+    g.box("WINDOW", -1, -1, 11, 11);
+    CHECK(!g.engine.selection().has_region());
+
+    g.box("CROSSING", 4, -5, 6, 25);
+    CHECK(g.engine.selection().has_region());
+    CHECK(g.engine.selection().region().contains(Vec3{5, 10, 0}));
+    CHECK(!g.engine.selection().region().contains(Vec3{0, 10, 0}));
+}
+
+TEST_CASE("selection: REMOVE works with a box too") {
+    Grid g;
+    g.engine.begin(make_command("ERASE"));
+    g.engine.supply(InputValue::of_keyword("ALL"));
+    CHECK(g.engine.selection().size() == 3);
+
+    g.engine.supply(InputValue::of_keyword("REMOVE"));
+    g.box("CROSSING", -1, -1, 11, 1);  // just the y=0 line
+    CHECK(g.engine.selection().size() == 2);
+    CHECK(!g.engine.selection().contains(g.low));
+}
+
+TEST_CASE("selection: a circle is crossed by a box over its rim only") {
+    Database db;
+    CommandEngine engine(db);
+    db.add(std::make_unique<Circle>(Vec3{0, 0, 0}, 10.0));
+
+    engine.begin(make_command("ERASE"));
+    // A box entirely inside the circle touches no drawn geometry, so a crossing
+    // selection finds nothing -- same reasoning as picking a circle at its
+    // centre.
+    engine.supply(InputValue::of_keyword("CROSSING"));
+    engine.supply(InputValue::of_point({-2, -2, 0}));
+    engine.supply(InputValue::of_point({2, 2, 0}));
+    CHECK(engine.selection().empty());
+
+    // A box over the rim does.
+    engine.supply(InputValue::of_keyword("CROSSING"));
+    engine.supply(InputValue::of_point({8, -2, 0}));
+    engine.supply(InputValue::of_point({12, 2, 0}));
+    CHECK(engine.selection().size() == 1);
+
+    // And one enclosing the whole circle satisfies WINDOW.
+    engine.selection().clear();
+    engine.supply(InputValue::of_keyword("WINDOW"));
+    engine.supply(InputValue::of_point({-11, -11, 0}));
+    engine.supply(InputValue::of_point({11, 11, 0}));
+    CHECK(engine.selection().size() == 1);
+}
