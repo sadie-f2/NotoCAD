@@ -72,12 +72,25 @@ the end:
    click calls `supply()` from the mouse handler. Prompt semantics were lifted
    out of `ncad`'s `std::cin` loop into `app::PromptSession` so the window and
    the terminal run the same code over a `PromptOutput` sink.
-4. Usable: pick box, entity hit-testing, osnap cursor tracking, grips. This is the
-   expensive one, and most of it is geometry work rather than Qt work. The
-   prerequisite is done: the derived osnaps (PER/TAN/NEA/INT) live in
-   `osnap_derived.hpp`, headless and tested. Still to come — hit-testing against a
-   pick box, the candidate search that ranks snaps under the cursor, marker
-   glyphs, and grips.
+4. Usable: pick box, entity hit-testing, osnap cursor tracking, grips. Most of it
+   is geometry work rather than Qt work, so it split in two.
+
+   *(4a, done)* Picking and osnap. System variables arrived with it — `OSMODE`,
+   `PICKBOX`, `APERTURE` in `sysvar.hpp`, reachable from AutoLISP through
+   `getvar`/`setvar`, because there was no mechanism at all and three constants
+   would only have to be re-plumbed later. Hit-testing (`pick.hpp`) measures
+   against the flattened wireframe in pixels, so it needs no switch on entity
+   type and picks exactly what is drawn. `osnap_search.hpp` is where a snap
+   acquires its type, its source handle and its screen distance, and where
+   discrete snaps are ranked above continuous ones — without that tier rule
+   NEAREST buries ENDPOINT and the feature is useless.
+
+   *(4b, next)* The grip/stretch vtable. `transform(Mat4)` moves a whole entity
+   and STRETCH cannot be expressed with it; grips are the same mechanism. It
+   touches every entity class, so it is far cheaper at three of them than at
+   eight. Then selection sets, the editing commands, and interactive grips.
+
+   See `SF_todo.md` for the ordering beyond that and the open questions.
 
 **QPainter before OpenGL.** R12-era display is wireframe: lines, arcs, text. QPainter
 does that in a fraction of the code with no shader pipeline, no GL context management
@@ -196,8 +209,8 @@ Executables are `ncad*`; libraries are `noto_*`.
 
 ```
 include/noto/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, dxf,
-                     command, commands, input_text, osnap_derived, render, scene,
-                     viewport
+                     command, commands, input_text, osnap_derived, osnap_search,
+                     pick, render, scene, sysvar, viewport
 include/noto/lisp/   arena, value, reader, eval
 src/core/            geometry kernel, entities, database, DXF writer, commands
 src/lisp/            interpreter: arena, values, reader, eval, builtins, subrs

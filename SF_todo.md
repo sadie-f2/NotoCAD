@@ -23,19 +23,23 @@ ERASE, DXFOUT. Almost everything below follows from widening those two.
 
 ## Phase 4a — picking and object snap
 
-*In progress. Planned in detail separately.*
+*Done.*
 
-- [ ] Sysvar table: `OSMODE`, `PICKBOX`, `APERTURE`; `Database::sysvars()`
-- [ ] `OsnapMask` with R12 bit order — an explicit table, **not** `1 << int(type)`
-- [ ] `getvar` / `setvar` in AutoLISP
-- [ ] `entity_pick_distance` / `pick_entity`, flattened-polyline narrow phase
-- [ ] `osnap_search` — candidate ranking, discrete snaps beat continuous ones
-- [ ] Fix: a click at an Entity prompt supplies `of_entity`, not `of_point`
-- [ ] Osnap cursor tracking and marker glyphs, painted Qt-locally
+- [x] Sysvar table: `OSMODE`, `PICKBOX`, `APERTURE`; `Database::sysvars()`
+- [x] `OsnapMask` with R12 bit order — an explicit table, **not** `1 << int(type)`
+- [x] `getvar` / `setvar` in AutoLISP
+- [x] `entity_pick_distance` / `pick_entity`, flattened-polyline narrow phase
+- [x] `osnap_search` — candidate ranking, discrete snaps beat continuous ones
+- [x] Fix: a click at an Entity prompt supplies `of_entity`, not `of_point`
+- [x] Osnap cursor tracking and marker glyphs, painted Qt-locally
 
 R12's OSMODE bit order is not our `OsnapType` declaration order — Quadrant and Node
 are swapped, and Intersection is last in our enum but mid-mask in R12. `osnap_bit()`
-must be a lookup table, pinned by a test asserting the literal values.
+is a lookup table, pinned by a test asserting the literal values.
+
+Left undone deliberately: there is no OSNAP command and no status line, so `OSMODE`
+is set with `(setvar "OSMODE" 47)` and the active mode is named beside the marker
+glyph instead. Both become phase 6 and 8 work.
 
 ## Phase 4b — the grip/stretch vtable
 
