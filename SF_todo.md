@@ -79,15 +79,30 @@ commands: foundational, not a feature.
 
 ## Phase 5 — selection sets and the editing commands
 
-- [ ] `SelectionSet` type; widen `CommandContext` (its header already anticipates this)
-- [ ] Window, Crossing, Last, Previous, All, Fence, plus Remove/Add
-- [ ] Box and crossing pick in the viewport widget
-- [ ] `ssget`, `entsel`, `ssadd`, `ssdel`, `sslength`, `ssname` in AutoLISP
-- [ ] `getpoint`, `getdist`, `getangle`, `getstring`, `getreal`, `getint`
-- [ ] MOVE, COPY, ROTATE, SCALE, MIRROR, ARRAY, ROTATE3D — all route through
-      `transform(Mat4)`, which already exists
-- [ ] STRETCH, crossing-window only, on the 4b mechanism
+*Mostly done. The unticked items are genuinely outstanding, not overlooked bookkeeping.*
+
+- [x] `SelectionSet` type; widen `CommandContext` (its header already anticipated this)
+- [x] Window, Crossing, Last, Previous, All, plus Remove/Add
+- [ ] **Fence selection** — never built
+- [x] Box and crossing pick in the viewport widget
+- [x] `ssget`, `ssadd`, `ssdel`, `sslength`, `ssname`, `ssmemb` in AutoLISP
+- [ ] `entsel` — needs interactive input, see below
+- [ ] `getpoint`, `getdist`, `getangle`, `getstring`, `getreal`, `getint` — same
+- [x] MOVE, COPY (with Multiple), ROTATE, SCALE, MIRROR, ARRAY, STRETCH
+- [ ] **ROTATE3D** — never built. Everything under it exists: `Mat4::rotation` has always
+      taken an arbitrary axis, `TransformCommand` is the right shape, and the View axis
+      option now has `ViewControl::view_basis()`. What is missing is the axis
+      sub-machine (`Xaxis/Yaxis/Zaxis/Entity/Last/View/<2points>`), a per-type axis
+      extraction for the Entity option, and somewhere for Last to live.
+- [ ] **Reference angle** on ROTATE, and reference length on SCALE — R12 has both and
+      neither was built, so ROTATE3D would inherit the gap. Worth doing together.
 - [ ] Interactive grip dragging
+
+ROTATE3D is also the best available stress test of the 3D kernel: it is the first
+command that *deliberately* puts geometry into arbitrary planes rather than reading it
+that way. Rotating a bulged polyline out of plane, writing DXF and reading it back
+exercises ECS, the bulge sign handling and the arbitrary-axis algorithm at once — and
+any of the three being subtly wrong shows up as a shape that changes when saved.
 
 **STRETCH needs more than a handle list.** It only works when the selection is made by
 crossing window or crossing polygon. With a plain Window, or with objects picked
