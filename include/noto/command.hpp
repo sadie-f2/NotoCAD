@@ -27,6 +27,7 @@
 #include "noto/database.hpp"
 #include "noto/osnap.hpp"
 #include "noto/selection.hpp"
+#include "noto/view_control.hpp"
 #include "noto/vec3.hpp"
 
 #include <cstdint>
@@ -161,6 +162,11 @@ struct CommandContext {
     // survives intervening commands that select nothing, so ERASE, then LINE,
     // then MOVE Previous still means the entities ERASE was given.
     const SelectionSet& previous;
+
+    // The view, when there is one. Null in `ncad`, which has no display, and a
+    // command that needs it must say so rather than pretend -- see
+    // view_control.hpp for why this is an interface and not a Viewport.
+    ViewControl* view{nullptr};
 };
 
 class Command {
@@ -201,7 +207,11 @@ enum class EngineStatus : std::uint8_t {
 
 class CommandEngine {
 public:
-    explicit CommandEngine(Database& db) : ctx_{db, selection_, previous_} {}
+    explicit CommandEngine(Database& db) : ctx_{db, selection_, previous_, nullptr} {}
+
+    // Not owned. Set by whatever has a display; left null by `ncad`.
+    void set_view_control(ViewControl* view) { ctx_.view = view; }
+    ViewControl* view_control() { return ctx_.view; }
 
     CommandEngine(const CommandEngine&) = delete;
     CommandEngine& operator=(const CommandEngine&) = delete;

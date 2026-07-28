@@ -1020,6 +1020,31 @@ Step StretchCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- PLAN -------------------------------------------------------------------
+
+Step PlanCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "<Current UCS>/Ucs/World";
+    p.keywords = {"Current", "Ucs", "World"};
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step PlanCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind != InputKind::None && value.kind != InputKind::Keyword) {
+        return Step::failed("answer Current, Ucs or World");
+    }
+
+    // No display: say so rather than reporting success for something that did
+    // not happen. `ncad` is a real way to drive this program, not a degraded one.
+    if (!ctx.view) return Step::failed("no view to change");
+
+    // All three answers name world XY until UCS exists.
+    ctx.view->set_plan_view(kWorldZ);
+    return Step::done("Regenerating drawing.");
+}
+
 // --- inquiry: DIST, ID, AREA, LIST ------------------------------------------
 
 namespace {
@@ -1238,6 +1263,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "DIST") return std::make_unique<DistCommand>();
     if (upper == "ID") return std::make_unique<IdCommand>();
     if (upper == "LIST") return std::make_unique<ListCommand>();
+    if (upper == "PLAN") return std::make_unique<PlanCommand>();
     if (upper == "MOVE") return std::make_unique<MoveCommand>(false);
     if (upper == "ROTATE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Rotate);
     if (upper == "SCALE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Scale);
@@ -1252,8 +1278,8 @@ CommandPtr make_command(std::string_view name) {
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
         "AREA", "ARRAY", "CIRCLE",  "COPY", "DIST",    "DXFOUT",  "ERASE", "ID",
-        "LINE", "LIST",  "MIRROR",  "MOVE", "REDO",    "ROTATE",  "SCALE", "STRETCH",
-        "UNDO"};
+        "LINE", "LIST",  "MIRROR",  "MOVE", "PLAN",    "REDO",    "ROTATE", "SCALE",
+        "STRETCH", "UNDO"};
     return names;
 }
 

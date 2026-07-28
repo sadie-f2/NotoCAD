@@ -33,6 +33,9 @@ constexpr double kDegreesPerNotch = 120.0;
 // Markers do not scale with zoom: they annotate the cursor, not the drawing.
 constexpr double kMarkerHalfPx = 6.0;
 
+// R12 remembered ten previous views.
+constexpr std::size_t kMaxPreviousViews = 10;
+
 // R12's glyph vocabulary. The shape carries the meaning -- you learn to read
 // "square" as endpoint without reading the label -- so they must stay distinct
 // from each other at six pixels rather than merely being drawn.
@@ -122,15 +125,65 @@ bool ViewportWidget::next_value(const Prompt&, InputValue&) {
     return false;
 }
 
+void ViewportWidget::push_view() {
+    view_stack_.push_back(viewport_);
+    // Oldest out first. Unbounded history of a thing nobody scrolls back
+    // through is just memory.
+    if (view_stack_.size() > kMaxPreviousViews) view_stack_.erase(view_stack_.begin());
+}
+
 void ViewportWidget::zoom_extents() {
+    push_view();
     viewport_.zoom_extents(db_.extents());
     update();
 }
 
-void ViewportWidget::set_plan_view() {
+void ViewportWidget::set_plan_view(const Vec3&) {
+    // The normal is world Z until UCS exists, and Viewport::set_plan_view()
+    // already means exactly that. When UCS arrives this is where the two part
+    // company.
+    push_view();
     viewport_.set_plan_view();
     update();
 }
+
+void ViewportWidget::zoom_window(const Vec3& a, const Vec3& b) {
+    BBox box;
+    box.expand(a);
+    box.expand(b);
+    if (!box.valid()) return;
+    push_view();
+    viewport_.zoom_extents(box);
+    update();
+}
+
+void ViewportWidget::zoom_scale(double factor) {
+    if (!(factor > 0.0)) return;
+    push_view();
+    viewport_.zoom(factor);
+    update();
+}
+
+bool ViewportWidget::zoom_previous() {
+    if (view_stack_.empty()) return false;
+    viewport_ = view_stack_.back();
+    view_stack_.pop_back();
+    update();
+    return true;
+}
+
+void ViewportWidget::pan(const Vec3& from, const Vec3& to) {
+    push_view();
+    const ScreenPoint a = viewport_.project(from);
+    const ScreenPoint b = viewport_.project(to);
+    if (!std::isfinite(a.x) || !std::isfinite(b.x)) return;
+    viewport_.pan_pixels(b.x - a.x, b.y - a.y);
+    update();
+}
+
+Basis ViewportWidget::view_basis() const { return viewport_.basis(); }
+
+DrawContext ViewportWidget::draw_context() const { return viewport_.draw_context(); }
 
 bool ViewportWidget::wants_point() const {
     if (!engine_ || !engine_->active()) return false;
@@ -422,7 +475,7 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event) {
     // become real commands once they exist, and these become their shortcuts.
     if (event->key() == Qt::Key_Home) {
         if (event->modifiers() & Qt::ControlModifier) {
-            set_plan_view();
+            set_plan_view(kWorldZ);
         } else {
             zoom_extents();
         }

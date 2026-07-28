@@ -44,6 +44,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     view_ = new ViewportWidget(db_, this);
     view_->set_engine(&engine_);
+    engine_.set_view_control(view_);
     command_line_ = new CommandLineWidget(this);
 
     output_ = std::make_unique<WidgetOutput>(command_line_);

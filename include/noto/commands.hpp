@@ -264,6 +264,19 @@ private:
     Vec3 base_{};
 };
 
+// PLAN: look straight down at the construction plane.
+//
+// R12 asks <Current UCS>/Ucs/World. Until UCS exists all three answers name the
+// same plane, so all three are accepted and mean world -- the prompt is right
+// from the start, and phase 12 fills in the difference rather than adding a
+// question that was not there before.
+class PlanCommand final : public Command {
+public:
+    const char* name() const override { return "PLAN"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
 // The inquiry commands: DIST, ID, AREA and LIST.
 //
 // They ask questions rather than change anything, which makes them the only

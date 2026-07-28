@@ -18,16 +18,19 @@
 
 #include "noto/command.hpp"
 #include "noto/osnap_search.hpp"
+#include "noto/view_control.hpp"
 #include "noto/viewport.hpp"
 
 #include <QPoint>
 #include <QWidget>
 
+#include <vector>
+
 namespace noto {
 
 class Database;
 
-class ViewportWidget : public QWidget, public InputSource {
+class ViewportWidget : public QWidget, public InputSource, public ViewControl {
     Q_OBJECT
 
 public:
@@ -43,8 +46,16 @@ public:
     // InputSource. Always false: see the note above.
     bool next_value(const Prompt& prompt, InputValue& out) override;
 
-    void zoom_extents();
-    void set_plan_view();
+    // ViewControl. The commands reach the view through these; the keyboard
+    // shortcuts below call the same ones, so ZOOM and Home cannot drift apart.
+    void set_plan_view(const Vec3& normal) override;
+    void zoom_extents() override;
+    void zoom_window(const Vec3& a, const Vec3& b) override;
+    void zoom_scale(double factor) override;
+    bool zoom_previous() override;
+    void pan(const Vec3& from, const Vec3& to) override;
+    Basis view_basis() const override;
+    DrawContext draw_context() const override;
 
     // Re-runs the snap search under the stationary cursor and repaints. The
     // command line calls this after every entered line: typing an override, or
@@ -123,6 +134,12 @@ private:
     // that found it and the paint that draws it, so the search runs once per
     // mouse move rather than once per repaint.
     OsnapHit snap_{};
+
+    // ZOOM Previous. Whole view states, not zoom rectangles: whether a change
+    // of view direction should be undone by Previous is a policy question, and
+    // storing only an extent would answer it permanently and by accident.
+    void push_view();
+    std::vector<Viewport> view_stack_;
 };
 
 }  // namespace noto

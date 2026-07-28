@@ -149,7 +149,7 @@ rather than guessing — the interface hides which one it is.
 
 | # | Phase | Why it sits here |
 |---|---|---|
-| 6 | View commands | ZOOM, PAN, PLAN, VIEW, VPOINT, REGEN, REDRAW. **Blocked**: they need a `Viewport`, and `CommandContext` deliberately holds none — the same decision the selection-window axes and the interactive LISP input are waiting on. The inquiry half (DIST, ID, AREA, LIST) is done. |
+| 6 | View commands | ZOOM, PAN, VIEW, REGEN, REDRAW. Unblocked: `ViewControl` exists and PLAN is done, so these are commands on top of an interface that is already implemented. **VPOINT is deliberately deferred to phase 12**, since it is interpreted in the current CS and writing it against WCS only would mean writing it twice. The inquiry half (DIST, ID, AREA, LIST) is done. |
 | 7 | Entity breadth | PLINE, POINT, SOLID, 3DFACE, TEXT, then PEDIT. Forces the TEXT rendering decision (open question 2). Afterwards, selection, hit-testing, osnap, transforms and DXF are all exercised against a realistic entity set instead of Line/Circle/Arc. |
 | 8 | Tables and settings | LAYER, LTYPE and dash rendering, COLOR, LTSCALE, UNITS, LIMITS. Linetypes touch three layers at once: the DXF table, dash generation in the render path, and LTSCALE — not just a table entry. |
 | 9 | DXF read and OPEN | Closes the write-only gap. `dxf.hpp` has `DxfWriter` and nothing else, so the drawing cannot be reopened — not even our own output — and the "open it in other CAD software" correctness gate runs one way only. Placed after 7–8 so the reader is written once against a fuller entity and table set rather than retrofitted, but see open question 6. |
@@ -274,36 +274,25 @@ to what the stack is made of. Storing only a zoom extent would bake the answer i
 
 Worth deciding the stack depth at the same time: R12 remembered ten previous views.
 
-## One decision now blocks three things
+## How a command reaches the view — settled
 
-How does a command reach the view?
+`ViewControl`, an abstract interface in the core, reached through a nullable
+`CommandContext::view`. The Qt shell implements it over its real `Viewport`; `ncad`
+leaves it null and commands that need a view say so rather than pretending. Decided
+and built when PLAN needed it.
 
-`CommandContext` is `{Database&, SelectionSet&, const SelectionSet&}` and its header
-says it holds no view deliberately. Three separate pieces of work are now waiting on
-that:
+This unblocks the rest of phase 6's view half. Still to write, all straightforward on
+top of the interface: **ZOOM** (All, Center, Dynamic, Extents, Left, Previous, Window,
+scale), **PAN**, **VIEW**, **REGEN**, **REDRAW**. The ViewControl methods for zoom and
+pan already exist and are implemented in the widget; only the commands are missing.
 
-1. **ZOOM, PAN, PLAN, VPOINT, VIEW, REGEN, REDRAW** — all of phase 6's view half. They
-   manipulate a `Viewport`, which lives in the Qt widget.
-2. **Selection window axes under orbit** — `SelectionPrompter::set_view_axes()` exists
-   and nothing calls it, because the widget cannot reach a prompter private to a
-   command.
-3. **Interactive AutoLISP input** — `entsel` and the `get*` family, below, which need
-   the same route from the interpreter out to whatever can ask a question.
+`SelectionPrompter::set_view_axes()` can now be fed from `ctx.view->view_basis()`,
+which fixes selection windows under orbit. Not done yet.
 
-Options, none obviously right:
-
-- **A third `CommandContext` member.** Simplest, and the header's own precedent — the
-  selection arrived exactly this way. But it puts a view in the core's command
-  interface, and `ncad` has no view at all, so it would have to be optional or a null
-  object.
-- **A host interface** — an abstract `ViewControl` the GUI implements and `ncad` stubs.
-  Keeps `Viewport` out of `CommandContext` while giving commands what they need. This
-  also happens to be the shape `UserInput` wants for (3), so one design could serve
-  both.
-- **Commands return view requests** as part of `Step`, and the host applies them.
-  Keeps the core pure but only expresses what can be enumerated in advance.
-
-Worth settling before phase 6 rather than during it.
+**Interactive AutoLISP input** — `entsel` and the `get*` family — should follow the
+same shape: an abstract `UserInput` with `bool ask(const Prompt&, InputValue&)`,
+implemented by `ncad` over stdin and by the GUI over a nested `QEventLoop`. The
+re-entrancy of a nested loop is the part that wants care, not the interface.
 
 ## Interactive AutoLISP input is not implemented
 
