@@ -891,6 +891,134 @@ Step ArrayCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- STRETCH ----------------------------------------------------------------
+
+Step StretchCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
+
+namespace {
+
+// Which of an entity's grips STRETCH is allowed to move.
+//
+// The Stretch-kind ones, when it has any -- a line's endpoints, an arc's. A
+// line's midpoint grip is Move, and including it would let a crossing window
+// over the middle of a line drag the whole line, which is not what STRETCH
+// does.
+//
+// An entity with no Stretch grips at all falls back to its Move grip, because
+// that is its definition point: a circle has no stretchable geometry, and R12
+// moves a circle when its centre is inside the window.
+//
+// NOTE: an arc caught by its centre alone does nothing here, since only its
+// endpoints are Stretch grips. Whether R12 moves it is unverified; see
+// SF_todo.md.
+void eligible_grips(const std::vector<Grip>& grips, const SelectionRegion& region,
+                    std::vector<GripIndex>& out) {
+    out.clear();
+
+    bool any_stretch = false;
+    for (const Grip& g : grips) {
+        if (g.kind == GripKind::Stretch) {
+            any_stretch = true;
+            break;
+        }
+    }
+
+    const GripKind wanted = any_stretch ? GripKind::Stretch : GripKind::Move;
+    for (const Grip& g : grips) {
+        if (g.kind == wanted && region.contains(g.pos)) out.push_back(g.index);
+    }
+}
+
+}  // namespace
+
+Step StretchCommand::apply(CommandContext& ctx, const Vec3& delta) {
+    const std::vector<Handle> handles = ctx.selection.handles();
+
+    // No crossing region: every defining point is "inside" the selection, so
+    // this degenerates into MOVE. Saying so is the difference between the
+    // command looking broken and the user knowing what they asked for.
+    if (!ctx.selection.has_region()) {
+        const Mat4 m = Mat4::translation(delta);
+        std::size_t n = 0;
+        for (const Handle h : handles) {
+            const Entity* e = ctx.db.get(h);
+            if (!e) continue;
+            EntityPtr moved = e->clone();
+            moved->transform(m);
+            ctx.db.replace(h, std::move(moved));
+            ++n;
+        }
+        return Step::done(std::to_string(n) + " moved (no crossing window: stretched as a move)");
+    }
+
+    const SelectionRegion& region = ctx.selection.region();
+    std::vector<Grip> grips;
+    std::vector<GripIndex> indices;
+
+    std::size_t n = 0;
+    for (const Handle h : handles) {
+        const Entity* e = ctx.db.get(h);
+        if (!e) continue;
+
+        EntityPtr copy = e->clone();
+        grips.clear();
+        copy->grips(grips);
+        eligible_grips(grips, region, indices);
+
+        // Nothing of this entity fell inside: it was merely crossed, so it
+        // stays exactly where it is.
+        if (indices.empty()) continue;
+
+        copy->stretch(delta, indices.data(), indices.size());
+        ctx.db.replace(h, std::move(copy));
+        ++n;
+    }
+    return Step::done(std::to_string(n) + " stretched");
+}
+
+Step StretchCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Selecting: {
+            switch (select_.feed(ctx, value)) {
+                case SelectionPrompter::Result::Selecting:
+                    return Step::ask(select_.prompt(ctx));
+                case SelectionPrompter::Result::Rejected:
+                    return Step::failed("an entity is required");
+                case SelectionPrompter::Result::Finished:
+                    break;
+            }
+            if (ctx.selection.empty()) return Step::done("Nothing selected");
+
+            state_ = State::Base;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Base point or displacement";
+            return Step::ask(p);
+        }
+
+        case State::Base: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            base_ = value.point;
+            state_ = State::Displacement;
+
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Second point of displacement";
+            p.allow_empty = true;
+            p.base = base_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::Displacement: {
+            if (value.kind == InputKind::None) return apply(ctx, base_);
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            return apply(ctx, value.point - base_);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
 // --- DXFOUT -----------------------------------------------------------------
 
 Step DxfOutCommand::start(CommandContext&) {
@@ -925,6 +1053,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "MOVE") return std::make_unique<MoveCommand>(false);
     if (upper == "ROTATE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Rotate);
     if (upper == "SCALE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Scale);
+    if (upper == "STRETCH") return std::make_unique<StretchCommand>();
     if (upper == "MIRROR") return std::make_unique<TransformCommand>(TransformCommand::Kind::Mirror);
     if (upper == "COPY") return std::make_unique<MoveCommand>(true);
     if (upper == "UNDO") return std::make_unique<UndoCommand>();
@@ -935,7 +1064,8 @@ CommandPtr make_command(std::string_view name) {
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {"ARRAY",  "CIRCLE", "COPY",  "DXFOUT",
                                                   "ERASE",  "LINE",   "MIRROR", "MOVE",
-                                                  "REDO",   "ROTATE", "SCALE", "UNDO"};
+                                                  "REDO",   "ROTATE", "SCALE", "STRETCH",
+                                                  "UNDO"};
     return names;
 }
 
@@ -950,6 +1080,7 @@ const std::vector<CommandAlias>& command_aliases() {
         {"M", "MOVE"},
         {"MI", "MIRROR"},
         {"RO", "ROTATE"},
+        {"S", "STRETCH"},
         {"SC", "SCALE"},
         {"U", "UNDO"},
     };

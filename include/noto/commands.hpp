@@ -234,6 +234,36 @@ private:
     double fill_{0.0};
 };
 
+// STRETCH: move the defining points that fell inside a crossing window, and
+// leave the rest where they are.
+//
+// The command that needs more from a selection than a list of entities.
+// Everything selected is being stretched; only some of each entity's points
+// move, and which ones is answered by the crossing region -- which is why
+// SelectionSet carries one.
+//
+// It only does anything interesting when the selection was made by crossing.
+// With a plain Window, or with objects picked one at a time, every defining
+// point of every selected entity is inside the selection, so "move the points
+// that are inside" moves all of them and STRETCH becomes MOVE. R12 behaves that
+// way, silently, and it is the classic reason the command looks broken. Here it
+// still behaves that way -- but deliberately, and it says so in the message.
+class StretchCommand final : public Command {
+public:
+    const char* name() const override { return "STRETCH"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Selecting, Base, Displacement };
+
+    Step apply(CommandContext& ctx, const Vec3& delta);
+
+    State state_{State::Selecting};
+    SelectionPrompter select_;
+    Vec3 base_{};
+};
+
 // DXFOUT: prompt for a file name and write the drawing. In R12 this is a
 // command, and it only lived as a LISP function because the command layer did
 // not exist yet. The (dxfout ...) function stays -- scripts want it -- but this

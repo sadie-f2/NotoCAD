@@ -237,6 +237,16 @@ checking against the documentation:
   CIRCLE and ARC amounts to much the same thing but will diverge for TEXT and INSERT,
   where the base point is a defined property rather than a derived one.
 
+## STRETCH details taken from reasoning, not from the R12 manual
+
+- **An arc caught by its centre alone does nothing.** Only Stretch-kind grips are
+  eligible, which for an arc means its endpoints; the centre is a Move grip. Whether
+  R12 moves an arc whose centre falls inside the crossing window is unverified.
+- **A circle uses its centre**, because it has no Stretch grips at all and falls back
+  to its Move grip. That matches R12's behaviour of moving a circle when its centre is
+  inside, and it also means the crossing box has to cross the rim *and* contain the
+  centre — crossing the rim alone selects the circle but moves nothing.
+
 ## Known issues — reported, not yet diagnosed
 
 ## Known issues — reported, not yet diagnosed
