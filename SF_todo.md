@@ -247,6 +247,32 @@ checking against the documentation:
   inside, and it also means the crossing box has to cross the rim *and* contain the
   centre — crossing the rim alone selects the circle but moves nothing.
 
+## Interactive AutoLISP input is not implemented
+
+`ssget` has its non-interactive modes — `"X"`, `"P"`, `"L"`, `"W"`, `"C"` — plus the
+whole accessor family, which is the half a procedural workflow uses: generating
+geometry from analysis data never involves a cursor. Bare `(ssget)` refuses with a
+message rather than returning an empty set, because "found nothing" and "cannot ask"
+must not look alike.
+
+Still missing, and blocked on one decision: `entsel`, `getpoint`, `getdist`,
+`getangle`, `getstring`, `getreal`, `getint`, `getcorner`, `getkword`.
+
+**The decision.** These need the interpreter to ask a question part-way through
+evaluating an expression. In `ncad` that is a blocking read from stdin and easy. In the
+Qt shell it cannot block the event loop, so it needs a nested `QEventLoop` — which is
+the standard Qt answer and does work, but re-entrancy is the hazard: a second command
+started from inside the nested loop, or the window closing while an expression is
+suspended, both need thinking about. The alternative is suspending the interpreter
+itself, which is what `CommandEngine` does for commands and would mean continuations or
+a separate thread for LISP.
+
+The shape that fits: an abstract `UserInput` with `bool ask(const Prompt&, InputValue&)`
+in the core, implemented by `ncad` over stdin and by the GUI over a nested loop. The
+core stays headless either way.
+
+Also not implemented: `ssget` fence mode `"F"`, and filter lists on `"X"`.
+
 ## Known issues — reported, not yet diagnosed
 
 ## Known issues — reported, not yet diagnosed

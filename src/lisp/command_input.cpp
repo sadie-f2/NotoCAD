@@ -37,6 +37,13 @@ bool value_to_input(const Prompt& prompt, const Value& v, InputValue& out, std::
             out = InputValue::none();
             return true;
 
+        case Type::Sset:
+            // A selection set is not an answer to a prompt. R12 has no way to
+            // hand one to (command ...) either -- you name the entities, or you
+            // use Previous.
+            error = "a selection set is not valid input to a command";
+            return false;
+
         case Type::Str: {
             const std::string text(v.str->view());
             if (text.empty()) {

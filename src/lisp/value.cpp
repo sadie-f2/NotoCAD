@@ -94,6 +94,10 @@ void print_value(const Value& v, bool readable, std::string& out) {
             std::snprintf(buf, sizeof(buf), "<File: %d>", v.file);
             out += buf;
             break;
+        case Type::Sset:
+            std::snprintf(buf, sizeof(buf), "<Selection set: %d>", v.sset);
+            out += buf;
+            break;
     }
 }
 
@@ -111,6 +115,7 @@ const char* type_name(Type t) {
         case Type::Subr: return "SUBR";
         case Type::Ename: return "ENAME";
         case Type::File: return "FILE";
+        case Type::Sset: return "PICKSET";
     }
     return "?";
 }
@@ -141,6 +146,7 @@ bool equal(const Value& a, const Value& b) {
         case Type::Ename: return a.ename == b.ename;
         case Type::Subr: return a.subr == b.subr;
         case Type::File: return a.file == b.file;
+        case Type::Sset: return a.sset == b.sset;
         case Type::Cons:
             return equal(a.cons->car, b.cons->car) && equal(a.cons->cdr, b.cons->cdr);
         default: return false;

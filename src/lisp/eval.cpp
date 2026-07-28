@@ -442,4 +442,19 @@ bool Interp::eval_string(std::string_view source, Value& out) {
     return true;
 }
 
+std::int32_t Interp::new_selection_set(SelectionSet set) {
+    ssets_.push_back(std::move(set));
+    return static_cast<std::int32_t>(ssets_.size() - 1);
+}
+
+SelectionSet* Interp::selection_set(std::int32_t index) {
+    if (index < 0 || static_cast<std::size_t>(index) >= ssets_.size()) return nullptr;
+    return &ssets_[static_cast<std::size_t>(index)];
+}
+
+const SelectionSet* Interp::selection_set(std::int32_t index) const {
+    if (index < 0 || static_cast<std::size_t>(index) >= ssets_.size()) return nullptr;
+    return &ssets_[static_cast<std::size_t>(index)];
+}
+
 }  // namespace noto::lisp

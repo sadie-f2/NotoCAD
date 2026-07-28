@@ -14,6 +14,7 @@
 #pragma once
 
 #include "noto/lisp/value.hpp"
+#include "noto/selection.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -122,6 +123,15 @@ public:
     void set_command_engine(CommandEngine* engine) { engine_ = engine; }
     CommandEngine* command_engine() { return engine_; }
 
+    // Selection sets live here rather than in the arena: they own a vector of
+    // handles, and the arena is for values that can be dropped wholesale. A
+    // Value holds an index into this table, so a set passed between variables
+    // is shared rather than copied, which is how AutoLISP behaves.
+    std::int32_t new_selection_set(SelectionSet set);
+    SelectionSet* selection_set(std::int32_t index);
+    const SelectionSet* selection_set(std::int32_t index) const;
+    void clear_selection_sets() { ssets_.clear(); }
+
     const EvalError& error() const { return error_; }
     void clear_error() { error_ = EvalError{}; }
 
@@ -167,6 +177,7 @@ private:
     Context& ctx_;
     Database* db_{nullptr};
     CommandEngine* engine_{nullptr};
+    std::vector<SelectionSet> ssets_;
     EvalError error_{};
     std::ostream* out_{nullptr};
 

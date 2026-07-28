@@ -11,6 +11,7 @@
 #include "entity_subrs.hpp"
 #include "command_subr.hpp"
 #include "file_subrs.hpp"
+#include "sset_subrs.hpp"
 #include "sysvar_subrs.hpp"
 
 #include <cmath>
@@ -803,6 +804,14 @@ constexpr SubrDef kSubrs[] = {
     {"ENTDEL", subr_entdel, 1, 1},
     {"ENTLAST", subr_entlast, 0, 0},
     {"ENTNEXT", subr_entnext, 0, 1},
+
+    // selection sets -- implemented in sset_subrs.cpp
+    {"SSGET", subr_ssget, 0, kNoMax},
+    {"SSADD", subr_ssadd, 0, 2},
+    {"SSDEL", subr_ssdel, 2, 2},
+    {"SSLENGTH", subr_sslength, 1, 1},
+    {"SSNAME", subr_ssname, 2, 2},
+    {"SSMEMB", subr_ssmemb, 2, 2},
 
     // system variables -- implemented in sysvar_subrs.cpp
     {"GETVAR", subr_getvar, 1, 1},

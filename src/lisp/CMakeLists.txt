@@ -8,6 +8,7 @@ add_library(noto_lisp STATIC
   eval.cpp
   builtins.cpp
   entity_subrs.cpp
+  sset_subrs.cpp
   sysvar_subrs.cpp
   file_subrs.cpp
   command_subr.cpp

@@ -32,6 +32,7 @@ enum class Type : std::uint8_t {
     Subr,     // built-in function
     Ename,    // entity name: a database handle
     File,     // open file descriptor from (open ...)
+    Sset,     // selection set from (ssget ...)
 };
 
 const char* type_name(Type t);
@@ -52,6 +53,7 @@ struct Value {
         Handle ename;
         std::int32_t subr;   // index into the builtin table
         std::int32_t file;   // index into the open-file table
+        std::int32_t sset;   // index into the interpreter's selection-set table
     };
 
     constexpr Value() : i(0) {}
@@ -138,6 +140,17 @@ inline Value make_subr(std::int32_t index) {
     Value v;
     v.type = Type::Subr;
     v.subr = index;
+    return v;
+}
+
+// Selection sets are held by the interpreter and referred to by index, so that
+// Value stays sixteen bytes. AutoLISP's own sets behave the same way: an
+// ssname is a reference, and two variables holding the same set see the same
+// thing.
+inline Value make_sset(std::int32_t index) {
+    Value v;
+    v.type = Type::Sset;
+    v.sset = index;
     return v;
 }
 
