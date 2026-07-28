@@ -179,6 +179,36 @@ Step EraseCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::ask(select_prompt());
 }
 
+// --- UNDO / REDO ------------------------------------------------------------
+
+Step UndoCommand::start(CommandContext& ctx) {
+    UndoJournal& j = ctx.db.journal();
+    if (!j.can_undo()) return Step::done("Nothing to undo");
+
+    // Named before the undo runs: afterwards the group has moved to the redo
+    // stack and undo_name() is talking about something else.
+    const std::string what = j.undo_name();
+    if (!j.undo(ctx.db)) return Step::failed("undo failed");
+    return Step::done(what.empty() ? "Undone" : what);
+}
+
+Step UndoCommand::next(CommandContext&, const InputValue&) {
+    return Step::failed("UNDO takes no input");
+}
+
+Step RedoCommand::start(CommandContext& ctx) {
+    UndoJournal& j = ctx.db.journal();
+    if (!j.can_redo()) return Step::done("Nothing to redo");
+
+    const std::string what = j.redo_name();
+    if (!j.redo(ctx.db)) return Step::failed("redo failed");
+    return Step::done(what.empty() ? "Redone" : what);
+}
+
+Step RedoCommand::next(CommandContext&, const InputValue&) {
+    return Step::failed("REDO takes no input");
+}
+
 // --- DXFOUT -----------------------------------------------------------------
 
 Step DxfOutCommand::start(CommandContext&) {
@@ -209,11 +239,14 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "CIRCLE") return std::make_unique<CircleCommand>();
     if (upper == "ERASE") return std::make_unique<EraseCommand>();
     if (upper == "DXFOUT") return std::make_unique<DxfOutCommand>();
+    if (upper == "UNDO") return std::make_unique<UndoCommand>();
+    if (upper == "REDO") return std::make_unique<RedoCommand>();
     return nullptr;
 }
 
 const std::vector<std::string>& command_names() {
-    static const std::vector<std::string> names = {"CIRCLE", "DXFOUT", "ERASE", "LINE"};
+    static const std::vector<std::string> names = {"CIRCLE", "DXFOUT", "ERASE",
+                                                  "LINE",   "REDO",   "UNDO"};
     return names;
 }
 
@@ -223,6 +256,7 @@ const std::vector<CommandAlias>& command_aliases() {
         {"C", "CIRCLE"},
         {"E", "ERASE"},
         {"L", "LINE"},
+        {"U", "UNDO"},
     };
     return aliases;
 }

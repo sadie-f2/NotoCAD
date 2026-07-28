@@ -24,6 +24,8 @@
 
 namespace noto {
 
+class UndoJournal;
+
 enum class SysvarType : std::uint8_t { Int, Real, String, Point };
 
 // Tagged struct with every field present, mirroring InputValue rather than
@@ -106,8 +108,17 @@ public:
     // configuration ones alone.
     void reset_drawing_vars();
 
+    // Every successful set is journalled through this. Wired by Database at
+    // construction, so a sysvar cannot be changed without the change being
+    // undoable -- routing writes past the journal is exactly how undo grows
+    // holes.
+    void set_journal(UndoJournal* j) { journal_ = j; }
+
 private:
+    void journal_write(Sysvar id, const SysvarValue& before);
+
     SysvarValue values_[static_cast<std::size_t>(Sysvar::kCount)];
+    UndoJournal* journal_{nullptr};
 };
 
 // For error text. Never null.

@@ -232,6 +232,8 @@ public:
 
 private:
     EngineStatus apply(const Step& step);
+    void open_group(const char* name);
+    void close_group();
 
     CommandContext ctx_;
     CommandPtr command_;
@@ -242,6 +244,7 @@ private:
     bool has_last_point_{false};
     OsnapMask osnap_override_{kOsnapNone};
     bool has_osnap_override_{false};
+    bool group_open_{false};
 };
 
 }  // namespace noto

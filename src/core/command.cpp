@@ -123,6 +123,7 @@ EngineStatus CommandEngine::begin(CommandPtr cmd) {
 
     command_ = std::move(cmd);
     message_.clear();
+    open_group(command_->name());
     return apply(command_->start(ctx_));
 }
 
@@ -172,10 +173,28 @@ EngineStatus CommandEngine::run(InputSource& src) {
 
 void CommandEngine::cancel() {
     if (!command_) return;
+    // Committed work survives Escape, as in R12 -- cancelling LINE after three
+    // segments keeps them. So the group closes normally and those three
+    // segments remain one undoable step, rather than being rolled back here.
+    close_group();
     command_.reset();
     prompt_ = Prompt{};
     message_ = "*Cancel*";
     status_ = EngineStatus::Cancelled;
+}
+
+// One command is one undo step, which is what makes UNDO after a four-segment
+// LINE remove the whole line rather than one segment. Groups nest, so a
+// (command ...) inside a running command does not start a second one.
+void CommandEngine::open_group(const char* name) {
+    ctx_.db.journal().begin_group(name ? name : "");
+    group_open_ = true;
+}
+
+void CommandEngine::close_group() {
+    if (!group_open_) return;
+    group_open_ = false;
+    ctx_.db.journal().end_group();
 }
 
 EngineStatus CommandEngine::apply(const Step& step) {
@@ -189,18 +208,21 @@ EngineStatus CommandEngine::apply(const Step& step) {
             status_ = EngineStatus::Waiting;
             return status_;
         case StepKind::Done:
+            close_group();
             command_.reset();
             prompt_ = Prompt{};
             message_ = step.message;
             status_ = EngineStatus::Finished;
             return status_;
         case StepKind::Cancelled:
+            close_group();
             command_.reset();
             prompt_ = Prompt{};
             message_ = step.message;
             status_ = EngineStatus::Cancelled;
             return status_;
         case StepKind::Failed:
+            close_group();
             command_.reset();
             prompt_ = Prompt{};
             message_ = step.message;

@@ -8,8 +8,13 @@
 namespace noto {
 
 Database::Database() {
+    sysvars_.set_journal(&journal_);
     add_linetype("CONTINUOUS", "Solid line", {});
     add_layer("0", 7, kLinetypeContinuous);
+
+    // The tables and defaults above are what a new drawing *is*, not something
+    // done to it. Undoing back past them is not meaningful.
+    journal_.clear();
 }
 
 Handle Database::add(EntityPtr entity) {
@@ -19,7 +24,25 @@ Handle Database::add(EntityPtr entity) {
     entity->handle_ = h;
     entities_.emplace(h, std::move(entity));
     order_.push_back(h);
+    journal_.record_add(*entities_[h], order_.size() - 1);
     return h;
+}
+
+bool Database::restore(Handle h, EntityPtr entity, std::size_t order_index) {
+    if (!entity || h == kNullHandle) return false;
+    if (entities_.find(h) != entities_.end()) return false;
+
+    entity->handle_ = h;
+    entities_.emplace(h, std::move(entity));
+
+    // Clamped rather than rejected: the order may legitimately be shorter now
+    // than when the entity was removed, if things after it went too.
+    const std::size_t at = order_index < order_.size() ? order_index : order_.size();
+    order_.insert(order_.begin() + static_cast<std::ptrdiff_t>(at), h);
+
+    // A handle handed back out must never be reissued to something else.
+    if (h >= next_handle_) next_handle_ = h + 1;
+    return true;
 }
 
 Entity* Database::get(Handle h) {
@@ -40,6 +63,7 @@ bool Database::replace(Handle h, EntityPtr entity) {
     // The handle carries over, so order_ needs no update and any ename held by
     // AutoLISP stays valid.
     entity->handle_ = h;
+    journal_.record_modify(*it->second, *entity);
     it->second = std::move(entity);
     return true;
 }
@@ -58,6 +82,10 @@ Handle Database::next(Handle h) const {
 bool Database::erase(Handle h) {
     const auto it = entities_.find(h);
     if (it == entities_.end()) return false;
+
+    const auto pos = std::find(order_.begin(), order_.end(), h);
+    const std::size_t index = static_cast<std::size_t>(pos - order_.begin());
+    journal_.record_erase(*it->second, index);
 
     entities_.erase(it);
     // Linear, which is fine at present sizes. If bulk deletion ever shows up in

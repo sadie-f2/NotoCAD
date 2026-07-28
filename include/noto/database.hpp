@@ -10,6 +10,7 @@
 
 #include "noto/entity.hpp"
 #include "noto/sysvar.hpp"
+#include "noto/undo.hpp"
 
 #include <string>
 #include <unordered_map>
@@ -56,6 +57,13 @@ public:
     bool erase(Handle h);
     void clear();
 
+    // Re-inserts an entity under a handle it previously had, at the drawing
+    // order position it previously occupied. This exists for undo and for
+    // nothing else: ordinary insertion is add(), which allocates a fresh handle.
+    // Restoring to the end of the order instead would silently change what
+    // draws on top of what, and change the DXF byte for byte.
+    bool restore(Handle h, EntityPtr entity, std::size_t order_index);
+
     // Drawing-order traversal, for AutoLISP's entnext and entlast.
     Handle first() const { return order_.empty() ? kNullHandle : order_.front(); }
     Handle last() const { return order_.empty() ? kNullHandle : order_.back(); }
@@ -96,6 +104,14 @@ public:
     Sysvars& sysvars() { return sysvars_; }
     const Sysvars& sysvars() const { return sysvars_; }
 
+    // --- undo ---------------------------------------------------------------
+
+    // Every mutation above is journalled here. It lives on the database for the
+    // same reason the sysvars do: commands reach it through the context they
+    // already hold, and nothing can change the drawing behind its back.
+    UndoJournal& journal() { return journal_; }
+    const UndoJournal& journal() const { return journal_; }
+
     Handle peek_next_handle() const { return next_handle_; }
 
 private:
@@ -105,6 +121,7 @@ private:
 
     std::vector<Layer> layers_;
     std::vector<Linetype> linetypes_;
+    UndoJournal journal_;
     Sysvars sysvars_;
 };
 

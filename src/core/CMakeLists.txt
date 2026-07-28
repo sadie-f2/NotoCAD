@@ -10,6 +10,7 @@ add_library(noto_core STATIC
   entities_grip.cpp
   osnap_derived.cpp
   sysvar.cpp
+  undo.cpp
   pick.cpp
   osnap_search.cpp
   render.cpp

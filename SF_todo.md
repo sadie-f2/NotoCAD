@@ -107,38 +107,41 @@ documentation rather than memory.
 
 ---
 
-## Undo and redo — infinite, back to the start of the session
+## Phase 4c — undo and redo
 
-**Requirement:** unlimited undo and redo, reaching all the way back to the beginning
-of a session. Not a depth-limited buffer.
+*Done.* Unlimited, back to the start of the session. `undo.hpp`, `UNDO` / `REDO` /
+the `U` alias.
 
-**This wants to land early — probably before phase 5, not after.** Every editing
-command has to be undoable, so building MOVE, COPY, ROTATE, SCALE, MIRROR, ARRAY and
-STRETCH first means revisiting all seven afterwards. The same argument as 4b and as
-ECS: cheaper at three commands than at ten.
+- [x] Before/after journal on `Database`, leaning on stable handles and `clone()`
+- [x] Command-level grouping — one UNDO reverses one command, not one segment
+- [x] Nested groups collapse, so a LISP function calling `(command ...)` repeatedly
+      is one step; this is the hook a batch mode will use for `entmake` meshes
+- [x] System variables journalled, not only entities
+- [x] Erased entities restored to their old position in the drawing order
+- [x] Undo is not itself undoable; new work discards the redo stack
 
-It also touches more than entities. A complete undo has to cover database mutations
-(`add` / `erase` / `replace`), symbol-table changes (layers, linetypes), and system
-variables — `(setvar "OSMODE" ...)` inside a command is state a user expects to come
-back. Anything mutable that is not journalled becomes a silent hole in undo, and holes
-in undo are discovered at the worst possible moment.
+Landed before phase 5 on purpose. Every editing command has to be undoable, so
+building MOVE, COPY, ROTATE, SCALE, MIRROR, ARRAY and STRETCH first would have meant
+revisiting all seven. The same argument as 4b and as ECS: cheaper at four commands
+than at eleven.
 
-Shape that fits this codebase, to be confirmed when it is planned properly:
+**Still open:** layers and linetypes are not journalled yet — no command changes them,
+so there is nothing to lose today, but LAYER in phase 8 must not land without it.
+Memory is unmeasured; see below.
 
-- A journal on `Database` of before/after records, leaning on two things already true:
-  handles are stable and never reused, and every entity can `clone()`.
-- Command-level grouping, so one UNDO reverses one command rather than one primitive.
-  `CommandEngine` already knows where commands begin and end.
-- R12's UNDO had marks and groups (`UNDO Mark` / `Back`); worth matching, and the
-  grouping mechanism is the same one.
-- The LISP path needs the same treatment: `entmake` in a loop over ten thousand faces
-  must not produce ten thousand undo steps, which ties into the suppressed-regen batch
-  mode already planned for phase 13.
+Not yet built, and wanted:
+
+- R12's `UNDO Mark` / `Back`, and `UNDO <n>` for several steps at once. The grouping
+  mechanism is already there; these are argument parsing on top of it.
+- Layer and linetype journalling, before LAYER exists to change them.
+- A group around a whole top-level LISP evaluation, so `entmake` in a loop over ten
+  thousand faces is one step rather than ten thousand. `begin_group` nests already;
+  nothing calls it from the interpreter yet.
 
 Open question: memory. Journalling clones back to session start is unbounded by
 definition, and the mesh workload is tens of thousands of faces. Whether that is
 actually a problem, and whether a compact diff beats storing clones, needs measuring
-rather than guessing.
+rather than guessing — the interface hides which one it is.
 
 ---
 

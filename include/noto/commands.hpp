@@ -82,6 +82,26 @@ public:
 // argument to (command ...) is a command name only if it matches exactly, and
 // resolving prefixes would make (command "LINE" p1 p2 "C") start CIRCLE instead
 // of closing the polyline.
+// UNDO and REDO. Both complete in one step with no prompt: R12's UNDO takes a
+// count and options, but plain "undo one thing" is what it does by default and
+// is the whole of what exists here.
+//
+// Neither is itself undoable, and neither opens a group -- an undo step that
+// undoes an undo is how a history turns into a maze. REDO is the inverse.
+class UndoCommand final : public Command {
+public:
+    const char* name() const override { return "UNDO"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
+class RedoCommand final : public Command {
+public:
+    const char* name() const override { return "REDO"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
 CommandPtr make_command(std::string_view name);
 
 // The registered command names, for help text and completion.

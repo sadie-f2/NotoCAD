@@ -3,6 +3,8 @@
 
 #include "noto/sysvar.hpp"
 
+#include "noto/undo.hpp"
+
 #include <cstddef>
 
 namespace noto {
@@ -146,7 +148,9 @@ Sysvars::SetStatus Sysvars::set_int(Sysvar id, std::int32_t v) {
     if (d.read_only) return SetStatus::ReadOnly;
     if (d.type != SysvarType::Int) return SetStatus::WrongType;
     if (v < d.int_min || v > d.int_max) return SetStatus::OutOfRange;
+    const SysvarValue before = values_[index_of(id)];
     values_[index_of(id)] = SysvarValue::of_int(v);
+    journal_write(id, before);
     return SetStatus::Ok;
 }
 
@@ -154,7 +158,9 @@ Sysvars::SetStatus Sysvars::set_real(Sysvar id, double v) {
     const SysvarDef& d = sysvar_def(id);
     if (d.read_only) return SetStatus::ReadOnly;
     if (d.type != SysvarType::Real) return SetStatus::WrongType;
+    const SysvarValue before = values_[index_of(id)];
     values_[index_of(id)] = SysvarValue::of_real(v);
+    journal_write(id, before);
     return SetStatus::Ok;
 }
 
@@ -162,7 +168,9 @@ Sysvars::SetStatus Sysvars::set_string(Sysvar id, std::string v) {
     const SysvarDef& d = sysvar_def(id);
     if (d.read_only) return SetStatus::ReadOnly;
     if (d.type != SysvarType::String) return SetStatus::WrongType;
+    const SysvarValue before = values_[index_of(id)];
     values_[index_of(id)] = SysvarValue::of_string(std::move(v));
+    journal_write(id, before);
     return SetStatus::Ok;
 }
 
@@ -170,7 +178,9 @@ Sysvars::SetStatus Sysvars::set_point(Sysvar id, const Vec3& p) {
     const SysvarDef& d = sysvar_def(id);
     if (d.read_only) return SetStatus::ReadOnly;
     if (d.type != SysvarType::Point) return SetStatus::WrongType;
+    const SysvarValue before = values_[index_of(id)];
     values_[index_of(id)] = SysvarValue::of_point(p);
+    journal_write(id, before);
     return SetStatus::Ok;
 }
 
@@ -207,6 +217,10 @@ Sysvars::SetStatus Sysvars::set(std::string_view name, const SysvarValue& v) {
             return set_point(d->id, v.point);
     }
     return SetStatus::WrongType;
+}
+
+void Sysvars::journal_write(Sysvar id, const SysvarValue& before) {
+    if (journal_) journal_->record_sysvar(id, before, values_[index_of(id)]);
 }
 
 void Sysvars::reset_drawing_vars() {
