@@ -948,6 +948,422 @@ Step TextCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- BLOCK ------------------------------------------------------------------
+
+Step BlockCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Block name";
+    return Step::ask(p);
+}
+
+Step BlockCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Name: {
+            if (value.kind != InputKind::String || value.text.empty()) {
+                return Step::failed("a block name is required");
+            }
+            block_name_ = upcase(value.text);
+            state_ = State::Base;
+
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Insertion base point";
+            return Step::ask(p);
+        }
+
+        case State::Base: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            base_ = value.point;
+            state_ = State::Selecting;
+            return Step::ask(select_.prompt(ctx));
+        }
+
+        case State::Selecting: {
+            const SelectionPrompter::Result r = select_.feed(ctx, value);
+            if (r == SelectionPrompter::Result::Rejected) {
+                return Step::failed("not a valid selection");
+            }
+            if (r == SelectionPrompter::Result::Selecting) {
+                return Step::ask(select_.prompt(ctx));
+            }
+
+            if (ctx.selection.empty()) return Step::failed("nothing selected");
+
+            // A block cannot be defined in terms of itself. Redefining one that
+            // is currently inserted is fine and is the point of redefinition;
+            // what is refused is a definition containing its own reference,
+            // which would be a cycle rather than a nesting.
+            const BlockId existing = ctx.db.find_block(block_name_);
+            if (existing != kInvalidBlock) {
+                for (Handle h : ctx.selection.handles()) {
+                    const Entity* e = ctx.db.get(h);
+                    if (!e || e->type() != EntityType::Insert) continue;
+                    if (static_cast<const Insert&>(*e).definition() == ctx.db.block(existing)) {
+                        return Step::failed("a block cannot contain itself");
+                    }
+                }
+            }
+
+            BlockDef def;
+            def.name = block_name_;
+            // The definition is stored around its own origin, so an insertion
+            // is a plain placement rather than a placement plus a correction.
+            def.base = Vec3{};
+
+            const Mat4 to_definition = Mat4::translation(base_ * -1.0);
+            for (Handle h : ctx.selection.handles()) {
+                const Entity* e = ctx.db.get(h);
+                if (!e) continue;
+                EntityPtr copy = e->clone();
+                copy->transform(to_definition);
+                def.entities.push_back(std::move(copy));
+            }
+
+            const std::size_t count = def.entities.size();
+            ctx.db.add_block(std::move(def));
+
+            // R12 removes the originals: BLOCK is not "copy this into a
+            // definition", it is "this geometry is now a definition". One UNDO
+            // brings them back, since the whole command is a single group.
+            for (Handle h : ctx.selection.handles()) ctx.db.erase(h);
+            ctx.selection.clear();
+
+            return Step::done(std::to_string(count) + " entities in block " + block_name_);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- INSERT and MINSERT -----------------------------------------------------
+
+Step InsertCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Block name";
+    return Step::ask(p);
+}
+
+Step InsertCommand::ask_rotation() {
+    state_ = State::Rotation;
+    Prompt p;
+    p.kind = PromptKind::Angle;
+    p.message = "Rotation angle";
+    p.allow_empty = true;
+    p.base = point_;
+    p.has_base = true;
+    return Step::ask(p);
+}
+
+Step InsertCommand::place(CommandContext& ctx) {
+    const BlockDef* def = ctx.db.block(block_);
+    if (!def) return Step::failed("no such block");
+
+    InsertPlacement p;
+    p.insertion = point_;
+    p.scale = scale_;
+    p.rotation = rotation_;
+    p.normal = construction_normal();
+
+    auto e = std::make_unique<Insert>(def, compose_placement(p, def->base));
+    if (multiple_) e->set_array(rows_, columns_, row_spacing_, column_spacing_);
+
+    ctx.db.add(with_current_props(ctx.db, std::move(e)));
+    return Step::done();
+}
+
+Step InsertCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Name: {
+            if (value.kind != InputKind::String || value.text.empty()) {
+                return Step::failed("a block name is required");
+            }
+            block_ = ctx.db.find_block(upcase(value.text));
+            if (block_ == kInvalidBlock) return Step::failed("no such block");
+
+            state_ = State::Point;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Insertion point";
+            return Step::ask(p);
+        }
+
+        case State::Point: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            point_ = value.point;
+
+            state_ = State::Scale;
+            Prompt p;
+            p.kind = PromptKind::Distance;
+            p.message = "X scale factor <1>";
+            p.allow_empty = true;
+            p.keywords = {"Corner", "XYZ"};
+            p.base = point_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::Scale: {
+            if (value.kind == InputKind::None) return ask_rotation();
+
+            if (keyword_is(value, "CORNER") || keyword_is(value, "XYZ")) {
+                // Corner takes the scale from a rectangle; XYZ asks for all
+                // three separately. Both end up asking for a second number, so
+                // both land in the same state.
+                state_ = State::YScale;
+                Prompt p;
+                p.kind = PromptKind::Distance;
+                p.message = "Y scale factor";
+                p.base = point_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+
+            double s = 0.0;
+            if (!signed_distance_from(value, point_, s)) {
+                return Step::failed("a scale factor is required");
+            }
+            if (s == 0.0) return Step::failed("scale cannot be zero");
+
+            // R12's default: one number scales all three axes. The Y prompt
+            // that follows offers "<default=X>" for exactly this reason.
+            scale_ = {s, s, s};
+            state_ = State::YScale;
+
+            Prompt p;
+            p.kind = PromptKind::Distance;
+            p.message = "Y scale factor (default=X)";
+            p.allow_empty = true;
+            p.base = point_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::YScale: {
+            if (value.kind != InputKind::None) {
+                double s = 0.0;
+                if (!signed_distance_from(value, point_, s)) {
+                    return Step::failed("a scale factor is required");
+                }
+                if (s == 0.0) return Step::failed("scale cannot be zero");
+                scale_.y = s;
+            }
+            return ask_rotation();
+        }
+
+        case State::Rotation: {
+            if (value.kind != InputKind::None) {
+                if (!angle_from(value, point_, rotation_)) {
+                    return Step::failed("an angle is required");
+                }
+            }
+            if (!multiple_) return place(ctx);
+
+            state_ = State::Rows;
+            Prompt p;
+            p.kind = PromptKind::Integer;
+            p.message = "Number of rows (---)";
+            return Step::ask(p);
+        }
+
+        case State::Rows: {
+            if (value.kind != InputKind::Integer || value.integer < 1) {
+                return Step::failed("a positive count is required");
+            }
+            rows_ = static_cast<std::int16_t>(value.integer);
+
+            state_ = State::Columns;
+            Prompt p;
+            p.kind = PromptKind::Integer;
+            p.message = "Number of columns (|||)";
+            return Step::ask(p);
+        }
+
+        case State::Columns: {
+            if (value.kind != InputKind::Integer || value.integer < 1) {
+                return Step::failed("a positive count is required");
+            }
+            columns_ = static_cast<std::int16_t>(value.integer);
+
+            // A single row or column needs no spacing for that axis, which is
+            // the one place R12 skips a question.
+            if (rows_ == 1 && columns_ == 1) return place(ctx);
+
+            state_ = State::RowSpacing;
+            Prompt p;
+            p.kind = PromptKind::Distance;
+            p.message = "Unit cell or distance between rows (---)";
+            p.base = point_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::RowSpacing: {
+            if (!signed_distance_from(value, point_, row_spacing_)) {
+                return Step::failed("a distance is required");
+            }
+            state_ = State::ColumnSpacing;
+            Prompt p;
+            p.kind = PromptKind::Distance;
+            p.message = "Distance between columns (|||)";
+            p.base = point_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::ColumnSpacing: {
+            if (!signed_distance_from(value, point_, column_spacing_)) {
+                return Step::failed("a distance is required");
+            }
+            return place(ctx);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- EXPLODE ----------------------------------------------------------------
+
+Step ExplodeCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
+
+Step ExplodeCommand::next(CommandContext& ctx, const InputValue& value) {
+    const SelectionPrompter::Result r = select_.feed(ctx, value);
+    if (r == SelectionPrompter::Result::Rejected) return Step::failed("not a valid selection");
+    if (r == SelectionPrompter::Result::Selecting) return Step::ask(select_.prompt(ctx));
+
+    if (ctx.selection.empty()) return Step::failed("nothing selected");
+
+    std::size_t exploded = 0;
+    std::size_t skipped = 0;
+
+    for (Handle h : ctx.selection.handles()) {
+        const Entity* e = ctx.db.get(h);
+        if (!e) continue;
+        if (e->type() != EntityType::Insert) {
+            // R12 also explodes polylines into lines and arcs, and dimensions
+            // into their parts. Not built: polyline explosion is the inverse of
+            // PEDIT Join and belongs beside it, and dimensions do not exist.
+            ++skipped;
+            continue;
+        }
+
+        const Insert& ins = static_cast<const Insert&>(*e);
+        const BlockDef* def = ins.definition();
+        if (!def) {
+            ++skipped;
+            continue;
+        }
+
+        // One level only, as R12 does: a nested reference comes out as a
+        // reference, not as its contents. Taking an assembly apart a layer at a
+        // time is the point rather than a limitation.
+        const EntityProps inherited = ins.props();
+        for (std::int16_t row = 0; row < ins.rows(); ++row) {
+            for (std::int16_t col = 0; col < ins.columns(); ++col) {
+                const Mat4 m = ins.placement_for(row, col);
+                for (const EntityPtr& child : def->entities) {
+                    if (!child) continue;
+                    EntityPtr copy = child->clone();
+                    copy->transform(m);
+                    // BYBLOCK resolves against the reference that is going
+                    // away, so anything carrying it inherits the reference's
+                    // own properties rather than becoming BYLAYER by accident.
+                    if (copy->props().color == kColorByBlock) {
+                        copy->props().color = inherited.color;
+                    }
+                    ctx.db.add(std::move(copy));
+                }
+            }
+        }
+
+        ctx.db.erase(h);
+        ++exploded;
+    }
+
+    ctx.selection.clear();
+    if (exploded == 0) return Step::failed("nothing that can be exploded was selected");
+
+    std::string msg = std::to_string(exploded) + " exploded";
+    if (skipped > 0) msg += ", " + std::to_string(skipped) + " skipped";
+    return Step::done(msg);
+}
+
+// --- WBLOCK -----------------------------------------------------------------
+
+Step WblockCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "File name";
+    return Step::ask(p);
+}
+
+Step WblockCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::File: {
+            if (value.kind != InputKind::String || value.text.empty()) {
+                return Step::failed("a file name is required");
+            }
+            path_ = value.text;
+            if (path_.size() < 4 || upcase(path_.substr(path_.size() - 4)) != ".DXF") {
+                path_ += ".dxf";
+            }
+
+            state_ = State::Block;
+            Prompt p;
+            p.kind = PromptKind::String;
+            p.message = "Block name (* for the whole drawing)";
+            return Step::ask(p);
+        }
+
+        case State::Block: {
+            if (value.kind != InputKind::String || value.text.empty()) {
+                return Step::failed("a block name is required");
+            }
+
+            if (value.text == "*") {
+                if (!write_dxf_file(ctx.db, path_)) return Step::failed("cannot write " + path_);
+                return Step::done(path_ + " written");
+            }
+
+            const BlockId id = ctx.db.find_block(upcase(value.text));
+            const BlockDef* def = ctx.db.block(id);
+            if (!def) return Step::failed("no such block");
+
+            // A fresh database holding the definition's contents as ordinary
+            // entities, which is what a written block is: the file is a drawing
+            // whose geometry happens to have come from one.
+            Database out;
+            for (const EntityPtr& e : def->entities) {
+                if (e) out.add(e->clone());
+            }
+            out.sysvars().set("INSBASE", SysvarValue::of_point(def->base));
+
+            if (!write_dxf_file(out, path_)) return Step::failed("cannot write " + path_);
+            return Step::done(path_ + " written");
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- BASE -------------------------------------------------------------------
+
+Step BaseCommand::start(CommandContext& ctx) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Base point";
+    p.allow_empty = true;
+    p.base = ctx.db.sysvars().get_point(Sysvar::InsBase);
+    p.has_base = true;
+    return Step::ask(p);
+}
+
+Step BaseCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind == InputKind::None) return Step::done();
+    if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+    ctx.db.sysvars().set("INSBASE", SysvarValue::of_point(value.point));
+    return Step::done();
+}
+
 // --- PEDIT ------------------------------------------------------------------
 
 namespace {
@@ -3080,6 +3496,12 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "LIST") return std::make_unique<ListCommand>();
     if (upper == "LTYPE") return std::make_unique<LtypeCommand>();
     if (upper == "PAN") return std::make_unique<PanCommand>();
+    if (upper == "BASE") return std::make_unique<BaseCommand>();
+    if (upper == "BLOCK") return std::make_unique<BlockCommand>();
+    if (upper == "EXPLODE") return std::make_unique<ExplodeCommand>();
+    if (upper == "INSERT") return std::make_unique<InsertCommand>(false);
+    if (upper == "MINSERT") return std::make_unique<InsertCommand>(true);
+    if (upper == "WBLOCK") return std::make_unique<WblockCommand>();
     if (upper == "PEDIT") return std::make_unique<PeditCommand>();
     if (upper == "PLINE") return std::make_unique<PlineCommand>();
     if (upper == "POINT") return std::make_unique<PointCommand>();
@@ -3105,7 +3527,7 @@ const std::vector<std::string>& command_names() {
         "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
-        "3DFACE",
+        "3DFACE", "BASE", "BLOCK", "EXPLODE", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
         "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;
@@ -3129,6 +3551,10 @@ const std::vector<CommandAlias>& command_aliases() {
         {"PL", "PLINE"},
         {"PO", "POINT"},
         {"PE", "PEDIT"},
+        {"B", "BLOCK"},
+        {"I", "INSERT"},
+        {"X", "EXPLODE"},
+        {"W", "WBLOCK"},
         {"SO", "SOLID"},
         {"DT", "TEXT"},
         {"3F", "3DFACE"},

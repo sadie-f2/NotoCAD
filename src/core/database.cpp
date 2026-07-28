@@ -3,6 +3,8 @@
 
 #include "noto/database.hpp"
 
+#include "noto/entities.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -219,6 +221,84 @@ LayerId Database::find_layer(const std::string& name) const {
         if (layers_[i].name == name) return static_cast<LayerId>(i);
     }
     return kInvalidLayer;
+}
+
+BlockId Database::add_block(BlockDef def) {
+    const BlockId existing = find_block(def.name);
+    if (existing != kInvalidBlock) {
+        // Redefinition, R12-style: the definition is rewritten in place so that
+        // every insertion of it updates. Replacing the unique_ptr instead would
+        // leave every Insert holding a dangling address.
+        BlockDef before = blocks_[existing]->clone();
+        *blocks_[existing] = std::move(def);
+        journal_.record_block_modify(existing, before, *blocks_[existing]);
+        return existing;
+    }
+
+    blocks_.push_back(std::make_unique<BlockDef>(std::move(def)));
+    const BlockId id = static_cast<BlockId>(blocks_.size() - 1);
+    journal_.record_block_add(id, *blocks_.back());
+    return id;
+}
+
+BlockId Database::find_block(const std::string& name) const {
+    for (std::size_t i = 0; i < blocks_.size(); ++i) {
+        if (blocks_[i]->name == name) return static_cast<BlockId>(i);
+    }
+    return kInvalidBlock;
+}
+
+const BlockDef* Database::block(BlockId id) const {
+    return id < blocks_.size() ? blocks_[id].get() : nullptr;
+}
+
+void Database::pop_block() {
+    if (!blocks_.empty()) blocks_.pop_back();
+}
+
+void Database::restore_block(BlockId id, BlockDef value) {
+    if (id < blocks_.size()) {
+        *blocks_[id] = std::move(value);
+        return;
+    }
+    // Redo of an add: the definition has to come back at the same id, which is
+    // the end of the vector because adds append.
+    if (id == blocks_.size()) {
+        blocks_.push_back(std::make_unique<BlockDef>(std::move(value)));
+    }
+}
+
+bool Database::block_is_referenced(BlockId id) const {
+    const BlockDef* target = block(id);
+    if (!target) return false;
+
+    auto references = [&](const std::vector<EntityPtr>& list, auto&& self, int depth) -> bool {
+        if (depth >= kMaxBlockDepth) return false;
+        for (const EntityPtr& e : list) {
+            if (!e || e->type() != EntityType::Insert) continue;
+            const Insert& ins = static_cast<const Insert&>(*e);
+            if (ins.definition() == target) return true;
+            if (ins.definition() && self(ins.definition()->entities, self, depth + 1)) return true;
+        }
+        return false;
+    };
+
+    // The drawing itself.
+    for (Handle h : order_) {
+        auto it = entities_.find(h);
+        if (it == entities_.end() || !it->second) continue;
+        if (it->second->type() != EntityType::Insert) continue;
+        const Insert& ins = static_cast<const Insert&>(*it->second);
+        if (ins.definition() == target) return true;
+        if (ins.definition() && references(ins.definition()->entities, references, 1)) return true;
+    }
+
+    // And every other definition, since a block may insert another.
+    for (const std::unique_ptr<BlockDef>& def : blocks_) {
+        if (def.get() == target) continue;
+        if (references(def->entities, references, 0)) return true;
+    }
+    return false;
 }
 
 LinetypeId Database::add_linetype(const std::string& name, const std::string& description,

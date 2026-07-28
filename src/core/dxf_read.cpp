@@ -116,9 +116,26 @@ private:
                              std::string& pending_value, bool& has_pending);
     void read_tables(GroupStream& in);
     void read_entities(GroupStream& in);
+    void read_blocks(GroupStream& in);
+
+    // An INSERT may name a block defined later in the file, and a block may
+    // insert another block. So inserts are built unresolved and fixed up once
+    // every definition has been read -- resolving inline would work only for
+    // files that happen to be in dependency order, which nothing guarantees.
+    //
+    // The raw pointers stay valid because entities are heap-allocated and only
+    // the owning unique_ptr moves.
+    struct PendingInsert {
+        Insert* entity{nullptr};
+        std::string block_name;
+        InsertPlacement placement;
+    };
+
+    void resolve_inserts();
 
     Database& db_;
     DxfReadResult result_;
+    std::vector<PendingInsert> pending_inserts_;
 };
 
 void Reader::apply_common(Entity& e, const EntityGroups& g) {
@@ -281,6 +298,32 @@ EntityPtr Reader::build(const EntityGroups& g, GroupStream& in, int& pending_cod
         return e;
     }
 
+    if (g.name == "INSERT") {
+        auto e = std::make_unique<Insert>();
+        apply_common(*e, g);
+
+        // The definition is not resolved here: the block may be defined later
+        // in the file. Everything needed to finish the job is recorded and the
+        // placement is composed once the base point is known -- which is the
+        // definition's, so it cannot be computed before resolution either.
+        InsertPlacement p;
+        p.normal = e->props().normal;
+        p.insertion = ecs_to_world(p.normal).transform_point(g.point(10));
+        p.scale = {g.real(41, 1.0), g.real(42, 1.0), g.real(43, 1.0)};
+        p.rotation = g.real(50) * kDegToRad;
+
+        // MINSERT: the same record with counts on it.
+        const int columns = to_int(g.text(70, "1"));
+        const int rows = to_int(g.text(71, "1"));
+        if (rows > 1 || columns > 1) {
+            e->set_array(static_cast<std::int16_t>(rows), static_cast<std::int16_t>(columns),
+                         g.real(45, 0.0), g.real(44, 0.0));
+        }
+
+        pending_inserts_.push_back({e.get(), g.text(2), p});
+        return e;
+    }
+
     // Everything else survives as itself.
     auto p = std::make_unique<Proxy>();
     p->set_dxf_name(g.name);
@@ -408,6 +451,113 @@ void Reader::read_entities(GroupStream& in) {
     }
 }
 
+void Reader::read_blocks(GroupStream& in) {
+    int code = 0;
+    std::string value;
+    bool has_pending = false;
+    int pending_code = 0;
+    std::string pending_value;
+
+    // The block being built, and the entity record being collected inside it.
+    BlockDef def;
+    bool in_block = false;
+
+    EntityGroups current;
+    bool have_entity = false;
+    bool in_header = false;  // collecting the BLOCK record's own groups
+
+    auto finish_entity = [&](GroupStream& stream) {
+        have_entity = false;
+        EntityPtr e = build(current, stream, pending_code, pending_value, has_pending);
+        if (!e) return;
+        if (in_block) {
+            // Into the definition, not the drawing: a block's contents are not
+            // entities of the drawing and must not get handles or an order.
+            def.entities.push_back(std::move(e));
+        }
+    };
+
+    for (;;) {
+        if (has_pending) {
+            code = pending_code;
+            value = pending_value;
+            has_pending = false;
+        } else if (!in.next(code, value)) {
+            break;
+        }
+
+        if (code != 0) {
+            if (have_entity) current.groups.push_back({code, value});
+            else if (in_header) current.groups.push_back({code, value});
+            continue;
+        }
+
+        // A zero group ends whatever was being collected.
+        if (have_entity) {
+            pending_code = code;
+            pending_value = value;
+            has_pending = true;
+            finish_entity(in);
+            continue;
+        }
+        if (in_header) {
+            in_header = false;
+            def.name = current.text(2);
+            def.base = current.point(10);
+            def.flags = static_cast<std::int16_t>(to_int(current.text(70, "0")));
+        }
+
+        if (value == "BLOCK") {
+            def = BlockDef{};
+            in_block = true;
+            current = EntityGroups{};
+            current.name = value;
+            in_header = true;
+            continue;
+        }
+        if (value == "ENDBLK") {
+            if (in_block && !def.name.empty()) {
+                db_.add_block(std::move(def));
+                ++result_.blocks;
+            }
+            def = BlockDef{};
+            in_block = false;
+            continue;
+        }
+        if (value == "ENDSEC") return;
+
+        // Anything else inside a BLOCK is one of its entities.
+        current = EntityGroups{};
+        current.name = value;
+        have_entity = true;
+    }
+
+    // A file that ends mid-section still yields the definitions it completed.
+}
+
+void Reader::resolve_inserts() {
+    for (const PendingInsert& pending : pending_inserts_) {
+        if (!pending.entity) continue;
+
+        const BlockId id = db_.find_block(pending.block_name);
+        const BlockDef* def = db_.block(id);
+        if (!def) {
+            // An INSERT naming a block the file never defined. Left with no
+            // definition, which draws and snaps as nothing rather than
+            // pretending -- and counted, so OPEN can say so instead of the
+            // drawing quietly coming up short.
+            ++result_.unresolved_inserts;
+            continue;
+        }
+
+        pending.entity->set_definition(def);
+        // Composed now, because the base point it is measured from belongs to
+        // the definition and was not available when the record was read.
+        pending.entity->set_placement(compose_placement(pending.placement, def->base));
+    }
+    pending_inserts_.clear();
+}
+
 DxfReadResult Reader::run(std::string text) {
     GroupStream in(std::move(text));
 
@@ -427,6 +577,9 @@ DxfReadResult Reader::run(std::string text) {
                 section.clear();
             } else if (section == "ENTITIES") {
                 read_entities(in);
+                section.clear();
+            } else if (section == "BLOCKS") {
+                read_blocks(in);
                 section.clear();
             }
             continue;
@@ -449,6 +602,7 @@ DxfReadResult Reader::run(std::string text) {
         }
     }
 
+    resolve_inserts();
     result_.ok = true;
     return result_;
 }

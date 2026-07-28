@@ -32,6 +32,13 @@ struct DxfReadResult {
     std::size_t proxies{0};
     std::size_t layers{0};
     std::size_t linetypes{0};
+    std::size_t blocks{0};
+
+    // INSERTs naming a block the file never defined. They are kept, with no
+    // definition, so the drawing is not silently short an entity -- but the
+    // caller should say so, because it means the file is broken rather than
+    // merely unusual.
+    std::size_t unresolved_inserts{0};
 
     // Set when the file names a version this reader does not claim to handle.
     // Reading continues anyway -- an R13 file is mostly R12 plus entities that

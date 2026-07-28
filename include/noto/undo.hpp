@@ -31,6 +31,7 @@
 // which is what a bare entmake at the command line should be.
 #pragma once
 
+#include "noto/blocks.hpp"
 #include "noto/entity.hpp"
 #include "noto/sysvar.hpp"
 #include "noto/tables.hpp"
@@ -52,6 +53,11 @@ enum class ChangeKind : std::uint8_t {
     ModifyLayer,
     AddLinetype,
     ModifyLinetype,
+    AddBlock,
+    // A block redefined in place. Every insertion of it changes at once, since
+    // they all hold the definition's address -- which is exactly why this has
+    // to be journalled as a table change and not as a pile of entity edits.
+    ModifyBlock,
 };
 
 // Table before-and-after states, held behind a pointer rather than inline.
@@ -68,6 +74,10 @@ struct TableChange {
     LinetypeId linetype_id{0};
     Linetype linetype_before;
     Linetype linetype_after;
+
+    BlockId block_id{0};
+    BlockDef block_before;
+    BlockDef block_after;
 };
 
 // Move-only: it owns entity copies.
@@ -119,6 +129,8 @@ public:
     void record_layer_modify(LayerId id, const Layer& before, const Layer& after);
     void record_linetype_add(LinetypeId id, const Linetype& added);
     void record_linetype_modify(LinetypeId id, const Linetype& before, const Linetype& after);
+    void record_block_add(BlockId id, const BlockDef& added);
+    void record_block_modify(BlockId id, const BlockDef& before, const BlockDef& after);
 
     bool replaying() const { return replaying_; }
 

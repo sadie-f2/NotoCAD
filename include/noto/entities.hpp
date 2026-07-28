@@ -13,6 +13,7 @@
 // the DXF layer instead of smeared through the kernel.
 #pragma once
 
+#include "noto/blocks.hpp"
 #include "noto/entity.hpp"
 
 #include <string>
@@ -395,6 +396,111 @@ private:
     TextHAlign h_align_{TextHAlign::Left};
     TextVAlign v_align_{TextVAlign::Baseline};
 };
+
+// INSERT, and MINSERT, which is the same entity with a row and column count.
+//
+// PLACEMENT IS A FULL MATRIX. R12 stores an insertion point, three scale
+// factors, one rotation angle and an extrusion, which between them describe
+// translate * rotate * scale and nothing else. This holds the whole transform
+// instead and reduces it to those fields at DXF write time.
+//
+// That is the same convention every other entity here follows -- geometry in
+// world space, entity coordinates synthesised at serialisation -- and it is
+// what lets ROTATE3D act on a block reference without a special case. The cost
+// is that a transform R12 cannot express (a shear, from non-uniform scale
+// composed with rotation) is approximated on the way out, exactly as a
+// non-uniform scale of a CIRCLE already is. The alternative was refusing the
+// transform, which would make ROTATE3D fail on one entity type out of nine.
+//
+// The definition is held by pointer, not by name or by value. Nothing in the
+// vtable is handed a database -- `osnap_points()` takes only an output vector --
+// so an insert that had to look its block up could not draw or snap at all.
+// Block definitions live at stable addresses for exactly this reason, and
+// pointing at the definition rather than copying it is also what makes R12's
+// redefinition behaviour fall out: rewriting a block updates every insertion.
+class Insert final : public Entity {
+public:
+    Insert() : Entity(EntityType::Insert) {}
+    Insert(const BlockDef* def, const Mat4& placement)
+        : Entity(EntityType::Insert), def_(def), placement_(placement) {}
+
+    const BlockDef* definition() const { return def_; }
+    void set_definition(const BlockDef* def) { def_ = def; }
+
+    // Maps the definition's own coordinates into the drawing.
+    const Mat4& placement() const { return placement_; }
+    void set_placement(const Mat4& m) { placement_ = m; }
+
+    // Where the block's base point landed. This is the INSERT's group 10, the
+    // point it was placed by, and its INS snap.
+    Vec3 insertion_point() const;
+
+    // MINSERT: a rectangular array of copies, without the array being separate
+    // entities. Spacings are in the insert's own rotated frame, as R12 has them.
+    std::int16_t rows() const { return rows_; }
+    std::int16_t columns() const { return columns_; }
+    double row_spacing() const { return row_spacing_; }
+    double column_spacing() const { return column_spacing_; }
+    void set_array(std::int16_t rows, std::int16_t columns, double row_spacing,
+                   double column_spacing);
+
+    bool is_array() const { return rows_ > 1 || columns_ > 1; }
+
+    // The transform placing copy (row, col). Equal to placement() for a plain
+    // INSERT, which is what keeps the array a detail rather than a second path.
+    Mat4 placement_for(std::int16_t row, std::int16_t column) const;
+
+    EntityPtr clone() const override;
+    void transform(const Mat4& m) override;
+    BBox bbox() const override;
+    void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
+    void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
+
+private:
+    const BlockDef* def_{nullptr};
+    Mat4 placement_{Mat4::identity()};
+    std::int16_t rows_{1};
+    std::int16_t columns_{1};
+    double row_spacing_{0.0};
+    double column_spacing_{0.0};
+};
+
+// The scale and rotation R12 would record for a placement, recovered from the
+// matrix. Exact for any translate/rotate/scale; approximate for a shear, which
+// R12's fields cannot express at all -- see the Insert comment.
+struct InsertPlacement {
+    Vec3 insertion{};
+    Vec3 scale{1, 1, 1};
+    double rotation{0.0};  // radians, in the plane of `normal`
+    Vec3 normal{0, 0, 1};
+};
+
+InsertPlacement decompose_placement(const Mat4& m, const Vec3& base);
+
+// Everything a block reference draws, as ordinary world-space entities.
+//
+// Transformed COPIES, which is the point: the derived object snaps and the
+// intersection kernel both dispatch on entity type and solve in world space,
+// and neither can be taught about blocks without teaching every solver about
+// them. Flattening once at the boundary means NEA, PER, TAN and INT work inside
+// a block without a single line of block awareness in any of them.
+//
+// It allocates, and it is reached from the cursor path. That is affordable
+// because the callers run their broad phase first, so only the reference
+// actually under the cursor is ever flattened -- and it is the same linear-scan
+// bargain the rest of the pick path already makes. See SF_todo.md on the
+// spatial index.
+//
+// Nested references are flattened too, depth-guarded. MINSERT yields one copy
+// per array element.
+void flatten_insert(const Insert& ins, std::vector<EntityPtr>& out);
+
+// The inverse: the matrix R12's fields describe. Round-trips with the above for
+// everything R12 can represent, which is what the DXF tests pin.
+Mat4 compose_placement(const InsertPlacement& p, const Vec3& base);
 
 // One DXF group: a code and its value, kept as text.
 //

@@ -60,6 +60,11 @@ enum class Sysvar : std::uint16_t {
     LimMin,
     LimMax,
     LimCheck,
+    // Where this drawing is grabbed by when it is inserted into another one.
+    // Set by BASE, and read by nothing yet -- there is no command that inserts
+    // a whole drawing. It is written to DXF regardless, because a drawing whose
+    // base point is silently dropped inserts wrong in the program that opens it.
+    InsBase,
     kCount,
 };
 

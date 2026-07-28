@@ -100,8 +100,46 @@ bool line_foot(const Line& l, const Vec3& ref, Vec3* out, double* t_out) {
 
 }  // namespace
 
+// The best answer among a block reference's flattened contents.
+//
+// One helper for all three derived snaps, parameterised by which one, because
+// they differ only in what "best" means -- and writing the descent three times
+// is how the three would end up disagreeing about depth limits.
+namespace {
+
+template <typename Solve>
+bool best_in_insert(const Entity& e, const Vec3& ref, Vec3* out, Solve solve) {
+    if (e.type() != EntityType::Insert) return false;
+
+    std::vector<EntityPtr> parts;
+    flatten_insert(static_cast<const Insert&>(e), parts);
+
+    bool found = false;
+    double best = 0.0;
+    for (const EntityPtr& part : parts) {
+        Vec3 candidate{};
+        if (!solve(*part, ref, &candidate)) continue;
+        const double d = length(candidate - ref);
+        if (!found || d < best) {
+            best = d;
+            *out = candidate;
+            found = true;
+        }
+    }
+    return found;
+}
+
+}  // namespace
+
 bool nearest_point(const Entity& e, const Vec3& ref, Vec3* out) {
     if (!out) return false;
+
+    if (e.type() == EntityType::Insert) {
+        return best_in_insert(e, ref, out,
+                              [](const Entity& c, const Vec3& r, Vec3* o) {
+                                  return nearest_point(c, r, o);
+                              });
+    }
 
     if (const Line* l = as_line(e)) {
         double t = 0.0;
@@ -125,6 +163,13 @@ bool nearest_point(const Entity& e, const Vec3& ref, Vec3* out) {
 
 bool perpendicular_point(const Entity& e, const Vec3& ref, Vec3* out) {
     if (!out) return false;
+
+    if (e.type() == EntityType::Insert) {
+        return best_in_insert(e, ref, out,
+                              [](const Entity& c, const Vec3& r, Vec3* o) {
+                                  return perpendicular_point(c, r, o);
+                              });
+    }
 
     if (const Line* l = as_line(e)) {
         // Unclamped on purpose: see the header.
@@ -152,8 +197,32 @@ bool perpendicular_point(const Entity& e, const Vec3& ref, Vec3* out) {
 }
 
 int tangent_points(const Entity& e, const Vec3& ref, Vec3 out[kMaxTangents]) {
+    if (!out) return 0;
+
+    if (e.type() == EntityType::Insert) {
+        // The nearest circular thing inside wins. Offering tangents to every
+        // circle in a block at once would bury the one being pointed at.
+        std::vector<EntityPtr> parts;
+        flatten_insert(static_cast<const Insert&>(e), parts);
+
+        int best_count = 0;
+        double best = 0.0;
+        for (const EntityPtr& part : parts) {
+            Vec3 candidates[kMaxTangents];
+            const int n = tangent_points(*part, ref, candidates);
+            if (n == 0) continue;
+            const double d = length(candidates[0] - ref);
+            if (best_count == 0 || d < best) {
+                best = d;
+                best_count = n;
+                for (int i = 0; i < n; ++i) out[i] = candidates[i];
+            }
+        }
+        return best_count;
+    }
+
     Circular c;
-    if (!out || !as_circular(e, c)) return 0;
+    if (!as_circular(e, c)) return 0;
 
     const Vec3 n = normalize(c.normal);
     const Vec3 p = project_to_plane(ref, c.center, n);

@@ -115,7 +115,7 @@ void DxfWriter::write_header() {
     code(5, to_hex(db_.peek_next_handle()));
 
     code(9, "$INSBASE");
-    point(10, Vec3{});
+    point(10, db_.sysvars().get_point(Sysvar::InsBase));
 
     BBox ext = db_.extents();
     if (!ext.valid()) ext = BBox{Vec3{}, Vec3{}};
@@ -124,12 +124,16 @@ void DxfWriter::write_header() {
     code(9, "$EXTMAX");
     point(10, ext.max);
 
+    // From the sysvars, not hardcoded: LIMITS exists, and a header that always
+    // wrote the default meant setting the limits and saving lost them.
+    const Vec3 limmin = db_.sysvars().get_point(Sysvar::LimMin);
+    const Vec3 limmax = db_.sysvars().get_point(Sysvar::LimMax);
     code(9, "$LIMMIN");
-    code(10, 0.0);
-    code(20, 0.0);
+    code(10, limmin.x);
+    code(20, limmin.y);
     code(9, "$LIMMAX");
-    code(10, 12.0);
-    code(20, 9.0);
+    code(10, limmax.x);
+    code(20, limmax.y);
 
     end_section();
 }
@@ -198,7 +202,31 @@ void DxfWriter::write_tables() {
 
 void DxfWriter::write_blocks() {
     begin_section("BLOCKS");
-    // Empty until INSERT and block definitions land.
+
+    // Each definition is a BLOCK record, its entities, and an ENDBLK. The
+    // entities are written by the same dxf_write() the drawing uses, because a
+    // block's contents are ordinary entities that merely live somewhere else --
+    // which is also why a block can contain an INSERT with no extra work.
+    for (const std::unique_ptr<BlockDef>& def : db_.blocks()) {
+        if (!def) continue;
+
+        code(0, "BLOCK");
+        code(8, "0");
+        code(2, def->name);
+        code(70, static_cast<int>(def->flags));
+        point(10, def->base);
+        // R12 repeats the name in group 3. Readers differ on which they trust,
+        // so both are written.
+        code(3, def->name);
+
+        for (const EntityPtr& e : def->entities) {
+            if (e) e->dxf_write(*this);
+        }
+
+        code(0, "ENDBLK");
+        code(8, "0");
+    }
+
     end_section();
 }
 

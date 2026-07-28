@@ -529,6 +529,127 @@ private:
     Vec3 base_{};
 };
 
+// BLOCK: turn selected entities into a named definition.
+//
+// The entities are REMOVED from the drawing, which is R12's behaviour and
+// surprises people the first time: BLOCK is not "make a block from a copy of
+// this", it is "this geometry is now a definition". OOPS brings it back in R12;
+// here UNDO does, since the whole command is one group.
+//
+// Coordinates are stored relative to the base point, so the definition sits
+// around its own origin and an insertion is a plain translation.
+class BlockCommand final : public Command {
+public:
+    const char* name() const override { return "BLOCK"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Name, Base, Selecting };
+
+    State state_{State::Name};
+    std::string block_name_;
+    Vec3 base_{};
+    SelectionPrompter select_;
+};
+
+// INSERT and MINSERT: place a block.
+//
+// One class for both, because MINSERT is the same prompt sequence with two more
+// questions at the end -- which is exactly how R12 spells it, and why the array
+// lives on the INSERT entity rather than becoming separate copies.
+//
+// R12's corner scale option and its separate X/Y/Z scales are here; the
+// "Preset" variants (PScale, PXscale...) are not, since they exist to support
+// dragging the block during placement and nothing drags yet.
+class InsertCommand final : public Command {
+public:
+    explicit InsertCommand(bool multiple = false) : multiple_(multiple) {}
+
+    const char* name() const override { return multiple_ ? "MINSERT" : "INSERT"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t {
+        Name,
+        Point,
+        Scale,
+        YScale,
+        Rotation,
+        Rows,
+        Columns,
+        RowSpacing,
+        ColumnSpacing,
+    };
+
+    Step ask_rotation();
+    Step place(CommandContext& ctx);
+
+    bool multiple_;
+    State state_{State::Name};
+    BlockId block_{kInvalidBlock};
+    Vec3 point_{};
+    Vec3 scale_{1, 1, 1};
+    double rotation_{0.0};
+    std::int16_t rows_{1};
+    std::int16_t columns_{1};
+    double row_spacing_{0.0};
+    double column_spacing_{0.0};
+};
+
+// EXPLODE: replace a block reference with copies of what it draws.
+//
+// One level, as R12 does: exploding a block containing a block yields the inner
+// references, not their contents. That is worth keeping rather than "fixing" --
+// it is how you take a nested assembly apart deliberately instead of losing all
+// its structure at once.
+//
+// A block inserted with unequal X and Y scales explodes anyway, approximating:
+// a circle inside becomes a circle scaled by the X factor, because R12 has no
+// ELLIPSE entity to become instead. That is the same approximation
+// transform_frame() already documents for SCALE, and it is applied here rather
+// than refusing, because refusing would leave no way to take the block apart.
+class ExplodeCommand final : public Command {
+public:
+    const char* name() const override { return "EXPLODE"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    SelectionPrompter select_;
+};
+
+// WBLOCK: write a block, or the whole drawing, to its own DXF file.
+//
+// R12 writes a DWG; only DXF exists here, so this writes DXF for the same
+// reason DXFIN is the command that opens a drawing.
+//
+// The `*` answer -- write the entire drawing -- is supported. The "write a
+// selection set" form is not yet: it needs a temporary database to assemble
+// into, which is a small thing but not the same thing.
+class WblockCommand final : public Command {
+public:
+    const char* name() const override { return "WBLOCK"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { File, Block };
+
+    State state_{State::File};
+    std::string path_;
+};
+
+// BASE: the insertion base point of the drawing itself, for when this drawing
+// is inserted into another. R12 keeps it in INSBASE.
+class BaseCommand final : public Command {
+public:
+    const char* name() const override { return "BASE"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
 // LAYER: R12's table editor, as one prompt that loops until Enter.
 //
 // ?/Make/Set/New/ON/OFF/Color/Ltype/Freeze/Thaw. Most options take a layer name

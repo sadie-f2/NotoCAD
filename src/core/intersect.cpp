@@ -142,6 +142,41 @@ std::vector<SubCurve> decompose(const Entity& e) {
     return out;
 }
 
+// A block reference's contents, as sub-curves in world space.
+//
+// Kept separate from decompose() because it owns the flattened copies for as
+// long as the sub-curves referring to them are in use. The sub-curves hold
+// coordinates rather than pointers, so the copies could be dropped immediately
+// -- but that is a property of the current SubCurve and not one worth relying
+// on silently.
+struct FlatInsert {
+    std::vector<EntityPtr> parts;
+    std::vector<SubCurve> curves;
+};
+
+FlatInsert decompose_insert(const Insert& ins) {
+    FlatInsert flat;
+    flatten_insert(ins, flat.parts);
+
+    // Parameters are assigned by index, evenly. An insert has no natural
+    // parameterisation of its own, and it does not need one: R12 lets a block
+    // be a TRIM cutting edge but never a trimmed object, so only the OTHER
+    // curve's parameter is ever acted on.
+    const std::size_t n = flat.parts.size();
+    for (std::size_t i = 0; i < n; ++i) {
+        std::vector<SubCurve> sub = decompose(*flat.parts[i]);
+        const double lo = static_cast<double>(i) / static_cast<double>(n ? n : 1);
+        const double span = 1.0 / static_cast<double>(n ? n : 1);
+        for (SubCurve& s : sub) {
+            s.t_lo = lo + s.t_lo * span;
+            s.t_hi = lo + s.t_hi * span;
+            s.extendable = false;  // as with a polyline, there is no carrier
+            flat.curves.push_back(s);
+        }
+    }
+    return flat;
+}
+
 // The fraction of the way along a sub-curve, from the raw parameter the
 // primitives produce. For an arc that means turning a whole-circle fraction
 // into a position along the sweep, which is where the direction matters.
@@ -403,8 +438,21 @@ std::size_t intersect(const Entity& a, const Entity& b, IntersectMode mode,
                       IntersectionList& out) {
     const std::size_t before = out.size();
 
-    const std::vector<SubCurve> sa = decompose(a);
-    const std::vector<SubCurve> sb = decompose(b);
+    // Block references are flattened rather than special-cased in the
+    // primitives, so a circle inside a block meets a line by exactly the
+    // arithmetic a loose circle would.
+    FlatInsert flat_a;
+    FlatInsert flat_b;
+    if (a.type() == EntityType::Insert) flat_a = decompose_insert(static_cast<const Insert&>(a));
+    if (b.type() == EntityType::Insert) flat_b = decompose_insert(static_cast<const Insert&>(b));
+
+    const std::vector<SubCurve> own_a =
+        (a.type() == EntityType::Insert) ? std::vector<SubCurve>{} : decompose(a);
+    const std::vector<SubCurve> own_b =
+        (b.type() == EntityType::Insert) ? std::vector<SubCurve>{} : decompose(b);
+
+    const std::vector<SubCurve>& sa = (a.type() == EntityType::Insert) ? flat_a.curves : own_a;
+    const std::vector<SubCurve>& sb = (b.type() == EntityType::Insert) ? flat_b.curves : own_b;
 
     for (const SubCurve& ca : sa) {
         for (const SubCurve& cb : sb) {

@@ -46,11 +46,14 @@ enum class EntityType : std::uint8_t {
     Point,
     Solid,
     Face3d,
+    // A placed copy of a block definition. MINSERT is the same entity with a
+    // row and column count, which is how R12 spells it too.
+    Insert,
     // Anything read from DXF that has no class here. Holds the groups it was
     // read from and writes them back unchanged, so opening and saving a drawing
     // cannot quietly destroy what this program does not understand.
     Proxy,
-    // R12 kinds still to come: INSERT, PFACE meshes, and the surface entities.
+    // R12 kinds still to come: PFACE meshes and the surface entities.
 };
 
 const char* entity_type_name(EntityType t);

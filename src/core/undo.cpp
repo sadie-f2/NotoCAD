@@ -161,6 +161,27 @@ const std::string& UndoJournal::redo_name() const {
     return redo_.empty() ? empty_name() : redo_.back().name;
 }
 
+void UndoJournal::record_block_add(BlockId id, const BlockDef& added) {
+    if (replaying_) return;
+    Change c;
+    c.kind = ChangeKind::AddBlock;
+    c.table = std::make_unique<TableChange>();
+    c.table->block_id = id;
+    c.table->block_after = added.clone();
+    push(std::move(c));
+}
+
+void UndoJournal::record_block_modify(BlockId id, const BlockDef& before, const BlockDef& after) {
+    if (replaying_) return;
+    Change c;
+    c.kind = ChangeKind::ModifyBlock;
+    c.table = std::make_unique<TableChange>();
+    c.table->block_id = id;
+    c.table->block_before = before.clone();
+    c.table->block_after = after.clone();
+    push(std::move(c));
+}
+
 bool UndoJournal::undo(Database& db) {
     if (undo_.empty()) return false;
 
@@ -201,6 +222,12 @@ bool UndoJournal::undo(Database& db) {
                     break;
                 case ChangeKind::ModifyLinetype:
                     db.restore_linetype(c.table->linetype_id, c.table->linetype_before);
+                    break;
+                case ChangeKind::AddBlock:
+                    db.pop_block();
+                    break;
+                case ChangeKind::ModifyBlock:
+                    db.restore_block(c.table->block_id, c.table->block_before.clone());
                     break;
             }
         }
@@ -244,6 +271,10 @@ bool UndoJournal::redo(Database& db) {
                     break;
                 case ChangeKind::ModifyLinetype:
                     db.restore_linetype(c.table->linetype_id, c.table->linetype_after);
+                    break;
+                case ChangeKind::AddBlock:
+                case ChangeKind::ModifyBlock:
+                    db.restore_block(c.table->block_id, c.table->block_after.clone());
                     break;
             }
         }

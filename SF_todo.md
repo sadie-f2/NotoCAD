@@ -173,9 +173,9 @@ rather than guessing — the interface hides which one it is.
 | 7 | *(detail)* | Done. Selection, hit-testing, osnap, transforms and DXF are now exercised against a realistic entity set rather than Line/Circle/Arc. The TEXT rendering decision (open question 2) is still open — the entity draws as a placeholder box, now correctly placed by its justification. |
 | 8 | Tables and settings | *Done, apart from UNITS.* LAYER, LTYPE with built-in patterns, dash rendering, COLOR, LTSCALE, LIMITS, and current entity properties. **UNITS is not built**: R12's is a page of report-format questions, and the formatting they control is hardcoded to four decimal places in DIST, ID, AREA and LIST. LUNITS/LUPREC/AUNITS/AUPREC do not exist yet. Also missing: LTYPE loading from a real `acad.lin`, and wildcards in layer and linetype names. |
 | 8 | *(detail)* | LAYER, LTYPE and dash rendering, COLOR, LTSCALE, UNITS, LIMITS. Linetypes touch three layers at once: the DXF table, dash generation in the render path, and LTSCALE — not just a table entry. |
-| 9 | DXF read and OPEN | *Done.* `dxf_read.hpp`, the `Proxy` entity, and DXFIN with OPEN as its alias. LINE, CIRCLE, ARC and POLYLINE become real entities; everything else becomes a proxy that writes back unchanged. **Not read yet:** the HEADER section's system variables (only `$ACADVER` is looked at), and the BLOCKS section — a file with blocks loses its definitions, though the INSERT entities referring to them survive as proxies. Both want doing before this is trusted with real drawings. |
+| 9 | DXF read and OPEN | *Done.* `dxf_read.hpp`, the `Proxy` entity, and DXFIN with OPEN as its alias. LINE, CIRCLE, ARC, POLYLINE and INSERT become real entities; everything else becomes a proxy that writes back unchanged. **The BLOCKS gap is closed** — definitions are read, and an INSERT naming a block defined later still resolves, because inserts are fixed up in a second pass. **Still not read:** the HEADER section's system variables (only `$ACADVER` is looked at), so a file's OSMODE, LIMITS and INSBASE are ignored on the way in even though they are now written on the way out. |
 | 10 | Geometry editing | TRIM, EXTEND, OFFSET, FILLET, CHAMFER, BREAK, CHANGE/CHPROP. **The intersection kernel it needs is built** — `intersect.hpp`. The commands themselves are not. |
-| 11 | Blocks | BLOCK, INSERT, WBLOCK, EXPLODE, MINSERT, BASE. Raises open question 7. |
+| 11 | Blocks | *Done.* BLOCK, INSERT, MINSERT, EXPLODE, WBLOCK and BASE, plus the BLOCKS section both ways. Open question 7 is answered below. **Not built:** ATTDEF/ATTRIB, and EXPLODE of a polyline. |
 | 12 | UCS | `CLAUDE.md` notes ECS is foundational and already in the kernel, but that UCS "has nowhere to live". This gives it one. |
 | 13 | Meshes and surfaces | PFACE, 3DMESH, RULESURF, TABSURF, REVSURF, EDGESURF; AutoLISP file I/O (`open`, `read-line` — `file_subrs.cpp` currently holds only `dxfout`); suppressed-regen batch mode for LISP loops. **The project's stated purpose.** |
 | 14 | Performance | A spatial index — none exists, and 4a's mouse-move path is the first thing to feel the linear scan. `QOpenGLWidget` migration behind the same `draw()`. |
@@ -381,6 +381,65 @@ every entity rather than stopping at the first hit.
 the pick box, ordered topmost-first, plus somewhere to remember which one was offered
 last so the next Ctrl+click moves on. The search itself is a small change —
 `pick_entity` already visits them all and simply returns early.
+
+## Blocks — built, and what open question 7 turned out to be
+
+`blocks.hpp`, `insert.cpp`. **Open question 7 is answered: yes, an INSERT's
+`draw()` recurses into the definition, and `transform()` composes into a matrix
+the entity holds.**
+
+**Placement is a full `Mat4`, reduced to R12's fields only at DXF write time.**
+That is the convention every other entity already follows — world coordinates in
+the kernel, entity coordinates synthesised at serialisation — and it is what lets
+ROTATE3D act on a block reference with no special case. A shear, which R12's
+point/scale/angle/extrusion cannot express at all, is approximated on the way
+out; the alternative was refusing the transform, which would make ROTATE3D fail
+on one entity type out of nine. `compose_placement`/`decompose_placement` are
+inverses for everything R12 *can* express, and a test pins the round trip —
+which is what caught the first version building the matrix transposed, because
+`Mat4::from_basis()` builds the world-TO-basis direction.
+
+**A definition is held by pointer, not by name or by value.** Nothing in the
+vtable is handed a database — `osnap_points()` takes only an output vector — so
+an insert that had to look its block up could not draw or snap at all. Hence
+`std::vector<std::unique_ptr<BlockDef>>`: adding a block must not move what an
+existing insert points at. R12's redefinition behaviour falls out for free, and
+is tested: rewriting a block updates every insertion, because they share the
+definition rather than holding copies.
+
+**Picking and region selection through blocks came for free.** `entity_pick_distance`
+and the region tests all drive `Entity::draw()` with their own probe, and
+`Insert::draw()` recurses — so the flatten-in-the-kernel decision from render.hpp
+paid for itself again. Only the *derived* snaps needed work, because NEA/PER/TAN
+dispatch on entity type; they descend via `flatten_insert()`, which hands back
+transformed copies so no solver needs to know blocks exist. The intersection
+kernel uses the same seam.
+
+Decisions worth not re-litigating:
+
+- **EXPLODE goes one level.** A nested reference comes out as a reference. That
+  is R12, and it is how an assembly is taken apart deliberately.
+- **EXPLODE approximates a non-uniform scale** rather than refusing, since R12
+  has no ELLIPSE to explode a squashed circle into and refusing would leave no
+  way to take the block apart at all. Same approximation `transform_frame()`
+  already documents.
+- **BLOCK removes the originals**, as R12 does. One UNDO brings them back.
+- **BYBLOCK colour resolves against the reference** as it is exploded, or the
+  geometry would silently become BYLAYER.
+- **A depth guard of 32 on every recursion.** A drawing cannot contain a cycle,
+  because a block does not exist while it is being defined — but a DXF is data
+  from elsewhere, and a cycle in one must cost a truncated drawing rather than a
+  stack overflow. Tested.
+
+Not built, and deliberately: **ATTDEF and ATTRIB**. Block attributes are a
+feature in their own right and TEXT is still a placeholder, so there is nothing
+for them to draw. **EXPLODE of a polyline** is also absent — it is the inverse of
+PEDIT Join and belongs beside it.
+
+Also fixed in passing, because the same gap in a different place: `$LIMMIN` and
+`$LIMMAX` were **hardcoded to the defaults** in the DXF header, so LIMITS could
+be set and would not survive a save. They come from the sysvars now, as
+`$INSBASE` does since BASE exists to set it.
 
 ## The intersection kernel — built, and what it decided
 
@@ -593,8 +652,10 @@ Recorded so they get decided rather than drifted into.
    bidirectional. The counter-argument is that a reader written before the entity set
    settles gets retrofitted repeatedly.
 
-7. **Blocks and the vtable.** Does an INSERT's `draw()` recurse into the block
-   definition, and what does `transform()` mean for a block reference?
+7. **Blocks and the vtable.** *Settled in phase 11.* `draw()` recurses through
+   the definition under an accumulated transform; `transform()` composes into a
+   full matrix the entity carries, which is reduced to R12's fields only when
+   the drawing is written. See the blocks section above.
 
 8. **GL migration trigger.** `CLAUDE.md` says "when 3D orbit performance demands it".
    Worth naming an actual threshold rather than deciding by feel.

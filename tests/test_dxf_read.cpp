@@ -115,13 +115,14 @@ TEST_CASE("dxf read: an entity after a polyline is not swallowed") {
 
 TEST_CASE("dxf read: an unknown entity survives as a proxy") {
     Database db;
-    // INSERT, which has no class here yet. This test used to use TEXT; TEXT is
-    // now a real entity, which is exactly how a type is meant to leave proxy
-    // status -- the reader changes, nothing else does.
+    // DIMENSION, which has no class here. This test has now used TEXT and then
+    // INSERT and outlived both, which is exactly how a type is meant to leave
+    // proxy status -- the reader changes and nothing else does. Dimensions are
+    // deferred by CLAUDE.md, so this one should last a while.
     const DxfReadResult r = read_dxf_text(
         db, dxf({kEntitiesOpen,
-                 "  0\nINSERT\n  8\nBLOCKS\n  2\nCHAIR\n 10\n1.0\n 20\n2.0\n 30\n0.0\n"
-                 " 41\n1.0\n 42\n1.0",
+                 "  0\nDIMENSION\n  8\nDIMS\n  2\n*D1\n 10\n1.0\n 20\n2.0\n 30\n0.0\n"
+                 " 13\n0.0\n 14\n5.0",
                  kEnd}));
 
     CHECK(r.ok);
@@ -130,7 +131,7 @@ TEST_CASE("dxf read: an unknown entity survives as a proxy") {
 
     const Entity* e = db.get(db.order()[0]);
     CHECK(e->type() == EntityType::Proxy);
-    CHECK(static_cast<const Proxy*>(e)->dxf_name() == "INSERT");
+    CHECK(static_cast<const Proxy*>(e)->dxf_name() == "DIMENSION");
     // Nothing to draw, nothing to pick, nothing to frame.
     CHECK(!e->bbox().valid());
 }

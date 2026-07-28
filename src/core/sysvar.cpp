@@ -45,6 +45,8 @@ constexpr SysvarDef kTable[] = {
     {"LIMMAX", Sysvar::LimMax, SysvarType::Point, false, true, 0, 0, 0, 0.0, "",
      {12.0, 9.0, 0.0}},
     {"LIMCHECK", Sysvar::LimCheck, SysvarType::Int, false, true, 0, 0, 1, 0.0, "", {}},
+    {"INSBASE", Sysvar::InsBase, SysvarType::Point, false, true, 0, 0, 0, 0.0, "",
+     {0.0, 0.0, 0.0}},
 };
 
 static_assert(sizeof(kTable) / sizeof(kTable[0]) == static_cast<std::size_t>(Sysvar::kCount),

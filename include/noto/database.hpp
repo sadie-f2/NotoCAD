@@ -8,6 +8,7 @@
 // arbitrary amounts of user activity, and R12 DXF writes handles to disk.
 #pragma once
 
+#include "noto/blocks.hpp"
 #include "noto/entity.hpp"
 #include "noto/sysvar.hpp"
 #include "noto/tables.hpp"
@@ -89,6 +90,31 @@ public:
     bool set_layer_linetype(LayerId id, LinetypeId linetype);
     const std::vector<Layer>& layers() const { return layers_; }
 
+    // --- blocks -------------------------------------------------------------
+
+    // Takes ownership of the definition and returns its id. A name that already
+    // exists is REDEFINED rather than duplicated, which is R12's behaviour and
+    // is why every insertion updates: they hold the definition's address, and
+    // the address does not change.
+    BlockId add_block(BlockDef def);
+
+    BlockId find_block(const std::string& name) const;
+
+    // Stable for the lifetime of the database. Null for an invalid id.
+    const BlockDef* block(BlockId id) const;
+
+    std::size_t block_count() const { return blocks_.size(); }
+    const std::vector<std::unique_ptr<BlockDef>>& blocks() const { return blocks_; }
+
+    // Undo's way back, matching pop_layer and restore_layer above.
+    void pop_block();
+    void restore_block(BlockId id, BlockDef value);
+
+    // Whether any entity in the drawing, or in another block, inserts this one.
+    // BLOCK refuses to redefine a block in terms of itself, and a future PURGE
+    // needs the same question answered.
+    bool block_is_referenced(BlockId id) const;
+
     LinetypeId add_linetype(const std::string& name, const std::string& description,
                             std::vector<double> pattern);
     LinetypeId find_linetype(const std::string& name) const;
@@ -133,6 +159,9 @@ private:
 
     std::vector<Layer> layers_;
     std::vector<Linetype> linetypes_;
+    // unique_ptr rather than by value: an Insert holds the definition's
+    // address, so growing this vector must not move what it points at.
+    std::vector<std::unique_ptr<BlockDef>> blocks_;
     UndoJournal journal_;
     Sysvars sysvars_;
 };
