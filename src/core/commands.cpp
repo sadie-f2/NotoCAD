@@ -1098,21 +1098,6 @@ Step BreakCommand::next(CommandContext& ctx, const InputValue& value) {
 
 // --- UCS --------------------------------------------------------------------
 
-namespace {
-
-// The UCS a previous UCS command left behind. R12 remembers one per drawing,
-// which is what its Prev option restores.
-//
-// A file-scope value rather than a member of CommandContext or the engine: it
-// is the same shape of problem ROTATE3D's Last axis has, and it wants the same
-// decision rather than two different ones. Recorded in SF_todo.md.
-Ucs& previous_ucs_slot() {
-    static Ucs previous;
-    return previous;
-}
-
-}  // namespace
-
 Step UcsCommand::ask_option(CommandContext&) {
     state_ = State::Option;
     Prompt p;
@@ -1129,7 +1114,8 @@ Step UcsCommand::ask_option(CommandContext&) {
 // reference the argument would alias it and Prev would restore the frame it was
 // leaving rather than the one before it.
 Step UcsCommand::adopt(CommandContext& ctx, Ucs u, const std::string& name) {
-    previous_ucs_slot() = ctx.db.current_ucs();
+    ctx.memory.previous_ucs = ctx.db.current_ucs();
+    ctx.memory.has_previous_ucs = true;
     ctx.db.set_current_ucs(u, name);
 
     // UCSFOLLOW: switch to a plan view of the new system automatically. Only
@@ -1152,7 +1138,10 @@ Step UcsCommand::next(CommandContext& ctx, const InputValue& value) {
             }
 
             if (keyword_is(value, "PREV")) {
-                return adopt(ctx, previous_ucs_slot(), "");
+                if (!ctx.memory.has_previous_ucs) {
+                    return Step::failed("no previous coordinate system");
+                }
+                return adopt(ctx, ctx.memory.previous_ucs, "");
             }
 
             if (keyword_is(value, "VIEW")) {
@@ -2892,6 +2881,13 @@ Step Rotate3dCommand::ask_angle() {
 Step Rotate3dCommand::apply(CommandContext& ctx, double radians) {
     if (is_zero(direction_)) return Step::failed("the axis has no direction");
 
+    // Remembered for the Last option, which is the whole reason session memory
+    // exists. Recorded on apply rather than when the axis was chosen, so a
+    // cancelled command leaves no trace.
+    ctx.memory.last_axis_origin = origin_;
+    ctx.memory.last_axis_direction = normalize(direction_);
+    ctx.memory.has_last_axis = true;
+
     const Mat4 m = Mat4::rotation(origin_, normalize(direction_), radians);
     const std::vector<Handle> handles = ctx.selection.handles();
 
@@ -2924,12 +2920,20 @@ Step Rotate3dCommand::next(CommandContext& ctx, const InputValue& value) {
             state_ = State::AxisOption;
             Prompt p;
             p.kind = PromptKind::Point;
-            p.message = "Axis by Entity/View/Xaxis/Yaxis/Zaxis/<2points>";
-            p.keywords = {"Entity", "View", "Xaxis", "Yaxis", "Zaxis"};
+            p.message = "Axis by Entity/Last/View/Xaxis/Yaxis/Zaxis/<2points>";
+            p.keywords = {"Entity", "Last", "View", "Xaxis", "Yaxis", "Zaxis"};
             return Step::ask(p);
         }
 
         case State::AxisOption: {
+            if (keyword_is(value, "LAST")) {
+                // The axis the previous ROTATE3D turned about, which outlives
+                // the command that set it -- see CommandMemory.
+                if (!ctx.memory.has_last_axis) return Step::failed("no last axis");
+                origin_ = ctx.memory.last_axis_origin;
+                direction_ = ctx.memory.last_axis_direction;
+                return ask_angle();
+            }
             if (keyword_is(value, "ENTITY")) {
                 state_ = State::AxisEntity;
                 Prompt p;

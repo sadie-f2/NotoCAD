@@ -560,3 +560,54 @@ TEST_CASE("ucs: a world drawing writes no surprise into the header") {
     CHECK(loaded.current_ucs().is_world());
     CHECK(loaded.sysvars().get_int(Sysvar::WorldUcs) == 1);
 }
+
+// --- session memory ---------------------------------------------------------
+//
+// UCS Prev lived in a file-scope static when it was first written, which is one
+// per PROCESS: two drawings shared it, undo could not see it, and it leaked
+// between test cases. It lives in CommandMemory now, owned by the engine beside
+// the selection and LASTPOINT.
+
+TEST_CASE("ucs: Prev is per-engine, not per-process") {
+    // The defect the static had. Two drawings must not share one another's
+    // previous coordinate system.
+    Database a;
+    CommandEngine engine_a(a);
+    engine_a.begin(make_command("UCS"));
+    engine_a.supply(InputValue::of_keyword("ORIGIN"));
+    engine_a.supply(InputValue::of_point({50, 0, 0}));
+
+    Database b;
+    CommandEngine engine_b(b);
+    // This engine has no history at all, whatever the other one did.
+    engine_b.begin(make_command("UCS"));
+    const EngineStatus status = engine_b.supply(InputValue::of_keyword("PREV"));
+    CHECK(status == EngineStatus::Failed);
+    CHECK(b.current_ucs().is_world());
+}
+
+TEST_CASE("ucs: Prev with no history says so rather than snapping to world") {
+    Database db;
+    CommandEngine engine(db);
+    engine.begin(make_command("UCS"));
+    const EngineStatus status = engine.supply(InputValue::of_keyword("PREV"));
+    CHECK(status == EngineStatus::Failed);
+}
+
+TEST_CASE("ucs: the previous system is session state, not drawing state") {
+    // A UCS change is undoable; what Prev would restore is not. That is R12's
+    // behaviour and it is what "session state" means -- the previous system
+    // describes what you were doing, not what you drew.
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("UCS"));
+    engine.supply(InputValue::of_keyword("ORIGIN"));
+    engine.supply(InputValue::of_point({10, 0, 0}));
+
+    engine.begin(make_command("UNDO"));
+    CHECK(db.current_ucs().is_world());
+    // The memory still holds what it held: undo rolled back the drawing, not
+    // the session.
+    CHECK(engine.memory().has_previous_ucs);
+}

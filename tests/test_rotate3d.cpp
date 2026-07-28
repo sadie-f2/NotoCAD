@@ -246,3 +246,62 @@ TEST_CASE("rotate3d: a bulged polyline out of plane survives a DXF round trip") 
     CHECK_NEAR(after->vertices()[0].bulge, bulge, 1e-9);
     CHECK_NEAR(after->length(), len, 1e-9);
 }
+
+TEST_CASE("rotate3d: Last reuses the axis of the previous rotation") {
+    Database db;
+    CommandEngine engine(db);
+    const Handle h = db.add(std::make_unique<Line>(Vec3{0, 5, 0}, Vec3{10, 5, 0}));
+
+    // A quarter turn about the world X axis through the origin.
+    engine.begin(make_command("ROTATE3D"));
+    engine.supply(InputValue::of_entity(h));
+    engine.supply(InputValue::none());
+    engine.supply(InputValue::of_keyword("XAXIS"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_real(90.0));
+
+    const Line* once = static_cast<const Line*>(db.get(h));
+    REQUIRE(once != nullptr);
+    CHECK_NEAR(once->start().z, 5.0, 1e-9);
+
+    // The same axis again, named only as Last.
+    engine.begin(make_command("ROTATE3D"));
+    engine.supply(InputValue::of_entity(h));
+    engine.supply(InputValue::none());
+    engine.supply(InputValue::of_keyword("LAST"));
+    engine.supply(InputValue::of_real(90.0));
+
+    const Line* twice = static_cast<const Line*>(db.get(h));
+    REQUIRE(twice != nullptr);
+    // Two quarter turns about X: y = 5 has become y = -5.
+    CHECK_NEAR(twice->start().y, -5.0, 1e-9);
+    CHECK_NEAR(twice->start().z, 0.0, 1e-9);
+}
+
+TEST_CASE("rotate3d: Last with no previous rotation fails") {
+    Database db;
+    CommandEngine engine(db);
+    const Handle h = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{10, 0, 0}));
+
+    engine.begin(make_command("ROTATE3D"));
+    engine.supply(InputValue::of_entity(h));
+    engine.supply(InputValue::none());
+    const EngineStatus status = engine.supply(InputValue::of_keyword("LAST"));
+    CHECK(status == EngineStatus::Failed);
+}
+
+TEST_CASE("rotate3d: a cancelled rotation leaves no last axis") {
+    // Recorded on apply, not when the axis was chosen.
+    Database db;
+    CommandEngine engine(db);
+    const Handle h = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{10, 0, 0}));
+
+    engine.begin(make_command("ROTATE3D"));
+    engine.supply(InputValue::of_entity(h));
+    engine.supply(InputValue::none());
+    engine.supply(InputValue::of_keyword("XAXIS"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::cancel());
+
+    CHECK(!engine.memory().has_last_axis);
+}

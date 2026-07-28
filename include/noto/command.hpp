@@ -27,6 +27,7 @@
 #include "noto/database.hpp"
 #include "noto/osnap.hpp"
 #include "noto/selection.hpp"
+#include "noto/tables.hpp"
 #include "noto/view_control.hpp"
 #include "noto/vec3.hpp"
 
@@ -160,6 +161,32 @@ struct Step {
     static Step failed(std::string msg);
 };
 
+// State that outlives the command that set it, without belonging to the drawing.
+//
+// The third answer to a question this codebase has now met three times. R12 has
+// several options whose whole point is "the one from last time" -- UCS Prev,
+// ROTATE3D's Last axis, LASTPOINT -- and none of them can live on the command,
+// because the command is gone by the time the next one asks.
+//
+// It is SESSION state, not drawing state, and the difference decides where it
+// goes. A drawing saved and reopened has no previous UCS and no last axis: those
+// describe what you were doing, not what you drew. So they are not journalled
+// and not written to DXF, and undoing a UCS change does not restore what Prev
+// would have given -- which is R12's behaviour too.
+//
+// One struct rather than a member each, so that the fourth of these costs a
+// field instead of another CommandContext member.
+struct CommandMemory {
+    // ROTATE3D Last: the axis the previous 3D rotation turned about.
+    Vec3 last_axis_origin{};
+    Vec3 last_axis_direction{};
+    bool has_last_axis{false};
+
+    // UCS Prev: the coordinate system in force before the current one.
+    Ucs previous_ucs{};
+    bool has_previous_ucs{false};
+};
+
 // What a command is allowed to touch. Still deliberately narrow: no view, no
 // UI. New members arrive explicitly, so the coupling stays visible.
 //
@@ -176,6 +203,11 @@ struct CommandContext {
     // survives intervening commands that select nothing, so ERASE, then LINE,
     // then MOVE Previous still means the entities ERASE was given.
     const SelectionSet& previous;
+
+    // Session-scoped scratch: the "same as last time" options. Owned by the
+    // engine, beside the selection and LASTPOINT, for the same stated reason --
+    // state that spans commands belongs to whatever spans commands.
+    CommandMemory& memory;
 
     // The view, when there is one. Null in `ncad`, which has no display, and a
     // command that needs it must say so rather than pretend -- see
@@ -221,7 +253,8 @@ enum class EngineStatus : std::uint8_t {
 
 class CommandEngine {
 public:
-    explicit CommandEngine(Database& db) : ctx_{db, selection_, previous_, nullptr} {}
+    explicit CommandEngine(Database& db)
+        : ctx_{db, selection_, previous_, memory_, nullptr} {}
 
     // Not owned. Set by whatever has a display; left null by `ncad`.
     void set_view_control(ViewControl* view) { ctx_.view = view; }
@@ -277,6 +310,11 @@ public:
     const SelectionSet& selection() const { return selection_; }
     const SelectionSet& previous_selection() const { return previous_; }
 
+    // The "same as last time" state. Readable so a viewport or a test can see
+    // what UCS Prev would restore without running the command.
+    CommandMemory& memory() { return memory_; }
+    const CommandMemory& memory() const { return memory_; }
+
     // The pending one-shot osnap override, if any. Set by supplying an
     // InputValue of kind OsnapOverride, and cleared as soon as any value
     // actually answers a prompt -- an override lasts for exactly one pick,
@@ -309,6 +347,7 @@ private:
     // Declared before ctx_, which holds references to them.
     SelectionSet selection_;
     SelectionSet previous_;
+    CommandMemory memory_;
     CommandContext ctx_;
     CommandPtr command_;
 

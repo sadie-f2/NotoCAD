@@ -90,10 +90,8 @@ commands: foundational, not a feature.
 - [ ] `getpoint`, `getdist`, `getangle`, `getstring`, `getreal`, `getint` — same
 - [x] MOVE, COPY (with Multiple), ROTATE, SCALE, MIRROR, ARRAY, STRETCH
 - [x] **ROTATE3D** — done, with Entity/View/Xaxis/Yaxis/Zaxis/2points.
-- [ ] ROTATE3D's **Last** axis option. It has to outlive the command that set it, and
-      `CommandContext` has nowhere for it to live — the same shape of problem LASTPOINT
-      solved by living on the engine. Small, but it wants a decision about whether the
-      context grows a fifth member or the engine grows another accessor.
+- [x] ROTATE3D's **Last** axis option — built, once `CommandMemory` gave it somewhere
+      to live. See the session-state note below.
 - [ ] **Reference angle** on ROTATE, and reference length on SCALE — R12 has both and
       neither was built, so ROTATE3D would inherit the gap. Worth doing together.
 - [ ] Interactive grip dragging
@@ -554,10 +552,8 @@ world would move the point twice.
 
 ### Still open
 
-**`UCS Prev` remembers one frame in a file-scope static.** It is the same problem
-ROTATE3D'"'"'s `Last` axis has, and it now has two instances rather than one —
-state that must outlive the command that set it, with nowhere on `CommandContext`
-to live. Worth one decision covering both rather than two different bodges.
+**`UCS Prev`** was a file-scope static when first written. Fixed — see the
+session-state note below.
 
 **VPOINT is built.** It was worth the wait: the answer names a direction by its
 coordinates in the current UCS, so the same three numbers mean different views
@@ -784,6 +780,38 @@ a flag on the polyline plus a tessellation rule, so they belong with PLINE in ph
 and cost nothing structurally.
 
 The NURBS `SPLINE` entity is R13, and so is excluded today — see the R13 note above.
+
+## Session state — settled: `CommandMemory` on the engine
+
+The question met three times and now answered once. R12 has several options whose
+whole point is "the one from last time", and none of them can live on the command
+because the command is gone by the time the next one asks:
+
+| | Remembers | Where it lives |
+|---|---|---|
+| LASTPOINT | last point entered | engine, stamped onto `Prompt` |
+| Previous selection | last selection used | engine |
+| ROTATE3D `Last` | last 3D rotation axis | `CommandMemory` |
+| UCS `Prev` | previous coordinate system | `CommandMemory` |
+
+`CommandContext` grew its fifth member: a `CommandMemory&` the engine owns,
+beside the selection and LASTPOINT. One struct rather than a member each, so the
+fourth of these costs a field instead of another context member.
+
+**Why not on `Database`.** It is SESSION state, not drawing state, and the
+distinction decides everything: a drawing saved and reopened has no previous UCS
+and no last axis, because those describe what you were *doing* rather than what
+you drew. So they are not journalled and not written to DXF, and undoing a UCS
+change does not restore what `Prev` would have given — which is R12's behaviour
+and is pinned by a test.
+
+**Why not a `CommandEngine&` in the context.** It would let a command call
+`begin()`, `cancel()` or `supply()` from inside its own `next()`, which is
+exactly what the narrow context was protecting against.
+
+The static it replaced was a real defect rather than an inelegance: one per
+*process*, so two `Database` instances shared it, undo could not see it, and it
+leaked between test cases. A test now pins that two engines do not share history.
 
 ## Numerical accuracy — untested, and the tolerances do not scale
 
