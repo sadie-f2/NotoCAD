@@ -174,7 +174,7 @@ rather than guessing — the interface hides which one it is.
 | 8 | Tables and settings | *Done, apart from UNITS.* LAYER, LTYPE with built-in patterns, dash rendering, COLOR, LTSCALE, LIMITS, and current entity properties. **UNITS is not built**: R12's is a page of report-format questions, and the formatting they control is hardcoded to four decimal places in DIST, ID, AREA and LIST. LUNITS/LUPREC/AUNITS/AUPREC do not exist yet. Also missing: LTYPE loading from a real `acad.lin`, and wildcards in layer and linetype names. |
 | 8 | *(detail)* | LAYER, LTYPE and dash rendering, COLOR, LTSCALE, UNITS, LIMITS. Linetypes touch three layers at once: the DXF table, dash generation in the render path, and LTSCALE — not just a table entry. |
 | 9 | DXF read and OPEN | *Done.* `dxf_read.hpp`, the `Proxy` entity, and DXFIN with OPEN as its alias. LINE, CIRCLE, ARC, POLYLINE and INSERT become real entities; everything else becomes a proxy that writes back unchanged. **The BLOCKS gap is closed** — definitions are read, and an INSERT naming a block defined later still resolves, because inserts are fixed up in a second pass. **Still not read:** the HEADER section's system variables (only `$ACADVER` is looked at), so a file's OSMODE, LIMITS and INSBASE are ignored on the way in even though they are now written on the way out. |
-| 10 | Geometry editing | TRIM, EXTEND, OFFSET, FILLET, CHAMFER, BREAK, CHANGE/CHPROP. **The intersection kernel it needs is built** — `intersect.hpp`. The commands themselves are not. |
+| 10 | Geometry editing | *In progress.* The kernel is built (`intersect.hpp`) and so are the cutting primitives (`curve_edit.hpp`). **BREAK is done.** Still to write: TRIM, EXTEND, OFFSET, FILLET, CHAMFER, CHANGE/CHPROP. |
 | 11 | Blocks | *Done.* BLOCK, INSERT, MINSERT, EXPLODE, WBLOCK and BASE, plus the BLOCKS section both ways. Open question 7 is answered below. **Not built:** ATTDEF/ATTRIB, and EXPLODE of a polyline. |
 | 12 | UCS | `CLAUDE.md` notes ECS is foundational and already in the kernel, but that UCS "has nowhere to live". This gives it one. |
 | 13 | Meshes and surfaces | PFACE, 3DMESH, RULESURF, TABSURF, REVSURF, EDGESURF; AutoLISP file I/O (`open`, `read-line` — `file_subrs.cpp` currently holds only `dxfout`); suppressed-regen batch mode for LISP loops. **The project's stated purpose.** |
@@ -489,6 +489,40 @@ Decisions worth not re-litigating:
 Not yet done: no spatial index, so `intersect` over a selection set is O(n^2) in
 the set's size. That is open question 5's problem and slots in behind this
 without changing the signature.
+
+## BREAK, and the bug it found in the kernel
+
+`curve_edit.hpp` is the other half of what phase 10 rests on: `intersect.hpp`
+says where curves meet and where on each, this says what is left when a span is
+cut out. `extract_curve_span` and `break_curve` are both expressed purely in the
+normalised parameters, which is what the uniform parameterisation was *for* — one
+implementation cuts a LINE, an ARC, a CIRCLE and a bulged POLYLINE with no
+per-command switch. TRIM is the next consumer and needs no new primitive.
+
+`curve_parameter_at` is the inverse of `curve_point_at`, and it projects rather
+than requiring incidence, because a pick is never exactly on the curve. It clamps
+past the ends, which is what makes BREAK's "second point beyond the endpoint"
+shorten the line instead of failing.
+
+**`InputValue` gained `has_point`, and entity answers can now carry where they
+were picked.** R12's BREAK takes the pick point as the first break point, because
+pointing at an object means pointing somewhere on it — and a bare handle cannot
+say that. A typed handle or a LISP ename carries no location, so BREAK asks for
+the first point instead of breaking wherever the origin happens to project to.
+
+**The bug worth remembering.** `decompose()` gave a negative-bulge polyline
+segment `start_angle = a1` and flipped its sweep positive. Same geometry, but the
+segment's parameter then ran *backwards* against the polyline's direction of
+travel, so every intersection reported on such a segment had a mirrored
+parameter. It had been latent in the intersection kernel since it was written and
+was invisible there — nothing consumed a parameter until BREAK did. The sweep is
+signed now, `fraction_along_sweep()` is the one place that understands it, and
+both the kernel and BREAK have regression tests.
+
+The lesson for TRIM: a parameter that is never evaluated is never checked. The
+test that caught this samples the extracted piece and asserts every sample lies
+on the original curve, which is the strongest check available without a second
+implementation. Worth repeating for TRIM and OFFSET.
 
 ## PEDIT's curve options need a curve representation first
 

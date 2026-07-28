@@ -112,6 +112,10 @@ struct InputValue {
     std::string text;
     Handle entity{kNullHandle};
 
+    // Set only for an entity answer that came from pointing at something. See
+    // of_picked_entity.
+    bool has_point{false};
+
     static InputValue none();
     static InputValue cancel();
     static InputValue of_point(const Vec3& p);
@@ -119,7 +123,17 @@ struct InputValue {
     static InputValue of_integer(std::int32_t v);
     static InputValue of_string(std::string s);
     static InputValue of_keyword(std::string s);
+    // An entity answer may carry WHERE it was picked as well as which one.
+    //
+    // BREAK is why: R12 takes the point you pointed at as the first break
+    // point, because pointing at an object means pointing somewhere on it. A
+    // handle alone cannot say that, and asking a second time would change the
+    // command's prompt sequence.
+    //
+    // `has_point` distinguishes a pick from a typed handle or a LISP ename,
+    // neither of which has a location. Commands that do not care ignore both.
     static InputValue of_entity(Handle h);
+    static InputValue of_picked_entity(Handle h, const Vec3& at);
 
     // The mask rides in `integer`. kOsnapNone is meaningful here -- it is NON,
     // "no snap for this pick" -- so the kind, not the value, says an override

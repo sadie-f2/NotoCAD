@@ -110,6 +110,23 @@ std::size_t intersect(const Entity& a, const Entity& b, IntersectMode mode,
 // the curve means evaluating the pieces either side of it.
 bool curve_point_at(const Entity& e, double t, Vec3* out);
 
+// The inverse: the parameter of the point on `e` nearest to `p`.
+//
+// BREAK is why it exists. A pick gives a coordinate, and every decision after
+// that -- which piece to keep, which way round the two points are, whether the
+// second point fell off the end -- is a comparison of parameters. Answering it
+// by coordinate instead means re-deriving the same ordering at every step.
+//
+// The point need not be on the curve: it is projected first, which is what makes
+// a pick a little off the line still break where the user meant. False for an
+// entity with no curve.
+bool curve_parameter_at(const Entity& e, const Vec3& p, double* out);
+
+// Whether the entity's curve closes on itself -- a CIRCLE always, a POLYLINE
+// when its closed flag is set. Breaking one leaves a single piece rather than
+// two, which is the whole difference between the closed and open cases.
+bool curve_is_closed(const Entity& e);
+
 // --- the primitives ---------------------------------------------------------
 //
 // Exposed because FILLET and CHAMFER construct geometry that is not yet an

@@ -117,17 +117,15 @@ std::vector<SubCurve> decompose(const Entity& e) {
                     s.centre = centre;
                     s.radius = radius;
                     s.normal = p.props().normal;
-                    // The bulge's included angle carries the direction; a
-                    // negative one sweeps clockwise, which the primitives
-                    // express by starting at the other end.
-                    const double included = 4.0 * std::atan(p.vertices()[i].bulge);
-                    if (included >= 0.0) {
-                        s.start_angle = a0;
-                        s.sweep = included;
-                    } else {
-                        s.start_angle = a1;
-                        s.sweep = -included;
-                    }
+                    // The sweep is SIGNED, and must be: a negative bulge sweeps
+                    // clockwise, and starting from the other end instead would
+                    // run the segment's parameter backwards against the
+                    // polyline's direction of travel. Every parameter reported
+                    // for a hit on such a segment would then be mirrored within
+                    // it, which is wrong for TRIM and invisible until something
+                    // cuts a curve there.
+                    s.start_angle = a0;
+                    s.sweep = 4.0 * std::atan(p.vertices()[i].bulge);
                 } else {
                     s.p0 = p.vertices()[i].pos;
                     s.p1 = p.vertices()[(i + 1) % p.size()].pos;
@@ -180,20 +178,31 @@ FlatInsert decompose_insert(const Insert& ins) {
 // The fraction of the way along a sub-curve, from the raw parameter the
 // primitives produce. For an arc that means turning a whole-circle fraction
 // into a position along the sweep, which is where the direction matters.
+// Where an angle falls along a possibly-clockwise sweep, as a fraction of it.
+//
+// One place that understands a signed sweep, so that a clockwise arc segment is
+// not a special case anywhere else.
+double fraction_along_sweep(double angle, double start_angle, double sweep) {
+    const double magnitude = std::abs(sweep);
+    if (magnitude < kIntersectTol) return 0.0;
+
+    // Measured in the direction the sweep actually goes.
+    double delta = (sweep >= 0.0) ? normalize_angle(angle - start_angle)
+                                  : normalize_angle(start_angle - angle);
+
+    if (magnitude >= kTwoPi - kIntersectTol) return delta / kTwoPi;  // a full circle
+
+    // Past the end, report the shorter way round as a negative parameter rather
+    // than as almost a full turn -- EXTEND asks "how far beyond the end", and a
+    // value just under 1 would say the opposite.
+    if (delta > magnitude + (kTwoPi - magnitude) * 0.5) delta -= kTwoPi;
+    return delta / magnitude;
+}
+
 double local_parameter(const SubCurve& s, double raw) {
     if (!s.is_arc) return raw;
-
     // `raw` is the fraction of a full turn measured from the ECS X axis.
-    const double angle = raw * kTwoPi;
-    double delta = normalize_angle(angle - s.start_angle);
-
-    if (s.sweep >= kTwoPi - kIntersectTol) return delta / kTwoPi;  // a full circle
-
-    // Past the end of the sweep, report the shorter way round as a negative
-    // parameter rather than as almost a full turn -- EXTEND asks "how far
-    // beyond the end", and a value just under 1 would say the opposite.
-    if (delta > s.sweep + (kTwoPi - s.sweep) * 0.5) delta -= kTwoPi;
-    return delta / s.sweep;
+    return fraction_along_sweep(raw * kTwoPi, s.start_angle, s.sweep);
 }
 
 bool within_unit(double t) {
@@ -460,6 +469,59 @@ std::size_t intersect(const Entity& a, const Entity& b, IntersectMode mode,
         }
     }
     return out.size() - before;
+}
+
+bool curve_is_closed(const Entity& e) {
+    if (e.type() == EntityType::Circle) return true;
+    if (e.type() == EntityType::Polyline) return static_cast<const Polyline&>(e).closed();
+    return false;
+}
+
+bool curve_parameter_at(const Entity& e, const Vec3& p, double* out) {
+    if (!out) return false;
+
+    const std::vector<SubCurve> subs = decompose(e);
+    if (subs.empty()) return false;
+
+    bool found = false;
+    double best_distance = 0.0;
+    double best_t = 0.0;
+
+    for (const SubCurve& s : subs) {
+        double local = 0.0;
+        Vec3 on{};
+
+        if (!s.is_arc) {
+            const Vec3 d = s.p1 - s.p0;
+            const double len_sq = dot(d, d);
+            if (len_sq < kIntersectTol) continue;
+            // Clamped: a point beyond the end belongs to the end, which is what
+            // makes BREAK's "second point past the end" trim rather than fail.
+            local = std::clamp(dot(p - s.p0, d) / len_sq, 0.0, 1.0);
+            on = s.p0 + d * local;
+        } else {
+            const Basis b = arbitrary_axis(s.normal);
+            const Vec3 radial = p - s.centre;
+            const double angle = std::atan2(dot(radial, b.ay), dot(radial, b.ax));
+
+            // Clamped to the arc, so a pick past the end lands on the end --
+            // the same rule the straight case uses.
+            local = std::clamp(fraction_along_sweep(angle, s.start_angle, s.sweep), 0.0, 1.0);
+
+            const double at = s.start_angle + s.sweep * local;
+            on = s.centre + (b.ax * std::cos(at) + b.ay * std::sin(at)) * s.radius;
+        }
+
+        const double distance = length(on - p);
+        if (!found || distance < best_distance) {
+            found = true;
+            best_distance = distance;
+            best_t = s.t_lo + local * (s.t_hi - s.t_lo);
+        }
+    }
+
+    if (found) *out = best_t;
+    return found;
 }
 
 bool curve_point_at(const Entity& e, double t, Vec3* out) {

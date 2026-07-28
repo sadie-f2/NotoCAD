@@ -86,6 +86,13 @@ InputValue InputValue::of_entity(Handle h) {
     return v;
 }
 
+InputValue InputValue::of_picked_entity(Handle h, const Vec3& at) {
+    InputValue v = of_entity(h);
+    v.point = at;
+    v.has_point = true;
+    return v;
+}
+
 InputValue InputValue::of_osnap_override(OsnapMask mask) {
     InputValue v;
     v.kind = InputKind::OsnapOverride;

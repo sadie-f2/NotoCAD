@@ -378,7 +378,10 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event) {
             return;
         }
 
-        engine_->supply(InputValue::of_entity(r.entity));
+        // Carries where it was picked, not only which one. BREAK takes the pick
+        // point as its first break point, which is R12's sequence and cannot be
+        // recovered from a handle.
+        engine_->supply(InputValue::of_picked_entity(r.entity, pick_point(event->pos())));
         update();
         // The bare handle, which is exactly what could have been typed at this
         // prompt -- input_text.cpp parses a decimal handle here.

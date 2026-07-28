@@ -332,6 +332,52 @@ TEST_CASE("intersect: a bulged polyline segment is intersected as the arc it is"
     CHECK(near_equal(hits[0].point, Vec3{5, -5, 0}, 1e-7));
 }
 
+TEST_CASE("intersect: a clockwise polyline segment is parameterised forwards") {
+    // A negative bulge sweeps clockwise. The sub-curve's sweep has to be signed
+    // to say so -- starting from the other end and sweeping positively instead
+    // describes the same geometry but runs the parameter BACKWARDS against the
+    // polyline's direction of travel, so every hit on such a segment reports a
+    // mirrored parameter. Invisible until something cuts a curve there, which
+    // is how BREAK found it.
+    Polyline p;
+    p.add({0, 0, 0}, -1.0);  // a half turn, clockwise: arcs ABOVE the chord
+    p.add({10, 0, 0});
+
+    // Parameter zero is the first vertex, not the second.
+    Vec3 at_start{};
+    REQUIRE(curve_point_at(p, 0.0, &at_start));
+    CHECK(near_equal(at_start, Vec3{0, 0, 0}, 1e-7));
+
+    Vec3 at_end{};
+    REQUIRE(curve_point_at(p, 1.0, &at_end));
+    CHECK(near_equal(at_end, Vec3{10, 0, 0}, 1e-7));
+
+    // And the midpoint is above the chord, which is where a negative bulge puts
+    // it -- the mirror image of the positive case.
+    Vec3 middle{};
+    REQUIRE(curve_point_at(p, 0.5, &middle));
+    CHECK(middle.y > 0.0);
+    CHECK(near_equal(middle, Vec3{5, 5, 0}, 1e-7));
+}
+
+TEST_CASE("intersect: a hit on a clockwise segment reports the parameter it is at") {
+    Polyline p;
+    p.add({0, 0, 0}, -1.0);
+    p.add({10, 0, 0});
+
+    // The line meets the arc at its topmost point, which is halfway along.
+    Line l{{5, 1, 0}, {5, 8, 0}};
+
+    IntersectionList hits;
+    REQUIRE(intersect(l, p, IntersectMode::Bounded, hits) == 1);
+    CHECK_NEAR(hits[0].t1, 0.5, 1e-7);
+
+    // And the parameter evaluates back to the point it came with.
+    Vec3 back{};
+    REQUIRE(curve_point_at(p, hits[0].t1, &back));
+    CHECK(near_equal(back, hits[0].point, 1e-7));
+}
+
 TEST_CASE("intersect: a polyline's own segments are never extended") {
     // A line that misses the polyline but would meet the carrier of one of its
     // segments. Extended must still decline, because a polyline has no carrier.

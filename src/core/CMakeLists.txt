@@ -14,6 +14,7 @@ add_library(noto_core STATIC
   text.cpp
   proxy.cpp
   insert.cpp
+  curve_edit.cpp
   intersect.cpp
   osnap_derived.cpp
   selection.cpp

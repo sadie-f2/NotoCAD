@@ -3,6 +3,8 @@
 
 #include "noto/commands.hpp"
 
+#include "noto/curve_edit.hpp"
+#include "noto/intersect.hpp"
 #include "noto/pick.hpp"
 #include "noto/scene.hpp"
 
@@ -943,6 +945,136 @@ Step TextCommand::next(CommandContext& ctx, const InputValue& value) {
             if (value.kind == InputKind::None) return Step::done();
             if (value.kind != InputKind::String) return Step::failed("text is required");
             return build(ctx, value.text);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- BREAK ------------------------------------------------------------------
+
+Step BreakCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Entity;
+    p.message = "Select object";
+    return Step::ask(p);
+}
+
+Prompt BreakCommand::second_prompt() const {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Enter second point (or F for first point)";
+    p.keywords = {"First"};
+    p.base = first_;
+    p.has_base = true;
+    return p;
+}
+
+Step BreakCommand::apply(CommandContext& ctx, const Vec3& first, const Vec3& second,
+                         bool single) {
+    const Entity* e = ctx.db.get(target_);
+    if (!e) return Step::failed("the object is gone");
+
+    double t0 = 0.0;
+    double t1 = 0.0;
+    if (!curve_parameter_at(*e, first, &t0)) return Step::failed("that object cannot be broken");
+    if (single) {
+        t1 = t0;
+    } else if (!curve_parameter_at(*e, second, &t1)) {
+        return Step::failed("that object cannot be broken");
+    }
+
+    if (single && curve_is_closed(*e)) {
+        // A single point cannot open a loop: there would be nothing to remove
+        // and the curve would still be closed. R12 refuses too.
+        return Step::failed("a closed object needs two break points");
+    }
+
+    std::vector<EntityPtr> pieces;
+    break_curve(*e, t0, t1, pieces);
+
+    if (pieces.empty()) {
+        // The break spanned the whole curve. Erasing it is the honest result --
+        // nothing of it survives -- and is what R12 does.
+        ctx.db.erase(target_);
+        return Step::done();
+    }
+
+    // The first piece takes the original's handle, so anything holding that
+    // ename still refers to something recognisable. R12 keeps the first half
+    // as the original object for the same reason.
+    ctx.db.replace(target_, std::move(pieces[0]));
+    for (std::size_t i = 1; i < pieces.size(); ++i) {
+        ctx.db.add(std::move(pieces[i]));
+    }
+    return Step::done();
+}
+
+Step BreakCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Select: {
+            if (value.kind != InputKind::Entity) return Step::failed("select an object");
+            const Entity* e = ctx.db.get(value.entity);
+            if (!e) return Step::failed("no such entity");
+
+            double probe = 0.0;
+            if (!curve_parameter_at(*e, Vec3{}, &probe)) {
+                return Step::failed("that object cannot be broken");
+            }
+            target_ = value.entity;
+
+            // Pointing at the object is also the first break point, which is
+            // R12's sequence and the reason the First option exists at all.
+            // A typed handle or a LISP ename carries no location, so those go
+            // straight to asking for the first point rather than silently
+            // breaking at wherever the origin projects to.
+            if (!value.has_point) {
+                state_ = State::FirstAgain;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Enter first point";
+                return Step::ask(p);
+            }
+
+            first_ = value.point;
+            state_ = State::Second;
+            return Step::ask(second_prompt());
+        }
+
+        case State::Second: {
+            if (keyword_is(value, "FIRST")) {
+                state_ = State::FirstAgain;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Enter first point";
+                return Step::ask(p);
+            }
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            return apply(ctx, first_, value.point, false);
+        }
+
+        case State::FirstAgain: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            first_ = value.point;
+            state_ = State::SecondAfterFirst;
+
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Enter second point (@ for none)";
+            p.keywords = {"At"};
+            p.base = first_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::SecondAfterFirst: {
+            // R12's "@" means the second point equals the first: split the
+            // curve in two without removing anything.
+            if (keyword_is(value, "AT")) return apply(ctx, first_, first_, true);
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            if (near_equal(value.point, first_, 1e-12)) {
+                return apply(ctx, first_, first_, true);
+            }
+            return apply(ctx, first_, value.point, false);
         }
     }
     return Step::failed("internal state error");
@@ -3497,6 +3629,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "LTYPE") return std::make_unique<LtypeCommand>();
     if (upper == "PAN") return std::make_unique<PanCommand>();
     if (upper == "BASE") return std::make_unique<BaseCommand>();
+    if (upper == "BREAK") return std::make_unique<BreakCommand>();
     if (upper == "BLOCK") return std::make_unique<BlockCommand>();
     if (upper == "EXPLODE") return std::make_unique<ExplodeCommand>();
     if (upper == "INSERT") return std::make_unique<InsertCommand>(false);
@@ -3527,7 +3660,7 @@ const std::vector<std::string>& command_names() {
         "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
-        "3DFACE", "BASE", "BLOCK", "EXPLODE", "INSERT", "MINSERT", "WBLOCK",
+        "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
         "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;
@@ -3552,6 +3685,7 @@ const std::vector<CommandAlias>& command_aliases() {
         {"PO", "POINT"},
         {"PE", "PEDIT"},
         {"B", "BLOCK"},
+        {"BR", "BREAK"},
         {"I", "INSERT"},
         {"X", "EXPLODE"},
         {"W", "WBLOCK"},

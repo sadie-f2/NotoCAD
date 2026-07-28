@@ -650,6 +650,39 @@ public:
     Step next(CommandContext& ctx, const InputValue& value) override;
 };
 
+// BREAK: remove the piece of a curve between two points.
+//
+// The first of phase 10's commands, and the simplest consumer of the
+// intersection kernel's parameterisation -- which is why it is first. It needs
+// no intersections at all; what it needs is the parameter machinery those
+// intersections are reported in, so building it proves that half before TRIM
+// depends on both.
+//
+// R12's prompt sequence is the odd part and is faithfully odd here: selecting
+// the object also supplies the FIRST break point, because you point at the
+// object by pointing somewhere on it. `F` then exists to say "that pick was
+// only to choose the object, ask me again". Answering the second prompt with
+// `@` breaks at a single point, splitting the curve without removing anything.
+//
+// A CIRCLE becomes an ARC, and a closed POLYLINE becomes an open one. Neither
+// is a simplification: a loop with a piece missing is not a loop.
+class BreakCommand final : public Command {
+public:
+    const char* name() const override { return "BREAK"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Select, Second, FirstAgain, SecondAfterFirst };
+
+    Prompt second_prompt() const;
+    Step apply(CommandContext& ctx, const Vec3& first, const Vec3& second, bool single);
+
+    State state_{State::Select};
+    Handle target_{kNullHandle};
+    Vec3 first_{};
+};
+
 // LAYER: R12's table editor, as one prompt that loops until Enter.
 //
 // ?/Make/Set/New/ON/OFF/Color/Ltype/Freeze/Thaw. Most options take a layer name
