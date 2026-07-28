@@ -39,6 +39,8 @@ public:
     void zoom_scale(double) override {}
     bool zoom_previous() override { return false; }
     void pan(const Vec3&, const Vec3&) override {}
+    void set_view_direction(const Vec3&) override {}
+    Vec3 view_direction() const override { return kWorldZ; }
     Basis view_basis() const override { return Basis{{1, 0, 0}, {0, 0, 1}, {0, -1, 0}}; }
     DrawContext draw_context() const override { return DrawContext{}; }
 };

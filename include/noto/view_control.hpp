@@ -30,8 +30,17 @@ public:
     virtual ~ViewControl() = default;
 
     // PLAN. Look straight down `normal`, which is the current construction
-    // plane's -- world Z until UCS exists.
+    // plane's. That is world Z only while the UCS is the world one.
     virtual void set_plan_view(const Vec3& normal) = 0;
+
+    // VPOINT. The direction from the target toward the eye, in WORLD terms.
+    //
+    // The command converts before calling: R12 reads a VPOINT answer in the
+    // current coordinate system, so the same three numbers mean different views
+    // under different UCSs. Doing the conversion in the command rather than
+    // here keeps this interface about the view and not about the drawing.
+    virtual void set_view_direction(const Vec3& world_direction) = 0;
+    virtual Vec3 view_direction() const = 0;
 
     // ZOOM Extents, ZOOM Window, and ZOOM <scale>. A window is given as two
     // world points on the construction plane, not as a screen rectangle,

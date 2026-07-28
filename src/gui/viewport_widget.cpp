@@ -139,14 +139,27 @@ void ViewportWidget::zoom_extents() {
     update();
 }
 
-void ViewportWidget::set_plan_view(const Vec3&) {
-    // The normal is world Z until UCS exists, and Viewport::set_plan_view()
-    // already means exactly that. When UCS arrives this is where the two part
-    // company.
+void ViewportWidget::set_plan_view(const Vec3& normal) {
+    // This is where the two parted company, now that UCS exists. Looking down
+    // the construction plane's normal IS the plan view of it; the argument was
+    // ignored while every plane was world XY, and honouring it is the whole of
+    // what PLAN in a tilted UCS means.
     push_view();
-    viewport_.set_plan_view();
+    if (is_zero(normal) || near_equal(normalize(normal), kWorldZ, 1e-12)) {
+        viewport_.set_plan_view();
+    } else {
+        viewport_.set_view_direction(normalize(normal));
+    }
     update();
 }
+
+void ViewportWidget::set_view_direction(const Vec3& world_direction) {
+    push_view();
+    viewport_.set_view_direction(world_direction);
+    update();
+}
+
+Vec3 ViewportWidget::view_direction() const { return viewport_.view_direction(); }
 
 void ViewportWidget::zoom_window(const Vec3& a, const Vec3& b) {
     BBox box;

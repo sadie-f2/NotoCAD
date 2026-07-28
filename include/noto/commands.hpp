@@ -930,6 +930,35 @@ private:
     Vec3 first_{};
 };
 
+// VPOINT: look at the model from somewhere else.
+//
+// Held back until UCS existed, deliberately, and this is why: **the answer is
+// read in the current coordinate system.** `1,1,1` is a direction in the UCS,
+// not in world, so the same three numbers mean different views under different
+// UCSs. Writing it against WCS would have meant writing it twice, which is the
+// trap SF_todo.md recorded rather than walked into.
+//
+// R12's prompt is `Rotate/<View point>`, and Enter brings up a compass and axis
+// tripod to point with. That widget is not built, so Enter reports the current
+// direction rather than pretending -- the same choice PLAN makes when there is
+// no view at all.
+//
+// Rotate asks for two angles instead of a vector: around, then up. It is the
+// option worth having, because "30 degrees round and 20 up" is a thing people
+// can hold in their heads and `-0.5,-0.866,0.342` is not.
+class VpointCommand final : public Command {
+public:
+    const char* name() const override { return "VPOINT"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Option, RotateAround, RotateUp };
+
+    State state_{State::Option};
+    double around_{0.0};
+};
+
 class PanCommand final : public Command {
 public:
     const char* name() const override { return "PAN"; }

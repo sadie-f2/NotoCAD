@@ -1396,6 +1396,91 @@ Step UcsCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- VPOINT -----------------------------------------------------------------
+
+Step VpointCommand::start(CommandContext& ctx) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Rotate/<View point>";
+    p.keywords = {"Rotate"};
+    p.allow_empty = true;
+    (void)ctx;
+    return Step::ask(p);
+}
+
+Step VpointCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (!ctx.view) return Step::failed("no view to change");
+
+    switch (state_) {
+        case State::Option: {
+            if (keyword_is(value, "ROTATE")) {
+                state_ = State::RotateAround;
+                Prompt p;
+                p.kind = PromptKind::Angle;
+                p.message = "Enter angle in X-Y plane from X axis";
+                return Step::ask(p);
+            }
+
+            if (value.kind == InputKind::None) {
+                // R12 shows a compass and an axis tripod here. Without one,
+                // reporting where the view already points is honest; inventing
+                // a default would silently move the camera.
+                const Vec3 d = ctx.view->view_direction();
+                return Step::done("View direction " + fmt(d.x) + "," + fmt(d.y) + "," +
+                                  fmt(d.z));
+            }
+
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+            // THE POINT OF THE WHOLE COMMAND. The answer names a direction by
+            // its coordinates in the current UCS, so those coordinates are
+            // recovered and then re-applied as a VECTOR -- a direction has no
+            // origin to be translated from.
+            //
+            // Recovering and re-applying cancels to `point - origin`, and that
+            // is deliberately how it is left rather than folded down, because
+            // the two steps are what make it right for both kinds of answer. A
+            // typed coordinate arrived already mapped into world by the parser;
+            // a picked one arrived in world from the viewport. Reading either
+            // one's UCS coordinates as a direction is what R12 does, and it is
+            // the same arithmetic for both.
+            const Ucs ucs = ctx.db.current_ucs();
+            const Vec3 in_ucs = ucs.from_world().transform_point(value.point);
+            const Vec3 world = ucs.to_world().transform_vector(in_ucs);
+
+            if (is_zero(world)) return Step::failed("the view direction cannot be zero");
+            ctx.view->set_view_direction(world);
+            return Step::done("Regenerating drawing.");
+        }
+
+        case State::RotateAround: {
+            if (!angle_from(value, Vec3{}, around_)) return Step::failed("an angle is required");
+            state_ = State::RotateUp;
+            Prompt p;
+            p.kind = PromptKind::Angle;
+            p.message = "Enter angle from X-Y plane";
+            return Step::ask(p);
+        }
+
+        case State::RotateUp: {
+            double up = 0.0;
+            if (!angle_from(value, Vec3{}, up)) return Step::failed("an angle is required");
+
+            // Spherical, in the UCS's own frame: `around_` from its X axis, then
+            // `up` out of its XY plane.
+            const Vec3 in_ucs{std::cos(around_) * std::cos(up), std::sin(around_) * std::cos(up),
+                              std::sin(up)};
+            const Ucs ucs = ctx.db.current_ucs();
+            const Vec3 world = ucs.to_world().transform_vector(in_ucs);
+
+            if (is_zero(world)) return Step::failed("the view direction cannot be zero");
+            ctx.view->set_view_direction(world);
+            return Step::done("Regenerating drawing.");
+        }
+    }
+    return Step::failed("internal state error");
+}
+
 // --- UCSICON ----------------------------------------------------------------
 
 Step UcsIconCommand::start(CommandContext&) {
@@ -3907,7 +3992,7 @@ bool command_is_transparent(std::string_view name) {
     // mid-command. ERASE would be very useful mid-command and must never be
     // transparent, because the outer command may be holding handles.
     return upper == "ZOOM" || upper == "PAN" || upper == "PLAN" || upper == "REDRAW" ||
-           upper == "ID" || upper == "DIST";
+           upper == "VPOINT" || upper == "ID" || upper == "DIST";
 }
 
 // --- inquiry: DIST, ID, AREA, LIST ------------------------------------------
@@ -4164,6 +4249,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "BASE") return std::make_unique<BaseCommand>();
     if (upper == "BREAK") return std::make_unique<BreakCommand>();
     if (upper == "UCS") return std::make_unique<UcsCommand>();
+    if (upper == "VPOINT") return std::make_unique<VpointCommand>();
     if (upper == "UCSICON") return std::make_unique<UcsIconCommand>();
     if (upper == "TRIM") return std::make_unique<TrimCommand>(false);
     if (upper == "EXTEND") return std::make_unique<TrimCommand>(true);
@@ -4197,7 +4283,7 @@ const std::vector<std::string>& command_names() {
         "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
-        "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "UCS", "UCSICON", "INSERT", "MINSERT", "WBLOCK",
+        "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
         "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;

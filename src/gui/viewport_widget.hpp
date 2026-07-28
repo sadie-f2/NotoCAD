@@ -49,6 +49,8 @@ public:
     // ViewControl. The commands reach the view through these; the keyboard
     // shortcuts below call the same ones, so ZOOM and Home cannot drift apart.
     void set_plan_view(const Vec3& normal) override;
+    void set_view_direction(const Vec3& world_direction) override;
+    Vec3 view_direction() const override;
     void zoom_extents() override;
     void zoom_window(const Vec3& a, const Vec3& b) override;
     void zoom_scale(double factor) override;

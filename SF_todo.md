@@ -559,8 +559,33 @@ ROTATE3D'"'"'s `Last` axis has, and it now has two instances rather than one —
 state that must outlive the command that set it, with nowhere on `CommandContext`
 to live. Worth one decision covering both rather than two different bodges.
 
-**VPOINT is still not built**, and is now unblocked: it is interpreted in the
-current CS, and there is finally a current CS to interpret it against.
+**VPOINT is built.** It was worth the wait: the answer names a direction by its
+coordinates in the current UCS, so the same three numbers mean different views
+under different systems, and a version written against WCS would have been
+written twice.
+
+The arithmetic cancels to `point - origin`, and is deliberately left as the two
+steps it is made of, because that is what makes it right for both kinds of
+answer. A typed coordinate reaches the command already mapped into world by the
+parser; a picked one arrives in world from the viewport. Reading either one's UCS
+coordinates as a direction is what R12 does, and it is the same arithmetic for
+both — which two of the first tests got wrong by supplying raw numbers and
+asserting semantics the pipeline never produces.
+
+`Rotate` is present; the compass and axis tripod are not, so Enter reports the
+current direction rather than inventing a default that would silently move the
+camera.
+
+**Also fixed, and it was a real bug:** `ViewportWidget::set_plan_view()` ignored
+its normal argument. That was correct while every construction plane was world
+XY and wrong the moment UCS landed — PLAN in a tilted UCS would have shown a
+world plan view. It honours the argument now.
+
+*Still open, and unchanged:* whether VPOINT should push onto the previous-view
+stack. It does, because `push_view()` is called by every view mutator and that is
+the consistent choice; AutoCAD 2026 agrees. R12 remains unverified, and because
+the stack holds whole `Viewport` states rather than zoom rectangles, changing the
+answer stays a one-line policy edit.
 
 **The rest of the HEADER is still not read.** The UCS variables are, because a
 drawing that reopens in world XY when it was saved tilted changes what typing a
@@ -759,6 +784,71 @@ a flag on the polyline plus a tessellation rule, so they belong with PLINE in ph
 and cost nothing structurally.
 
 The NURBS `SPLINE` entity is R13, and so is excluded today — see the R13 note above.
+
+## Numerical accuracy — untested, and the tolerances do not scale
+
+Raised by Sadie, and correct: **nothing in the suite tests conditioning.** Every
+test runs at comfortable magnitudes — the largest coordinate anywhere in
+`tests/` is about 1000 — and no test mentions precision, accumulation or
+ill-conditioning. What is pinned is *behaviour*, at magnitudes where double
+precision is never in doubt.
+
+**The systemic issue is that every tolerance is ABSOLUTE.** `kIntersectTol`
+(1e-9), `kSpanEps` (1e-9), `kJoinTol` (1e-9), `kBulgeEps` (1e-12), `kUcsEps`
+(1e-12), `vec3.hpp`'s `kEps` (1e-10), and the harness's own `approx()` and
+`near_equal()` — all of them compare a difference against a fixed number of
+drawing units. That is fine near the origin and wrong away from it:
+
+- A double has about 15–16 significant digits. At a coordinate of 1e6 the
+  representable spacing is around 1e-10, so a 1e-9 absolute tolerance is barely
+  above the noise floor. At 1e9 it is *below* it, and a comparison like
+  `length(pa - pb) > kIntersectTol` — the skew-line rejection in
+  `intersect_line_line` — stops discriminating and starts returning whichever
+  answer rounding happens to give.
+- This is not hypothetical for an engineering tool. Survey and site coordinates
+  routinely run to 1e5–1e7, and the stated workflow imports external analysis
+  data whose units nobody here chose.
+
+Specific hazards worth a test each, all in code that already exists:
+
+1. **The bulge singularity.** `bulge = tan(included / 4)`, so an arc approaching
+   a full turn has a bulge approaching infinity, and `polyline.cpp`'s
+   `apothem = (chord/2) / tan(half)` blows up as a segment approaches straight.
+   Both have `kBulgeEps` guards; what is untested is the *transition region*
+   just outside them, where the answer is finite, wrong, and unflagged.
+2. **`arbitrary_axis()`'s branch discontinuity.** R12's algorithm switches
+   derivation when `|Nx| < 1/64 && |Ny| < 1/64`. Straddling that boundary flips
+   the derived X axis, so an entity whose normal wanders across it changes
+   orientation discontinuously. Deliberate and R12-faithful, but nothing pins
+   the behaviour either side.
+3. **Catastrophic cancellation in circle/circle.** `x = (d² + r0² - r1²) / 2d`
+   followed by `h = sqrt(r0² - x²)` loses most of its significant digits when
+   two circles are nearly tangent, or when the radii are large and their
+   difference small.
+4. **Accumulated transform error.** `transform(Mat4)` composes, so ARRAY with
+   many items, repeated ROTATE, and nested block placements all accumulate.
+   Nothing measures the drift.
+5. **`decompose_placement` at extreme scale.** Recovering scale from column
+   lengths and rotation from `atan2` degrades as the factors spread apart.
+
+What a test suite for this should look like, and it is a design job as much as a
+test-writing one:
+
+- **Round-trip identities at several magnitudes.** The same construction at
+  1e-3, 1, 1e3, 1e6 and 1e9, asserting a *relative* error bound rather than an
+  absolute one. That alone would document where the current code stops working.
+- **Adversarial pairs.** Nearly-tangent circles, nearly-parallel lines, nearly
+  straight bulges, normals on the 1/64 boundary.
+- **Chains.** N transforms applied and inverted, asserting drift stays below a
+  bound that scales with N — which also catches an inverse that is subtly not.
+- **A decision the tests will force:** whether the tolerances become relative
+  (scaled by the magnitude of the operands or by a drawing-extents-derived
+  unit), or whether the kernel documents a supported coordinate range and says
+  so. R12 itself had limits here; matching it is a defensible answer, and so is
+  beating it, but drifting into one by accident is not.
+
+Worth doing before the mesh work in phase 13, since that is the phase that
+imports coordinates this project did not choose.
 
 ## Open architectural questions
 

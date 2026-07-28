@@ -44,10 +44,16 @@ public:
         first = a;
         second = b;
     }
+    void set_view_direction(const Vec3& d) override {
+        calls.push_back("vpoint");
+        direction = d;
+    }
+    Vec3 view_direction() const override { return direction; }
     Basis view_basis() const override { return Basis{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}; }
     DrawContext draw_context() const override { return DrawContext{}; }
 
     std::vector<std::string> calls;
+    Vec3 direction{0, 0, 1};
     Vec3 last_normal{};
     Vec3 first{};
     Vec3 second{};
@@ -347,4 +353,189 @@ TEST_CASE("transparent: nesting is refused rather than stacked") {
     // Still ZOOM: one level covers what this is for, and a stack would need an
     // answer for what Escape means at depth three.
     CHECK(engine.prompt().text() == zoom_prompt);
+}
+
+// --- VPOINT -----------------------------------------------------------------
+//
+// Held back until UCS existed, because the answer is read in the current
+// coordinate system. That is the whole reason it is here rather than in phase 6,
+// and it is what most of these pin.
+
+TEST_CASE("vpoint: a typed direction sets the view") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("VPOINT"));
+    engine.supply(InputValue::of_point({1, 0, 0}));
+
+    CHECK(view.calls.size() == 1);
+    CHECK(view.calls[0] == "vpoint");
+    CHECK(near_equal(normalize(view.direction), Vec3{1, 0, 0}, 1e-9));
+}
+
+TEST_CASE("vpoint: the same numbers mean a different view under a different UCS") {
+    // The reason this command waited for UCS. `1,0,0` is a direction in the
+    // current system, so standing the construction plane up rotates what it
+    // names -- and a version written against WCS would have had to be written
+    // again.
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    // World first, as the baseline.
+    engine.begin(make_command("VPOINT"));
+    engine.supply(InputValue::of_point({1, 0, 0}));
+    CHECK(near_equal(normalize(view.direction), Vec3{1, 0, 0}, 1e-9));
+
+    // Now a UCS whose X axis is world Y. Supplied the way the parser would
+    // supply it -- a typed coordinate reaches the command already mapped into
+    // world, and driving the command with raw numbers would test a pipeline
+    // that does not exist.
+    Ucs u;
+    u.xdir = {0, 1, 0};
+    u.ydir = {-1, 0, 0};
+    db.set_current_ucs(u);
+
+    engine.begin(make_command("VPOINT"));
+    engine.supply(InputValue::of_point(db.current_ucs().to_world().transform_point({1, 0, 0})));
+    CHECK(near_equal(normalize(view.direction), Vec3{0, 1, 0}, 1e-9));
+}
+
+TEST_CASE("vpoint: a direction is rotated, not translated") {
+    // A UCS origin far from world must not move a view DIRECTION, which has no
+    // origin to be moved from.
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    Ucs u;
+    u.origin = {1000, 2000, 3000};
+    db.set_current_ucs(u);
+
+    engine.begin(make_command("VPOINT"));
+    engine.supply(InputValue::of_point(db.current_ucs().to_world().transform_point({0, 0, 1})));
+    CHECK(near_equal(normalize(view.direction), Vec3{0, 0, 1}, 1e-9));
+}
+
+TEST_CASE("vpoint: Rotate takes two angles instead of a vector") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("VPOINT"));
+    engine.supply(InputValue::of_keyword("ROTATE"));
+    engine.supply(InputValue::of_real(90.0));  // round from the X axis
+    engine.supply(InputValue::of_real(0.0));   // level with the XY plane
+
+    CHECK(near_equal(normalize(view.direction), Vec3{0, 1, 0}, 1e-9));
+}
+
+TEST_CASE("vpoint: Rotate straight up is the plan view") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("VPOINT"));
+    engine.supply(InputValue::of_keyword("ROTATE"));
+    engine.supply(InputValue::of_real(0.0));
+    engine.supply(InputValue::of_real(90.0));
+
+    CHECK(near_equal(normalize(view.direction), Vec3{0, 0, 1}, 1e-9));
+}
+
+TEST_CASE("vpoint: Enter reports rather than moving the camera") {
+    // R12 shows a compass and axis tripod here. There is not one, and inventing
+    // a default would silently change the view.
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("VPOINT"));
+    engine.supply(InputValue::none());
+
+    CHECK(view.calls.empty());
+    CHECK(!engine.message().empty());
+}
+
+TEST_CASE("vpoint: with no view it says so rather than reporting success") {
+    Database db;
+    CommandEngine engine(db);
+    engine.begin(make_command("VPOINT"));
+    const EngineStatus status = engine.supply(InputValue::of_point({1, 1, 1}));
+    CHECK(status == EngineStatus::Failed);
+}
+
+TEST_CASE("vpoint: a zero direction is refused") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("VPOINT"));
+    const EngineStatus status = engine.supply(InputValue::of_point({0, 0, 0}));
+    CHECK(status == EngineStatus::Failed);
+}
+
+TEST_CASE("plan: a tilted UCS gets a plan view of its own plane, not of world XY") {
+    // set_plan_view() ignored its argument while every construction plane was
+    // world XY. Now that they are not, honouring it is the whole of what PLAN
+    // in a UCS means.
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    Ucs u;
+    u.xdir = {1, 0, 0};
+    u.ydir = {0, 0, 1};  // the XZ plane, facing -Y
+    db.set_current_ucs(u);
+
+    engine.begin(make_command("PLAN"));
+    engine.supply(InputValue::of_keyword("CURRENT"));
+
+    CHECK(near_equal(view.last_normal, Vec3{0, -1, 0}, 1e-9));
+}
+
+TEST_CASE("plan: World still means world, whatever the UCS is") {
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    Ucs u;
+    u.xdir = {1, 0, 0};
+    u.ydir = {0, 0, 1};
+    db.set_current_ucs(u);
+
+    engine.begin(make_command("PLAN"));
+    engine.supply(InputValue::of_keyword("WORLD"));
+
+    CHECK(near_equal(view.last_normal, kWorldZ, 1e-9));
+}
+
+TEST_CASE("vpoint: a picked point is read as its UCS coordinates") {
+    // A click arrives in world, not in the UCS. R12 reads the picked point's
+    // UCS coordinates as the direction, which is the same arithmetic a typed
+    // answer gets -- and is why the command does not simply use the world
+    // point as the direction.
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    Ucs u;
+    u.origin = {10, 0, 0};
+    db.set_current_ucs(u);
+
+    engine.begin(make_command("VPOINT"));
+    // A world point one unit up from the UCS origin.
+    engine.supply(InputValue::of_point({10, 0, 1}));
+    CHECK(near_equal(normalize(view.direction), Vec3{0, 0, 1}, 1e-9));
 }
