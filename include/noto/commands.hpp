@@ -151,6 +151,41 @@ private:
     std::size_t placed_{0};
 };
 
+// ROTATE, SCALE and MIRROR: select, then a base point, then the transform.
+//
+// All three act in the current construction plane, not in the view. That is not
+// a simplification: in R12 you can only draw in the current plane, so a rotation
+// needs no axis (it is the plane's normal through the base point) and a mirror
+// needs no plane (it is the line you gave, extruded along that normal). Points
+// and point pairs are the whole input, which is why these fit one shape.
+//
+// Without UCS the current plane is world XY. When UCS arrives this reads the
+// plane from it and nothing else here changes.
+class TransformCommand : public Command {
+public:
+    enum class Kind : std::uint8_t { Rotate, Scale, Mirror };
+
+    explicit TransformCommand(Kind kind) : kind_(kind) {}
+
+    const char* name() const override;
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    // Mirror asks for a second point of the axis rather than a magnitude, and
+    // then whether to keep the original -- so it has one state the others skip.
+    enum class State : std::uint8_t { Selecting, Base, Amount, MirrorSecond, MirrorDelete };
+
+    Step apply(CommandContext& ctx, const Mat4& m, bool erase_originals);
+    Prompt amount_prompt() const;
+
+    Kind kind_;
+    State state_{State::Selecting};
+    SelectionPrompter select_;
+    Vec3 base_{};
+    Vec3 mirror_second_{};
+};
+
 // DXFOUT: prompt for a file name and write the drawing. In R12 this is a
 // command, and it only lived as a LISP function because the command layer did
 // not exist yet. The (dxfout ...) function stays -- scripts want it -- but this

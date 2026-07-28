@@ -10,6 +10,8 @@
 #include "noto/entities.hpp"
 
 #include <memory>
+#include <cmath>
+#include <numbers>
 #include <string>
 
 namespace noto {
@@ -29,6 +31,24 @@ bool keyword_is(const InputValue& v, const char* name) {
 
 // A distance prompt accepts either a number or a second point, since picking two
 // points is how a radius gets specified with a mouse.
+// An angle, in radians. Typed as degrees -- R12 talks degrees to the user and
+// radians to AutoLISP -- or shown by pointing, in which case it is the direction
+// from the base point to where you pointed.
+bool angle_from(const InputValue& v, const Vec3& base, double& out) {
+    if (v.kind == InputKind::Real || v.kind == InputKind::Integer) {
+        const double degrees = (v.kind == InputKind::Real) ? v.real : static_cast<double>(v.integer);
+        out = degrees * std::numbers::pi / 180.0;
+        return true;
+    }
+    if (v.kind == InputKind::Point) {
+        const Vec3 d = v.point - base;
+        if (is_zero(d)) return false;
+        out = std::atan2(d.y, d.x);
+        return true;
+    }
+    return false;
+}
+
 bool distance_from(const InputValue& v, const Vec3& base, double& out) {
     if (v.kind == InputKind::Real || v.kind == InputKind::Integer) {
         out = (v.kind == InputKind::Real) ? v.real : static_cast<double>(v.integer);
@@ -475,6 +495,155 @@ Step MoveCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- ROTATE / SCALE / MIRROR ------------------------------------------------
+
+namespace {
+
+// The normal of the current construction plane. World Z until UCS exists; this
+// is the single place that has to learn about UCS later.
+Vec3 construction_normal() {
+    return kWorldZ;
+}
+
+}  // namespace
+
+const char* TransformCommand::name() const {
+    switch (kind_) {
+        case Kind::Rotate: return "ROTATE";
+        case Kind::Scale: return "SCALE";
+        case Kind::Mirror: return "MIRROR";
+    }
+    return "?";
+}
+
+Step TransformCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
+
+Prompt TransformCommand::amount_prompt() const {
+    Prompt p;
+    switch (kind_) {
+        case Kind::Rotate:
+            p.kind = PromptKind::Angle;
+            p.message = "Rotation angle";
+            break;
+        case Kind::Scale:
+            p.kind = PromptKind::Distance;
+            p.message = "Scale factor";
+            break;
+        case Kind::Mirror:
+            p.kind = PromptKind::Point;
+            p.message = "Second point of mirror line";
+            break;
+    }
+    // Both magnitudes can be shown instead of typed: an angle by pointing along
+    // it, a scale by pointing at the distance it should become.
+    p.base = base_;
+    p.has_base = true;
+    return p;
+}
+
+Step TransformCommand::apply(CommandContext& ctx, const Mat4& m, bool erase_originals) {
+    // Snapshotted: MIRROR without deletion adds while iterating, as COPY does.
+    const std::vector<Handle> handles = ctx.selection.handles();
+
+    std::size_t n = 0;
+    for (const Handle h : handles) {
+        const Entity* e = ctx.db.get(h);
+        if (!e) continue;
+
+        EntityPtr moved = e->clone();
+        moved->transform(m);
+
+        if (erase_originals) {
+            // In place, so the handle survives an AutoLISP ename.
+            ctx.db.replace(h, std::move(moved));
+        } else {
+            ctx.db.add(std::move(moved));
+        }
+        ++n;
+    }
+    return Step::done(std::to_string(n) + " changed");
+}
+
+Step TransformCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Selecting: {
+            switch (select_.feed(ctx, value)) {
+                case SelectionPrompter::Result::Selecting:
+                    return Step::ask(select_.prompt(ctx));
+                case SelectionPrompter::Result::Rejected:
+                    return Step::failed("an entity is required");
+                case SelectionPrompter::Result::Finished:
+                    break;
+            }
+            if (ctx.selection.empty()) return Step::done("Nothing selected");
+
+            state_ = State::Base;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = (kind_ == Kind::Mirror) ? "First point of mirror line" : "Base point";
+            return Step::ask(p);
+        }
+
+        case State::Base: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            base_ = value.point;
+            state_ = (kind_ == Kind::Mirror) ? State::MirrorSecond : State::Amount;
+            return Step::ask(amount_prompt());
+        }
+
+        case State::Amount: {
+            if (kind_ == Kind::Rotate) {
+                double radians = 0.0;
+                if (!angle_from(value, base_, radians)) return Step::failed("an angle is required");
+                return apply(ctx, Mat4::rotation(base_, construction_normal(), radians), true);
+            }
+
+            double factor = 0.0;
+            if (!distance_from(value, base_, factor)) return Step::failed("a factor is required");
+            // Zero collapses everything to a point and is not undoable by
+            // scaling back, so it is refused rather than obeyed.
+            if (factor <= 0.0) return Step::failed("scale factor must be positive");
+            return apply(ctx,
+                         Mat4::translation(base_) * Mat4::uniform_scaling(factor) *
+                             Mat4::translation(base_ * -1.0),
+                         true);
+        }
+
+        case State::MirrorSecond: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            mirror_second_ = value.point;
+
+            const Vec3 along = mirror_second_ - base_;
+            if (is_zero(along)) return Step::failed("the mirror line has no direction");
+
+            state_ = State::MirrorDelete;
+            Prompt p;
+            p.kind = PromptKind::String;
+            p.message = "Delete old objects? <N>";
+            p.keywords = {"Yes", "No"};
+            p.allow_empty = true;
+            return Step::ask(p);
+        }
+
+        case State::MirrorDelete: {
+            // R12 defaults to keeping them, so Enter means No.
+            const bool erase_originals = keyword_is(value, "YES");
+            if (!erase_originals && value.kind != InputKind::None && !keyword_is(value, "NO")) {
+                return Step::failed("answer Yes or No");
+            }
+
+            // The mirror plane contains the line and the plane normal, so its
+            // own normal is perpendicular to both.
+            const Vec3 along = mirror_second_ - base_;
+            const Vec3 normal = cross(along, construction_normal());
+            if (is_zero(normal)) return Step::failed("the mirror line has no direction");
+
+            return apply(ctx, Mat4::mirror(base_, normalize(normal)), erase_originals);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
 // --- DXFOUT -----------------------------------------------------------------
 
 Step DxfOutCommand::start(CommandContext&) {
@@ -506,6 +675,9 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "ERASE") return std::make_unique<EraseCommand>();
     if (upper == "DXFOUT") return std::make_unique<DxfOutCommand>();
     if (upper == "MOVE") return std::make_unique<MoveCommand>(false);
+    if (upper == "ROTATE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Rotate);
+    if (upper == "SCALE") return std::make_unique<TransformCommand>(TransformCommand::Kind::Scale);
+    if (upper == "MIRROR") return std::make_unique<TransformCommand>(TransformCommand::Kind::Mirror);
     if (upper == "COPY") return std::make_unique<MoveCommand>(true);
     if (upper == "UNDO") return std::make_unique<UndoCommand>();
     if (upper == "REDO") return std::make_unique<RedoCommand>();
@@ -513,8 +685,9 @@ CommandPtr make_command(std::string_view name) {
 }
 
 const std::vector<std::string>& command_names() {
-    static const std::vector<std::string> names = {"CIRCLE", "COPY", "DXFOUT", "ERASE",
-                                                  "LINE",   "MOVE", "REDO",   "UNDO"};
+    static const std::vector<std::string> names = {"CIRCLE", "COPY",   "DXFOUT", "ERASE",
+                                                  "LINE",   "MIRROR", "MOVE",   "REDO",
+                                                  "ROTATE", "SCALE",  "UNDO"};
     return names;
 }
 
@@ -526,6 +699,9 @@ const std::vector<CommandAlias>& command_aliases() {
         {"CP", "COPY"},
         {"L", "LINE"},
         {"M", "MOVE"},
+        {"MI", "MIRROR"},
+        {"RO", "ROTATE"},
+        {"SC", "SCALE"},
         {"U", "UNDO"},
     };
     return aliases;

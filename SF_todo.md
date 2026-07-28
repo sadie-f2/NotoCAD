@@ -191,8 +191,38 @@ under orbit, where a screen-aligned box is not axis-aligned in world space.
 prompter, which is private to each command. Fixing it properly means deciding how view
 information reaches a command, and `CommandContext`'s header is explicit that it holds
 no view. Options are a third context member, or `Prompt` carrying the frame out and the
-answer carrying it back. Worth settling before ROTATE and MIRROR, which have the same
-question about which plane they act in.
+answer carrying it back.
+
+**This does not affect ROTATE, MIRROR or ARRAY**, contrary to an earlier note here.
+Those act in the current construction plane (WCS/UCS), not in the view: in AutoCAD you
+can only draw in the current plane, so a rotation collapses to a base point plus an
+angle and a mirror to a point pair, with the axis and the plane implied. World XY is
+therefore *correct* for them until UCS exists, not a stand-in. Only selection windows
+are genuinely screen-space, because a window is a thing you drag on the screen.
+
+## UI polish — reported from use, not yet built
+
+**Focus is lost to the viewport after a pick.** Once you have selected or worked in the
+viewport, typed characters stop reaching the command line until you click back into it.
+`ViewportWidget` forwards printable keys through `textTyped`, so the plumbing exists;
+something about focus after a click is defeating it. R12 has no focus step at all —
+you just type — and that is the target. (Sadie reports this is still occasionally a UI
+wart in AutoCAD 2026, which is not a reason to keep it.)
+
+**Show the selection box while it is being dragged.** The window or crossing rectangle
+should be drawn as it is dragged, and distinguishably: AutoCAD uses a solid outline for
+window and a dashed one for crossing, which is how you know which you are getting
+before you release.
+
+**Ghost the selection during placement.** MOVE and COPY should show the selected
+geometry following the cursor between the base point and the second point.
+
+Both are wanted, with a caveat worth designing around: this is used over SSH with X11
+forwarding, where the current no-feedback behaviour is *faster*. Whatever is drawn
+should be cheap — outline only, no fill — and probably switchable, since the remote
+case is a real working mode rather than an edge case.
+
+## Known issues — reported, not yet diagnosed
 
 ## Known issues — reported, not yet diagnosed
 
