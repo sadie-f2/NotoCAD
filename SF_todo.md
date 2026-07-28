@@ -358,6 +358,29 @@ It matters as soon as DXF read lands: an R12 file records the string `BYLAYER` i
 changes what a default-constructed `EntityProps` means, so it wants doing deliberately
 rather than in passing.
 
+## Pick cycling is missing
+
+Reported from use: three identical lines at the same place, and a single click only
+ever selects one of them.
+
+That much is correct — AutoCAD picks the topmost and so does `pick_entity`, which walks
+the drawing order backwards and returns the first hit. What is missing is the way to
+reach the others: **Ctrl+click cycling** through coincident candidates. The comment in
+`pick.hpp` anticipated it ("nearest-wins would make pick cycling incoherent once it
+exists") and it was never built.
+
+The confusing part is not the single selection but what a second click does: it
+re-picks the same entity, `SelectionSet::add` dedupes it, and the count stays at 1 — so
+it reads as the click having been ignored.
+
+*Workaround today:* a crossing window catches all three, since `select_by_region` walks
+every entity rather than stopping at the first hit.
+
+*What it needs:* `pick_entity` returns one result; cycling wants all candidates within
+the pick box, ordered topmost-first, plus somewhere to remember which one was offered
+last so the next Ctrl+click moves on. The search itself is a small change —
+`pick_entity` already visits them all and simply returns early.
+
 ## Known issues — reported, not yet diagnosed
 
 ## Known issues — reported, not yet diagnosed
