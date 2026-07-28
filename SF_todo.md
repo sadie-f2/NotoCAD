@@ -343,6 +343,61 @@ Start here: `tangent_points()` in `osnap_derived.hpp` projects the reference poi
 the entity's plane before solving, which is exactly the step that degenerates when the
 plane is edge-on. That is a lead, not a diagnosis.
 
+## Settled: how POLYLINE and PFACE store vertices
+
+**Owned internally, one database entity per polyline or mesh.** VERTEX and SEQEND
+records are synthesised when writing DXF and consumed when reading, rather than being
+entities in their own right.
+
+The numbers that decided it, for a 20,000-face PFACE mesh stored the R12 way:
+
+- ~20,000 VERTEX entities in the map and the order vector — tens of MB before geometry
+- Undo journals a `clone()` of each one, so 20,000 retained allocations per mesh build
+- `Database::next()` is a linear scan, so an AutoLISP `entnext` walk becomes O(n²) —
+  400 million handle comparisons for one traversal
+
+The last is disqualifying on its own for the workload this project exists for.
+
+Cost: `entget` on a vertex handle is something real R12 LISP does, and it will not work.
+Synthesised vertex views — derived handles that `entnext`/`entget` can address, with
+`entmod` writing back into the parent — are the way to recover it if that turns out to
+matter, and can be added later without changing the storage.
+
+This also happens to be the direction the format went: R14's LWPOLYLINE stores vertices
+inline, exactly as this does.
+
+## R13, eventually — where today's design would bite
+
+Not being built, and it does not change the R12 target. Recorded so the choices made
+now are made with it in view.
+
+Carries over unchanged: the entity vtable, stable never-reused handles (R13 made handles
+mandatory anyway), `transform(Mat4)`, the flattening render path, grips, undo.
+
+Where it would need work:
+
+- **ELLIPSE.** `transform_frame()` in `entities.cpp` assumes uniform scale, with the
+  comment "R12 has no ELLIPSE entity, so a non-uniform scale cannot be represented and
+  is approximated by the X-axis factor". R13 has one, so that approximation becomes a
+  wrong answer rather than the only available one. The comment already marks the spot.
+- **SPLINE.** A new entity type; the `draw()`-to-polylines interface handles it with no
+  structural change, since everything already flattens.
+- **DXF versioning.** The writer is R12-only and unversioned. R13's format differs
+  enough that the writer needs a version concept rather than a flag.
+- **Solids.** A real kernel (OCCT or similar) behind an `Entity` whose `draw()` emits
+  edges. The vtable can host it. Accepted as possibly warranting a fresh start rather
+  than a retrofit, which is a reasonable trade for not distorting the R12 design now.
+
+## Splines — R12 has no SPLINE entity
+
+R12's splines are **polyline properties**, not a separate entity: `PEDIT` → `Spline`
+gives a quadratic or cubic B-spline approximation of the control polygon, governed by
+`SPLINETYPE` and `SPLINESEGS`, and `PEDIT` → `Fit` gives the curve-fit variant. Both are
+a flag on the polyline plus a tessellation rule, so they belong with PLINE in phase 7
+and cost nothing structurally.
+
+The NURBS `SPLINE` entity is R13, and so is excluded today — see the R13 note above.
+
 ## Open architectural questions
 
 Recorded so they get decided rather than drifted into.

@@ -167,9 +167,20 @@ including ROTATE3D; ruled and lofted surfaces (RULESURF, TABSURF, REVSURF, EDGES
 PFACE polyface meshes — the mechanism for pulling external analysis results back in
 for visualisation via LISP-driven `entmake`.
 
-**Out:** solid modeling kernel (ACIS/OCCT) — not planned. Grid snap (SNAP/F9) — later,
-rarely used. Dynamic blocks, MTEXT, associative dimensioning, ActiveX/.NET, ribbon UI,
-cloud/collaboration — all post-R12/R14, excluded by definition.
+**Out, for now:** grid snap (SNAP/F9) — later, rarely used. Dynamic blocks, ActiveX/.NET,
+ribbon UI, cloud/collaboration — excluded by definition.
+
+**R13 is a stated future direction**, including a solid modeling kernel. That is not
+being built and does not change the R12 target, but it does mean the design should
+avoid showstoppers. The places it would actually bite are recorded in `SF_todo.md`
+rather than pre-solved here; the entity vtable, stable handles and `transform(Mat4)`
+already carry over, and a solids kernel is accepted as possibly warranting a fresh
+start rather than being retrofitted.
+
+**Text and dimensions are deferred, deliberately and separately.** TEXT exists as an
+entity — geometry, DXF, snaps — so DXF read cannot silently destroy content, but is
+drawn as a placeholder until the font question is settled. Dimensioning is not built at
+all; R12's are non-associative and are blocks, so they cost nothing to defer.
 
 ## Build
 
