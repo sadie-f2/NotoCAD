@@ -121,6 +121,32 @@ TEST_CASE("osnap search: the aperture selects the entity, not the snap point") {
     // Off the line entirely: the entity is not in the aperture set, so it
     // offers nothing at all.
     CHECK(!osnap_search(db, v, at(100, 40), query(kOsnapEndpoint, 100, 40)).valid);
+
+    // But off the *end* of the line, within the aperture of the endpoint
+    // itself, does find it -- approaching an endpoint from beyond the end is
+    // how you reach for it when the line is short.
+    const OsnapHit past_end = osnap_search(db, v, at(-4, 0), query(kOsnapEndpoint, -4, 0));
+    CHECK(past_end.valid);
+    CHECK_VEC(past_end.pos, 0.0, 0.0, 0.0, 1e-9);
+}
+
+TEST_CASE("osnap search: an arc offers its centre from the arc, and from the centre") {
+    Database db;
+    // Quarter arc in the first quadrant, radius 100.
+    db.add(std::make_unique<Arc>(Vec3{0, 0, 0}, 100.0, 0.0, 1.5707963267948966));
+    const Viewport v = plan_800x600();
+
+    // From a point on the arc itself.
+    const OsnapHit from_curve =
+        osnap_search(db, v, at(70.71, 70.71), query(kOsnapCenter, 70.71, 70.71));
+    CHECK(from_curve.valid);
+    CHECK(from_curve.type == OsnapType::Center);
+    CHECK_VEC(from_curve.pos, 0.0, 0.0, 0.0, 1e-6);
+
+    // And from the centre, where the arc has no geometry at all.
+    const OsnapHit from_centre = osnap_search(db, v, at(0, 0), query(kOsnapCenter, 0, 0));
+    CHECK(from_centre.valid);
+    CHECK(from_centre.type == OsnapType::Center);
 }
 
 TEST_CASE("osnap search: a discrete snap beats a continuous one") {
@@ -192,9 +218,18 @@ TEST_CASE("osnap search: a circle's centre and quadrants") {
     CHECK(cen.entity == h);
     CHECK_VEC(cen.pos, 0.0, 0.0, 0.0, 1e-9);
 
-    // Hovering the middle of the circle finds nothing: there is no geometry
-    // there, so the circle is not in the aperture set.
-    CHECK(!osnap_search(db, v, at(2, 0), query(kOsnapCenter, 2, 0)).valid);
+    // And hovering the centre itself also finds it. There is no geometry there
+    // -- a circle is drawn only at its rim -- so this only works because a snap
+    // point under the aperture brings its entity into the set too. Reaching for
+    // CEN by pointing at the middle of the circle is the obvious thing to do.
+    const OsnapHit from_middle = osnap_search(db, v, at(2, 0), query(kOsnapCenter, 2, 0));
+    CHECK(from_middle.valid);
+    CHECK(from_middle.type == OsnapType::Center);
+    CHECK_VEC(from_middle.pos, 0.0, 0.0, 0.0, 1e-9);
+
+    // Well inside the circle but nowhere near either the rim or the centre:
+    // nothing, because neither route into the aperture set applies.
+    CHECK(!osnap_search(db, v, at(50, 0), query(kOsnapCenter, 50, 0)).valid);
 
     const OsnapHit qua = osnap_search(db, v, at(98, 0), query(kOsnapQuadrant, 98, 0));
     CHECK(qua.valid);

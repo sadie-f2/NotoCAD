@@ -13,15 +13,18 @@ using SetStatus = Sysvars::SetStatus;
 
 TEST_CASE("sysvar: defaults") {
     Sysvars sv;
-    // 53 = END|CEN|QUA|INT. R12 ships 0; we do not, because there is no OSNAP
+    // 37 = END|CEN|INT. R12 ships 0; we do not, because there is no OSNAP
     // command or status line yet to turn snapping on with.
-    CHECK(sv.get_int(Sysvar::OsMode) == 53);
-    CHECK(sv.get_int(Sysvar::OsMode) ==
-          (kOsnapEndpoint | kOsnapCenter | kOsnapQuadrant | kOsnapIntersection));
-    // Deliberately absent: MID competes with END all along a line, and NEA
-    // matches everywhere.
-    CHECK(!osnap_enabled(static_cast<OsnapMask>(sv.get_int(Sysvar::OsMode)), OsnapType::Midpoint));
-    CHECK(!osnap_enabled(static_cast<OsnapMask>(sv.get_int(Sysvar::OsMode)), OsnapType::Nearest));
+    CHECK(sv.get_int(Sysvar::OsMode) == 37);
+    CHECK(sv.get_int(Sysvar::OsMode) == (kOsnapEndpoint | kOsnapCenter | kOsnapIntersection));
+
+    // Deliberately absent, each for its own reason: MID competes with END all
+    // along a line, NEA matches everywhere, and QUA sits on every circle's rim
+    // where it beats CEN on distance. All three are one-shot override material.
+    const OsnapMask m = static_cast<OsnapMask>(sv.get_int(Sysvar::OsMode));
+    CHECK(!osnap_enabled(m, OsnapType::Midpoint));
+    CHECK(!osnap_enabled(m, OsnapType::Nearest));
+    CHECK(!osnap_enabled(m, OsnapType::Quadrant));
     CHECK(sv.get_int(Sysvar::PickBox) == 3);
     CHECK(sv.get_int(Sysvar::Aperture) == 10);
 }
@@ -85,7 +88,7 @@ TEST_CASE("sysvar: type mismatch is rejected") {
 
     // A real is not silently truncated into an integer variable.
     CHECK(sv.set("OSMODE", SysvarValue::of_real(47.0)) == SetStatus::WrongType);
-    CHECK(sv.get_int(Sysvar::OsMode) == 53);
+    CHECK(sv.get_int(Sysvar::OsMode) == 37);
 
     CHECK(sv.set_real(Sysvar::OsMode, 1.0) == SetStatus::WrongType);
     CHECK(sv.set_string(Sysvar::OsMode, "x") == SetStatus::WrongType);
@@ -110,13 +113,13 @@ TEST_CASE("sysvar: reset_drawing_vars leaves configuration alone") {
     sv.reset_drawing_vars();
 
     // OSMODE belongs to the drawing; PICKBOX follows the installation.
-    CHECK(sv.get_int(Sysvar::OsMode) == 53);
+    CHECK(sv.get_int(Sysvar::OsMode) == 37);
     CHECK(sv.get_int(Sysvar::PickBox) == 7);
 }
 
 TEST_CASE("sysvar: a database starts with defaults and is mutable") {
     Database db;
-    CHECK(db.sysvars().get_int(Sysvar::OsMode) == 53);
+    CHECK(db.sysvars().get_int(Sysvar::OsMode) == 37);
     CHECK(db.sysvars().set_int(Sysvar::OsMode, 33) == SetStatus::Ok);
 
     const Database& cdb = db;

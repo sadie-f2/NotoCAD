@@ -15,13 +15,20 @@
 // value on the entity vtable, and provenance lives in OsnapHit instead.
 //
 // THE APERTURE SELECTS THE ENTITY, NOT THE SNAP POINT. This is the rule the
-// whole thing turns on. An entity whose geometry passes under the aperture box
-// offers *all* of its enabled snap points, however far from the cursor they
-// land; an entity the box misses offers none. So touching a line anywhere with
-// END running snaps to its nearer end, and touching a circle's rim with CEN
-// running snaps to its centre. Filtering candidate points by distance instead
-// would mean having to be on a snap already in order to find it, which makes
-// END useless on anything longer than the aperture.
+// whole thing turns on. An entity the aperture box catches offers *all* of its
+// enabled snap points, however far from the cursor they land; an entity the box
+// misses offers none. Filtering candidate points by distance instead would mean
+// having to be on a snap already in order to find it, which makes END useless
+// on anything longer than the aperture.
+//
+// Two ways for the box to catch an entity, and both are needed:
+//
+//   1. It touches the entity's drawn geometry -- hover anywhere along a line
+//      and get its nearer end; hover a circle's rim and get its centre.
+//   2. It touches one of the entity's enabled snap points. A circle's centre
+//      has no geometry at it, so rule 1 alone would mean pointing at the middle
+//      of a circle found nothing -- which is exactly where you reach for CEN.
+//      Same for an endpoint approached from beyond the end of a short line.
 //
 // RANKING. Not simply nearest-wins, which does not work. NEAREST is within a
 // pixel of the cursor by definition and PERPENDICULAR usually is too, so a

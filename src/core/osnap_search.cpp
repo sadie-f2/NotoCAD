@@ -150,16 +150,25 @@ void osnap_candidates(const Database& db, const Viewport& vp, const ScreenPoint&
     out.clear();
     if (q.mask == kOsnapNone) return;  // the default state of a drawing
 
-    // The aperture set: visible entities the aperture box actually touches.
-    // Measured against the entity's geometry, not its bounding box -- a bbox
-    // hit would put every snap of a large tilted circle in play whenever the
-    // cursor was anywhere near its extent, including nowhere near the curve.
+    // The aperture set, and it is the whole selection step: everything in it
+    // offers all of its enabled snap points at any distance, everything outside
+    // offers none. Two ways in, and both are needed:
     //
-    // This set is the whole selection step. Everything it contains offers all
-    // of its enabled snap points, at any distance; everything it excludes
-    // offers none. Gathered backwards so the cap keeps the topmost entities,
-    // which are the ones being pointed at.
+    //   1. The aperture touches the entity's drawn geometry. This is what makes
+    //      "hover anywhere on a line, get its nearer end" work, and what gets
+    //      you a circle's centre from its rim.
+    //   2. The aperture touches one of the entity's enabled snap points. A
+    //      circle's centre has no geometry at it, so rule 1 alone would mean
+    //      hovering the middle of a circle found nothing -- which is exactly
+    //      where you reach for CEN. Same for an endpoint approached from off
+    //      the end of the line.
+    //
+    // Measured against geometry rather than the bounding box, since a bbox hit
+    // would put every snap of a large tilted circle in play whenever the cursor
+    // was near its extent and nowhere near the curve. Gathered backwards so the
+    // cap keeps the topmost entities, which are the ones being pointed at.
     std::vector<Candidate> set;
+    std::vector<OsnapPoint> scratch;
     const std::vector<Handle>& order = db.order();
     for (std::size_t i = order.size(); i-- > 0 && set.size() < kMaxApertureEntities;) {
         const Entity* e = db.get(order[i]);
@@ -168,14 +177,26 @@ void osnap_candidates(const Database& db, const Viewport& vp, const ScreenPoint&
         if (!entity_near_cursor(*e, vp, cursor, q.aperture_px)) continue;  // broad phase
 
         double d = 0.0;
-        if (!entity_pick_distance(*e, vp, cursor, &d)) continue;
-        if (d > q.aperture_px) continue;
+        bool in_set = entity_pick_distance(*e, vp, cursor, &d) && d <= q.aperture_px;
+
+        if (!in_set) {
+            scratch.clear();
+            e->osnap_points(scratch);
+            for (const OsnapPoint& p : scratch) {
+                if (!osnap_enabled(q.mask, p.type)) continue;
+                double pd = 0.0;
+                if (screen_distance(vp, cursor, p.pos, &pd) && pd <= q.aperture_px) {
+                    in_set = true;
+                    break;
+                }
+            }
+        }
+        if (!in_set) continue;
 
         set.push_back(Candidate{e, order[i]});
     }
     if (set.empty()) return;
 
-    std::vector<OsnapPoint> scratch;
     for (const Candidate& c : set) {
         collect_static(out, c, vp, cursor, q, scratch);
         collect_derived(out, c, vp, cursor, q);
