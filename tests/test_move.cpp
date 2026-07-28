@@ -195,3 +195,93 @@ TEST_CASE("move: a crossing box selects and then moves") {
     CHECK_VEC(line_at(db, 0)->start(), 0.0, -20.0, 0.0, 1e-12);
     CHECK_VEC(line_at(db, 1)->start(), 0.0, 100.0, 0.0, 1e-12);
 }
+
+TEST_CASE("copy: Multiple places one at each point until Enter") {
+    Database db;
+    CommandEngine engine(db);
+    const Handle h = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+
+    engine.begin(make_command("COPY"));
+    engine.supply(InputValue::of_entity(h));
+    engine.supply(InputValue::none());
+    engine.supply(InputValue::of_keyword("MULTIPLE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));  // base
+
+    engine.supply(InputValue::of_point({10, 0, 0}));
+    CHECK(db.size() == 2);
+    CHECK(engine.active());  // still asking
+
+    engine.supply(InputValue::of_point({20, 0, 0}));
+    engine.supply(InputValue::of_point({30, 0, 0}));
+    CHECK(db.size() == 4);
+
+    engine.supply(InputValue::none());
+    CHECK(engine.status() == EngineStatus::Finished);
+    CHECK(engine.message() == "3 copied");
+}
+
+TEST_CASE("copy: Multiple measures every copy from the same base") {
+    Database db;
+    CommandEngine engine(db);
+    const Handle h = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+
+    engine.begin(make_command("COPY"));
+    engine.supply(InputValue::of_entity(h));
+    engine.supply(InputValue::none());
+    engine.supply(InputValue::of_keyword("MULTIPLE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({10, 0, 0}));
+    engine.supply(InputValue::of_point({20, 0, 0}));
+    engine.supply(InputValue::none());
+
+    // Copies fan out from the base rather than chaining off each other: the
+    // second lands at 20, not at 30.
+    CHECK_VEC(line_at(db, 1)->start(), 10.0, 0.0, 0.0, 1e-12);
+    CHECK_VEC(line_at(db, 2)->start(), 20.0, 0.0, 0.0, 1e-12);
+}
+
+TEST_CASE("copy: Multiple is the whole command, so one UNDO takes them all") {
+    Database db;
+    CommandEngine engine(db);
+    const Handle h = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+
+    engine.begin(make_command("COPY"));
+    engine.supply(InputValue::of_entity(h));
+    engine.supply(InputValue::none());
+    engine.supply(InputValue::of_keyword("MULTIPLE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({10, 0, 0}));
+    engine.supply(InputValue::of_point({20, 0, 0}));
+    engine.supply(InputValue::none());
+    CHECK(db.size() == 3);
+
+    CHECK(db.journal().undo(db));
+    CHECK(db.size() == 1);
+}
+
+TEST_CASE("copy: Enter straight after the base still means <displacement>") {
+    Database db;
+    CommandEngine engine(db);
+    const Handle h = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+
+    // Without Multiple, Enter keeps its R12 meaning rather than ending early.
+    engine.begin(make_command("COPY"));
+    engine.supply(InputValue::of_entity(h));
+    engine.supply(InputValue::none());
+    engine.supply(InputValue::of_point({5, 5, 0}));
+    engine.supply(InputValue::none());
+    CHECK(db.size() == 2);
+    CHECK_VEC(line_at(db, 1)->start(), 5.0, 5.0, 0.0, 1e-12);
+}
+
+TEST_CASE("move: MOVE offers no Multiple") {
+    Database db;
+    CommandEngine engine(db);
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+
+    engine.begin(make_command("MOVE"));
+    engine.supply(InputValue::of_keyword("ALL"));
+    engine.supply(InputValue::none());
+    // Moving something to several places at once is not a thing.
+    CHECK(engine.prompt().keywords.empty());
+}

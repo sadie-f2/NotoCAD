@@ -366,6 +366,23 @@ Step RedoCommand::next(CommandContext&, const InputValue&) {
 
 Step MoveCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
 
+namespace {
+
+// Enter is allowed here and means two different things depending on the mode --
+// end the command in Multiple, or "<displacement>" otherwise. The caller decides
+// which; this only has to permit it.
+Prompt displacement_prompt(const Vec3& base) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Second point of displacement";
+    p.allow_empty = true;
+    p.base = base;
+    p.has_base = true;
+    return p;
+}
+
+}  // namespace
+
 Step MoveCommand::apply(CommandContext& ctx, const Vec3& delta) {
     const Mat4 m = Mat4::translation(delta);
 
@@ -391,6 +408,7 @@ Step MoveCommand::apply(CommandContext& ctx, const Vec3& delta) {
         ++n;
     }
 
+    placed_ += n;
     return Step::done(std::to_string(n) + (copy_ ? " copied" : " moved"));
 }
 
@@ -411,29 +429,47 @@ Step MoveCommand::next(CommandContext& ctx, const InputValue& value) {
             Prompt p;
             p.kind = PromptKind::Point;
             p.message = "Base point or displacement";
+            // R12 offers Multiple on COPY only: moving something to several
+            // places at once is not a thing.
+            if (copy_) p.keywords.push_back("Multiple");
             return Step::ask(p);
         }
 
         case State::Base: {
+            if (copy_ && keyword_is(value, "MULTIPLE")) {
+                multiple_ = true;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Base point";
+                return Step::ask(p);
+            }
             if (value.kind != InputKind::Point) return Step::failed("a point is required");
             base_ = value.point;
             state_ = State::Displacement;
-
-            Prompt p;
-            p.kind = PromptKind::Point;
-            p.message = "Second point of displacement";
-            p.allow_empty = true;  // Enter means the base point was the vector
-            p.base = base_;
-            p.has_base = true;
-            return Step::ask(p);
+            return Step::ask(displacement_prompt(base_));
         }
 
         case State::Displacement: {
-            // R12's "<displacement>": Enter here means the first point was the
-            // vector itself, measured from the origin.
-            if (value.kind == InputKind::None) return apply(ctx, base_);
+            if (value.kind == InputKind::None) {
+                // Two readings of Enter, and the mode decides which. In Multiple
+                // mode it ends the command; otherwise it is R12's
+                // "<displacement>", meaning the base point was the vector
+                // itself, measured from the origin.
+                if (multiple_) {
+                    return Step::done(std::to_string(placed_) + " copied");
+                }
+                return apply(ctx, base_);
+            }
             if (value.kind != InputKind::Point) return Step::failed("a point is required");
-            return apply(ctx, value.point - base_);
+
+            if (!multiple_) return apply(ctx, value.point - base_);
+
+            // Multiple: place one and ask again, always measuring from the same
+            // base point, so the copies fan out from where you started rather
+            // than chaining off each other.
+            const Step placed = apply(ctx, value.point - base_);
+            if (placed.kind != StepKind::Done) return placed;
+            return Step::ask(displacement_prompt(base_));
         }
     }
     return Step::failed("internal state error");

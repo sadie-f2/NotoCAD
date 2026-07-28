@@ -125,6 +125,11 @@ private:
 // The second prompt takes R12's "<displacement>" shortcut: Enter at the second
 // point means the first point WAS the displacement vector, measured from the
 // origin. It is a real R12 idiom and costs one branch.
+//
+// COPY also offers R12's Multiple: keep placing copies from the same base point
+// until Enter. Modern AutoCAD made that the default and added a Mode option to
+// get single-copy back; R12 puts it one keystroke away instead, and R12 is what
+// this targets. Making it the default is a one-line change in start().
 class MoveCommand : public Command {
 public:
     explicit MoveCommand(bool copy = false) : copy_(copy) {}
@@ -142,6 +147,8 @@ private:
     State state_{State::Selecting};
     SelectionPrompter select_;
     Vec3 base_{};
+    bool multiple_{false};
+    std::size_t placed_{0};
 };
 
 // DXFOUT: prompt for a file name and write the drawing. In R12 this is a
