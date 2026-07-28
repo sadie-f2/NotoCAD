@@ -14,6 +14,15 @@
 // Nothing is added to OsnapPoint to make this work: it stays a pure geometry
 // value on the entity vtable, and provenance lives in OsnapHit instead.
 //
+// THE APERTURE SELECTS THE ENTITY, NOT THE SNAP POINT. This is the rule the
+// whole thing turns on. An entity whose geometry passes under the aperture box
+// offers *all* of its enabled snap points, however far from the cursor they
+// land; an entity the box misses offers none. So touching a line anywhere with
+// END running snaps to its nearer end, and touching a circle's rim with CEN
+// running snaps to its centre. Filtering candidate points by distance instead
+// would mean having to be on a snap already in order to find it, which makes
+// END useless on anything longer than the aperture.
+//
 // RANKING. Not simply nearest-wins, which does not work. NEAREST is within a
 // pixel of the cursor by definition and PERPENDICULAR usually is too, so a
 // plain distance sort would let the continuous snaps bury ENDPOINT and
@@ -60,6 +69,7 @@ struct OsnapQuery {
     OsnapMask mask{kOsnapNone};
 
     // APERTURE, in pixels, as a half-height: the box is twice this on a side.
+    // It bounds which entities are considered, not which points -- see above.
     double aperture_px{10.0};
 
     // Where the cursor unprojected to. PER, TAN and NEA are all defined
@@ -86,7 +96,8 @@ int osnap_priority(OsnapType t);
 // geometry. Discrete snaps beat continuous ones regardless of distance.
 bool osnap_is_discrete(OsnapType t);
 
-// Every candidate within the aperture, best first.
+// Every candidate offered by the entities under the aperture, best first.
+// Their distances are not bounded by aperture_px.
 void osnap_candidates(const Database& db, const Viewport& vp, const ScreenPoint& cursor,
                       const OsnapQuery& q, std::vector<OsnapHit>& out);
 

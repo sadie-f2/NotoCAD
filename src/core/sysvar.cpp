@@ -15,8 +15,14 @@ namespace {
 // PICKBOX and APERTURE are half-heights in pixels -- the box R12 draws is twice
 // the value on a side -- and both live in the configuration rather than the
 // drawing. OSMODE is drawing state and is written to the DXF header as $OSMODE.
+// OSMODE 53 = END|CEN|QUA|INT. R12 ships with 0 -- no running snap at all --
+// but that is a decision made when a status line and an OSNAP command existed
+// to change it, and neither does here yet. These four are the ones that do real
+// drafting work and rarely fight each other. MID is left out on purpose: it
+// competes with END all along a line for no gain. NEA is left out because it
+// matches everywhere and would bury everything else.
 constexpr SysvarDef kTable[] = {
-    {"OSMODE", Sysvar::OsMode, SysvarType::Int, false, true, 0, 0, 2047, 0.0, "", {}},
+    {"OSMODE", Sysvar::OsMode, SysvarType::Int, false, true, 53, 0, 2047, 0.0, "", {}},
     {"PICKBOX", Sysvar::PickBox, SysvarType::Int, false, false, 3, 0, 50, 0.0, "", {}},
     {"APERTURE", Sysvar::Aperture, SysvarType::Int, false, false, 10, 1, 50, 0.0, "", {}},
 };

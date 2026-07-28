@@ -29,11 +29,16 @@ bool screen_distance(const Viewport& vp, const ScreenPoint& cursor, const Vec3& 
     return true;
 }
 
+// Note what is NOT here: a distance filter. The aperture chose the entity; a
+// snap point it produced is a candidate however far from the cursor it lands.
+// That is what makes "hover anywhere on a line with END running and get the
+// nearer end" work, and it is the same rule that snaps to a circle's centre
+// from its rim. Filtering points by distance instead would mean you had to be
+// on the snap already in order to find it.
 void add_hit(std::vector<OsnapHit>& out, const Viewport& vp, const ScreenPoint& cursor,
-             double aperture_px, const Vec3& pos, OsnapType type, Handle a, Handle b) {
+             const Vec3& pos, OsnapType type, Handle a, Handle b) {
     double d = 0.0;
     if (!screen_distance(vp, cursor, pos, &d)) return;
-    if (d > aperture_px) return;
 
     OsnapHit h;
     h.pos = pos;
@@ -72,7 +77,7 @@ void collect_static(std::vector<OsnapHit>& out, const Candidate& c, const Viewpo
     c.entity->osnap_points(scratch);
     for (const OsnapPoint& p : scratch) {
         if (!osnap_enabled(q.mask, p.type)) continue;
-        add_hit(out, vp, cursor, q.aperture_px, p.pos, p.type, c.handle, kNullHandle);
+        add_hit(out, vp, cursor, p.pos, p.type, c.handle, kNullHandle);
     }
 }
 
@@ -82,25 +87,23 @@ void collect_derived(std::vector<OsnapHit>& out, const Candidate& c, const Viewp
 
     Vec3 p{};
     if (osnap_enabled(q.mask, OsnapType::Nearest) && nearest_point(*c.entity, q.reference, &p)) {
-        add_hit(out, vp, cursor, q.aperture_px, p, OsnapType::Nearest, c.handle, kNullHandle);
+        add_hit(out, vp, cursor, p, OsnapType::Nearest, c.handle, kNullHandle);
     }
     if (osnap_enabled(q.mask, OsnapType::Perpendicular) &&
         perpendicular_point(*c.entity, q.reference, &p)) {
-        add_hit(out, vp, cursor, q.aperture_px, p, OsnapType::Perpendicular, c.handle,
-                kNullHandle);
+        add_hit(out, vp, cursor, p, OsnapType::Perpendicular, c.handle, kNullHandle);
     }
     if (osnap_enabled(q.mask, OsnapType::Tangent)) {
         Vec3 tan[kMaxTangents];
         const int n = tangent_points(*c.entity, q.reference, tan);
         for (int i = 0; i < n; ++i) {
-            add_hit(out, vp, cursor, q.aperture_px, tan[i], OsnapType::Tangent, c.handle,
-                    kNullHandle);
+            add_hit(out, vp, cursor, tan[i], OsnapType::Tangent, c.handle, kNullHandle);
         }
     }
 }
 
 void collect_intersections(std::vector<OsnapHit>& out, const std::vector<Candidate>& set,
-                           const Viewport& vp, const ScreenPoint& cursor, const OsnapQuery& q) {
+                           const Viewport& vp, const ScreenPoint& cursor) {
     Vec3 pts[kMaxIntersections];
     for (std::size_t i = 0; i < set.size(); ++i) {
         for (std::size_t j = i + 1; j < set.size(); ++j) {
@@ -108,8 +111,8 @@ void collect_intersections(std::vector<OsnapHit>& out, const std::vector<Candida
             for (int k = 0; k < n; ++k) {
                 // Both handles recorded, in drawing order, so the pair is
                 // reported the same way whichever side it was found from.
-                add_hit(out, vp, cursor, q.aperture_px, pts[k], OsnapType::Intersection,
-                        set[i].handle, set[j].handle);
+                add_hit(out, vp, cursor, pts[k], OsnapType::Intersection, set[i].handle,
+                        set[j].handle);
             }
         }
     }
@@ -147,8 +150,14 @@ void osnap_candidates(const Database& db, const Viewport& vp, const ScreenPoint&
     out.clear();
     if (q.mask == kOsnapNone) return;  // the default state of a drawing
 
-    // The aperture set: visible entities whose padded screen box contains the
-    // cursor. Gathered backwards so that capping keeps the topmost entities,
+    // The aperture set: visible entities the aperture box actually touches.
+    // Measured against the entity's geometry, not its bounding box -- a bbox
+    // hit would put every snap of a large tilted circle in play whenever the
+    // cursor was anywhere near its extent, including nowhere near the curve.
+    //
+    // This set is the whole selection step. Everything it contains offers all
+    // of its enabled snap points, at any distance; everything it excludes
+    // offers none. Gathered backwards so the cap keeps the topmost entities,
     // which are the ones being pointed at.
     std::vector<Candidate> set;
     const std::vector<Handle>& order = db.order();
@@ -156,7 +165,12 @@ void osnap_candidates(const Database& db, const Viewport& vp, const ScreenPoint&
         const Entity* e = db.get(order[i]);
         if (!e) continue;
         if (!entity_visible(db, *e)) continue;
-        if (!entity_near_cursor(*e, vp, cursor, q.aperture_px)) continue;
+        if (!entity_near_cursor(*e, vp, cursor, q.aperture_px)) continue;  // broad phase
+
+        double d = 0.0;
+        if (!entity_pick_distance(*e, vp, cursor, &d)) continue;
+        if (d > q.aperture_px) continue;
+
         set.push_back(Candidate{e, order[i]});
     }
     if (set.empty()) return;
@@ -168,7 +182,7 @@ void osnap_candidates(const Database& db, const Viewport& vp, const ScreenPoint&
     }
 
     if (osnap_enabled(q.mask, OsnapType::Intersection)) {
-        collect_intersections(out, set, vp, cursor, q);
+        collect_intersections(out, set, vp, cursor);
     }
 
     std::sort(out.begin(), out.end(), better);

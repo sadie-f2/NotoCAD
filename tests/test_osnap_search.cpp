@@ -90,9 +90,37 @@ TEST_CASE("osnap search: the mask filters, even past a nearer snap") {
     CHECK(mid.type == OsnapType::Midpoint);
     CHECK_VEC(mid.pos, 50.0, 0.0, 0.0, 1e-9);
 
-    // With only END enabled, the midpoint under the cursor is invisible and
-    // nothing is in range -- the endpoints are fifty pixels away.
-    CHECK(!osnap_search(db, v, at(50, 0), query(kOsnapEndpoint, 50, 0)).valid);
+    // With only END enabled the midpoint is invisible, but the cursor is still
+    // on the line, so the nearer endpoint comes back -- forty pixels away and
+    // well outside the aperture. The aperture chose the entity; the mask chose
+    // which of its points.
+    const OsnapHit end = osnap_search(db, v, at(40, 0), query(kOsnapEndpoint, 40, 0));
+    CHECK(end.valid);
+    CHECK(end.type == OsnapType::Endpoint);
+    CHECK_VEC(end.pos, 0.0, 0.0, 0.0, 1e-9);
+    CHECK_NEAR(end.distance_px, 40.0, 1e-9);
+}
+
+TEST_CASE("osnap search: the aperture selects the entity, not the snap point") {
+    Database db;
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1000, 0, 0}));
+    const Viewport v = plan_800x600();
+
+    // Touching the line anywhere with END running finds the nearer end, however
+    // far away it is. Filtering candidate points by distance instead would mean
+    // having to be on the snap already in order to find it, which makes END
+    // useless on anything longer than the aperture.
+    const OsnapHit near_start = osnap_search(db, v, at(100, 0), query(kOsnapEndpoint, 100, 0));
+    CHECK(near_start.valid);
+    CHECK_VEC(near_start.pos, 0.0, 0.0, 0.0, 1e-9);
+
+    const OsnapHit near_end = osnap_search(db, v, at(900, 0), query(kOsnapEndpoint, 900, 0));
+    CHECK(near_end.valid);
+    CHECK_VEC(near_end.pos, 1000.0, 0.0, 0.0, 1e-9);
+
+    // Off the line entirely: the entity is not in the aperture set, so it
+    // offers nothing at all.
+    CHECK(!osnap_search(db, v, at(100, 40), query(kOsnapEndpoint, 100, 40)).valid);
 }
 
 TEST_CASE("osnap search: a discrete snap beats a continuous one") {
@@ -122,13 +150,21 @@ TEST_CASE("osnap search: a continuous snap wins when no discrete one is in range
     const Handle h = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{100, 0, 0}));
     const Viewport v = plan_800x600();
 
-    // Mid-span, far from either end and off the midpoint.
-    const OsnapHit hit =
-        osnap_search(db, v, at(30, 0), query(kOsnapEndpoint | kOsnapNearest, 30, 0));
+    // With only NEA enabled there is no discrete candidate at all.
+    const OsnapHit hit = osnap_search(db, v, at(30, 0), query(kOsnapNearest, 30, 0));
     CHECK(hit.valid);
     CHECK(hit.type == OsnapType::Nearest);
     CHECK(hit.entity == h);
     CHECK_VEC(hit.pos, 30.0, 0.0, 0.0, 1e-9);
+
+    // Add END and the endpoint takes it, even though NEAREST is zero pixels
+    // away and the endpoint is thirty. This is why NEA is not in the default
+    // OSMODE: with it on, it matches everywhere, and only the tier rule keeps
+    // it from burying everything else.
+    const OsnapHit with_end =
+        osnap_search(db, v, at(30, 0), query(kOsnapEndpoint | kOsnapNearest, 30, 0));
+    CHECK(with_end.valid);
+    CHECK(with_end.type == OsnapType::Endpoint);
 }
 
 TEST_CASE("osnap search: the aperture bounds what is considered") {
@@ -148,11 +184,17 @@ TEST_CASE("osnap search: a circle's centre and quadrants") {
     const Handle h = db.add(std::make_unique<Circle>(Vec3{0, 0, 0}, 100.0));
     const Viewport v = plan_800x600();
 
-    const OsnapHit cen = osnap_search(db, v, at(2, 0), query(kOsnapCenter, 2, 0));
+    // Hovering the rim snaps to the centre, a hundred pixels away. Same rule as
+    // the line's endpoints: the aperture has to touch the circle, not the point.
+    const OsnapHit cen = osnap_search(db, v, at(100, 0), query(kOsnapCenter, 100, 0));
     CHECK(cen.valid);
     CHECK(cen.type == OsnapType::Center);
     CHECK(cen.entity == h);
     CHECK_VEC(cen.pos, 0.0, 0.0, 0.0, 1e-9);
+
+    // Hovering the middle of the circle finds nothing: there is no geometry
+    // there, so the circle is not in the aperture set.
+    CHECK(!osnap_search(db, v, at(2, 0), query(kOsnapCenter, 2, 0)).valid);
 
     const OsnapHit qua = osnap_search(db, v, at(98, 0), query(kOsnapQuadrant, 98, 0));
     CHECK(qua.valid);
@@ -254,10 +296,11 @@ TEST_CASE("osnap search: candidates come back sorted, best first") {
         }
     }
 
-    // And every one of them is genuinely inside the aperture.
+    // Every candidate is valid. Note there is deliberately no distance bound
+    // here: candidates come from entities the aperture touched, and their snap
+    // points may be arbitrarily far from the cursor.
     for (const OsnapHit& h : all) {
         CHECK(h.valid);
-        CHECK(h.distance_px <= 40.0);
     }
 }
 

@@ -44,7 +44,7 @@ struct Fixture {
 
 TEST_CASE("getvar: reads the R12 defaults") {
     Fixture f;
-    CHECK(f.eval("(getvar \"OSMODE\")") == "0");
+    CHECK(f.eval("(getvar \"OSMODE\")") == "53");
     CHECK(f.eval("(getvar \"PICKBOX\")") == "3");
     CHECK(f.eval("(getvar \"APERTURE\")") == "10");
 }
@@ -90,7 +90,7 @@ TEST_CASE("setvar: a real is not truncated into an integer variable") {
     Fixture f;
     CHECK(f.failed("(setvar \"OSMODE\" 47.5)"));
     CHECK(f.failed("(setvar \"OSMODE\" \"47\")"));
-    CHECK(f.db.sysvars().get_int(Sysvar::OsMode) == 0);
+    CHECK(f.db.sysvars().get_int(Sysvar::OsMode) == 53);
 }
 
 TEST_CASE("getvar and setvar: the name must be a string") {
