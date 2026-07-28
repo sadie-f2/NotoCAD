@@ -17,6 +17,7 @@
 #pragma once
 
 #include "noto/command.hpp"
+#include "noto/osnap_search.hpp"
 #include "noto/viewport.hpp"
 
 #include <QPoint>
@@ -93,6 +94,16 @@ private:
 
     void draw_rubber_band(QPainter& painter) const;
 
+    // Markers are painted here rather than through Renderer on purpose: they
+    // are screen-space and a fixed pixel size, which is the opposite of what a
+    // world-space polyline interface describes. The aperture box has always
+    // been drawn this way.
+    void draw_osnap_marker(QPainter& painter) const;
+
+    // Refreshes snap_ from the cursor position. Cheap when OSMODE is zero,
+    // which is a drawing's default state.
+    void update_osnap();
+
     const Database& db_;
     Viewport viewport_;
     CommandEngine* engine_{nullptr};
@@ -101,6 +112,11 @@ private:
     QPoint cursor_pos_;
     bool cursor_inside_{false};
     bool framed_{false};
+
+    // The snap under the cursor, or an invalid hit. Cached between the move
+    // that found it and the paint that draws it, so the search runs once per
+    // mouse move rather than once per repaint.
+    OsnapHit snap_{};
 };
 
 }  // namespace noto

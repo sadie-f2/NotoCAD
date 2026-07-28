@@ -24,9 +24,82 @@ const QColor kBackground(24, 24, 28);
 const QColor kRubberBand(180, 180, 190);
 const QColor kCrosshair(90, 90, 100);
 
+const QColor kOsnapMarker(250, 200, 60);
+
 // One wheel notch is 120 eighths of a degree; this is the zoom per notch.
 constexpr double kZoomPerNotch = 1.15;
 constexpr double kDegreesPerNotch = 120.0;
+
+// Markers do not scale with zoom: they annotate the cursor, not the drawing.
+constexpr double kMarkerHalfPx = 6.0;
+
+// R12's glyph vocabulary. The shape carries the meaning -- you learn to read
+// "square" as endpoint without reading the label -- so they must stay distinct
+// from each other at six pixels rather than merely being drawn.
+void paint_osnap_glyph(QPainter& p, OsnapType type, QPointF c, double h) {
+    const double x = c.x();
+    const double y = c.y();
+
+    switch (type) {
+        case OsnapType::Endpoint:
+            p.drawRect(QRectF(x - h, y - h, h * 2.0, h * 2.0));
+            break;
+
+        case OsnapType::Midpoint: {
+            const QPointF tri[3] = {{x, y - h}, {x - h, y + h}, {x + h, y + h}};
+            p.drawPolygon(tri, 3);
+            break;
+        }
+
+        case OsnapType::Center:
+            p.drawEllipse(QRectF(x - h, y - h, h * 2.0, h * 2.0));
+            break;
+
+        case OsnapType::Node:
+            p.drawEllipse(QRectF(x - h, y - h, h * 2.0, h * 2.0));
+            p.drawLine(QPointF(x - h, y), QPointF(x + h, y));
+            p.drawLine(QPointF(x, y - h), QPointF(x, y + h));
+            break;
+
+        case OsnapType::Quadrant: {
+            const QPointF dia[4] = {{x, y - h}, {x + h, y}, {x, y + h}, {x - h, y}};
+            p.drawPolygon(dia, 4);
+            break;
+        }
+
+        case OsnapType::Intersection:
+            p.drawLine(QPointF(x - h, y - h), QPointF(x + h, y + h));
+            p.drawLine(QPointF(x - h, y + h), QPointF(x + h, y - h));
+            break;
+
+        case OsnapType::Insert: {
+            const double s = h * 0.7;
+            p.drawRect(QRectF(x - h, y - h, s * 2.0, s * 2.0));
+            p.drawRect(QRectF(x - h + s, y - h + s, s * 2.0, s * 2.0));
+            break;
+        }
+
+        case OsnapType::Perpendicular:
+            // The right-angle mark, drawn open at the top left as R12 has it.
+            p.drawLine(QPointF(x - h, y - h), QPointF(x - h, y + h));
+            p.drawLine(QPointF(x - h, y + h), QPointF(x + h, y + h));
+            p.drawLine(QPointF(x - h, y), QPointF(x, y));
+            p.drawLine(QPointF(x, y), QPointF(x, y + h));
+            break;
+
+        case OsnapType::Tangent:
+            p.drawEllipse(QRectF(x - h, y - h * 0.6, h * 2.0, h * 1.6));
+            p.drawLine(QPointF(x - h, y - h), QPointF(x + h, y - h));
+            break;
+
+        case OsnapType::Nearest: {
+            // An hourglass: two triangles meeting at the point itself.
+            const QPointF bow[4] = {{x - h, y - h}, {x + h, y + h}, {x + h, y - h}, {x - h, y + h}};
+            p.drawPolygon(bow, 4);
+            break;
+        }
+    }
+}
 
 }  // namespace
 
@@ -110,6 +183,7 @@ void ViewportWidget::showEvent(QShowEvent* event) {
 
 void ViewportWidget::leaveEvent(QEvent* event) {
     cursor_inside_ = false;
+    snap_ = OsnapHit{};
     update();
     QWidget::leaveEvent(event);
 }
@@ -144,6 +218,44 @@ void ViewportWidget::draw_rubber_band(QPainter& painter) const {
     painter.drawLine(QPointF(base.x, base.y), QPointF(cursor.x, cursor.y));
 }
 
+void ViewportWidget::update_osnap() {
+    snap_ = OsnapHit{};
+    if (!cursor_inside_ || !wants_point()) return;
+
+    OsnapQuery q;
+    q.mask = static_cast<OsnapMask>(db_.sysvars().get_int(Sysvar::OsMode));
+    if (q.mask == kOsnapNone) return;  // the default state: costs one branch
+
+    q.aperture_px = aperture_px();
+    // The construction-plane point the cursor is over. PER, TAN and NEA are all
+    // defined relative to it, and it is the same point a click would produce.
+    q.reference = pick_point(cursor_pos_);
+    q.has_reference = true;
+
+    const ScreenPoint sp{static_cast<double>(cursor_pos_.x()),
+                         static_cast<double>(cursor_pos_.y())};
+    snap_ = osnap_search(db_, viewport_, sp, q);
+}
+
+void ViewportWidget::draw_osnap_marker(QPainter& painter) const {
+    if (!snap_.valid) return;
+
+    const ScreenPoint sp = viewport_.project(snap_.pos);
+    if (!std::isfinite(sp.x) || !std::isfinite(sp.y)) return;
+
+    QPen pen(kOsnapMarker);
+    pen.setWidth(0);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+    paint_osnap_glyph(painter, snap_.type, QPointF(sp.x, sp.y), kMarkerHalfPx);
+
+    // R12 put the active mode on the status line. There is no status line yet
+    // and no OSNAP command, so naming it beside the glyph is how you can tell
+    // which snap you are about to get.
+    painter.drawText(QPointF(sp.x + kMarkerHalfPx + 4.0, sp.y - kMarkerHalfPx - 2.0),
+                     QString::fromLatin1(osnap_name(snap_.type)));
+}
+
 void ViewportWidget::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.fillRect(rect(), kBackground);
@@ -156,6 +268,7 @@ void ViewportWidget::paintEvent(QPaintEvent*) {
     draw_database(db_, viewport_.draw_context(), renderer);
 
     draw_rubber_band(painter);
+    draw_osnap_marker(painter);
 }
 
 void ViewportWidget::mousePressEvent(QMouseEvent* event) {
@@ -196,7 +309,17 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event) {
         // Captured before supply(): afterwards the prompt is the next one, and
         // the transcript would attribute the answer to the wrong question.
         const QString asked = QString::fromStdString(engine_->prompt().text());
-        const Vec3 p = pick_point(event->pos());
+        // Refreshed rather than trusted: snap_ is otherwise only updated on
+        // movement, so a click with no intervening move -- the first click of a
+        // command, say -- could otherwise use a snap found for a previous
+        // prompt, at a position the cursor is no longer being asked about.
+        cursor_pos_ = event->pos();
+        cursor_inside_ = true;
+        update_osnap();
+
+        // The payoff for all of it: when a snap is showing, the click takes
+        // that exact point rather than wherever the cursor happened to be.
+        const Vec3 p = snap_.valid ? snap_.pos : pick_point(event->pos());
 
         // The whole point of the phase: a click is just another way to answer a
         // prompt, indistinguishable to the command from a typed coordinate.
@@ -220,7 +343,10 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event) {
     if (drag_ == Drag::None) {
         // Repaint only when something actually follows the cursor, so an idle
         // mouse over a large drawing costs nothing.
-        if (wants_pick()) update();
+        if (wants_pick()) {
+            update_osnap();
+            update();
+        }
         QWidget::mouseMoveEvent(event);
         return;
     }
