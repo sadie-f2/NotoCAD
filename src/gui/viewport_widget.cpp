@@ -223,8 +223,13 @@ void ViewportWidget::update_osnap() {
     if (!cursor_inside_ || !wants_point()) return;
 
     OsnapQuery q;
-    q.mask = static_cast<OsnapMask>(db_.sysvars().get_int(Sysvar::OsMode));
-    if (q.mask == kOsnapNone) return;  // the default state: costs one branch
+    // A typed override replaces OSMODE entirely for this one pick, rather than
+    // adding to it -- that is what makes "cen" mean cen and nothing else. An
+    // override of kOsnapNone is NON: snap to nothing, deliberately.
+    q.mask = engine_->has_osnap_override()
+                 ? engine_->osnap_override()
+                 : static_cast<OsnapMask>(db_.sysvars().get_int(Sysvar::OsMode));
+    if (q.mask == kOsnapNone) return;
 
     q.aperture_px = aperture_px();
     // The construction-plane point the cursor is over. PER, TAN and NEA are all

@@ -6,7 +6,9 @@
 #include "noto/ecs.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <numbers>
+#include <string_view>
 
 namespace noto {
 namespace {
@@ -99,6 +101,96 @@ const char* grip_kind_name(GripKind k) {
         case GripKind::Radius: return "RADIUS";
     }
     return "???";
+}
+
+namespace {
+
+struct OsnapNameRow {
+    const char* abbrev;  // what R12 shows, and what people type
+    const char* full;
+    OsnapMask bit;
+};
+
+// NON has no bit: it is the absence of every snap, and is handled by the caller
+// through the parse succeeding with an empty mask.
+constexpr OsnapNameRow kOsnapNames[] = {
+    {"END", "ENDPOINT", kOsnapEndpoint},         {"MID", "MIDPOINT", kOsnapMidpoint},
+    {"CEN", "CENTER", kOsnapCenter},             {"NOD", "NODE", kOsnapNode},
+    {"QUA", "QUADRANT", kOsnapQuadrant},         {"INT", "INTERSECTION", kOsnapIntersection},
+    {"INS", "INSERT", kOsnapInsert},             {"PER", "PERPENDICULAR", kOsnapPerpendicular},
+    {"TAN", "TANGENT", kOsnapTangent},           {"NEA", "NEAREST", kOsnapNearest},
+    {"QUI", "QUICK", kOsnapQuick},
+};
+
+char upcase(char c) {
+    return (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+}
+
+bool is_prefix_of(std::string_view token, const char* word) {
+    for (std::size_t i = 0; i < token.size(); ++i) {
+        if (word[i] == '\0' || upcase(token[i]) != word[i]) return false;
+    }
+    return true;
+}
+
+// One token to one bit. False if it matches nothing, or -- deliberately -- if it
+// matches more than one snap, since silently picking one of two would put the
+// cursor somewhere the user did not ask for.
+bool osnap_token(std::string_view token, OsnapMask* out, bool* is_none) {
+    // Three characters minimum. R12's snap names are three-letter codes and
+    // nothing shorter is one, which also keeps them clear of single-letter
+    // command keywords -- "C" at a point prompt offering Close and Center is
+    // an ambiguous keyword, and must stay one rather than becoming CEN.
+    if (token.size() < 3) return false;
+
+    if (is_prefix_of(token, "NONE")) {
+        *is_none = true;
+        return true;
+    }
+
+    OsnapMask found = kOsnapNone;
+    int matches = 0;
+    for (const OsnapNameRow& r : kOsnapNames) {
+        if (is_prefix_of(token, r.abbrev) || is_prefix_of(token, r.full)) {
+            if (found != r.bit) ++matches;
+            found = r.bit;
+        }
+    }
+    if (matches != 1) return false;
+    *out = found;
+    return true;
+}
+
+}  // namespace
+
+bool parse_osnap_mask(std::string_view text, OsnapMask* out) {
+    OsnapMask mask = kOsnapNone;
+    bool any = false;
+    bool none_seen = false;
+
+    std::size_t i = 0;
+    while (i < text.size()) {
+        while (i < text.size() && (text[i] == ',' || text[i] == ' ' || text[i] == '\t')) ++i;
+        const std::size_t start = i;
+        while (i < text.size() && text[i] != ',' && text[i] != ' ' && text[i] != '\t') ++i;
+        if (i == start) break;
+
+        OsnapMask bit = kOsnapNone;
+        bool is_none = false;
+        if (!osnap_token(text.substr(start, i - start), &bit, &is_none)) return false;
+        if (is_none) {
+            none_seen = true;
+        } else {
+            mask = static_cast<OsnapMask>(mask | bit);
+        }
+        any = true;
+    }
+
+    if (!any) return false;
+    // NONE anywhere in the list wins: "cen,none" is a contradiction, and the
+    // safe reading of a contradiction is to snap to nothing.
+    *out = none_seen ? kOsnapNone : mask;
+    return true;
 }
 
 // Written out rather than shifted: R12's OSMODE bit order is not this enum's

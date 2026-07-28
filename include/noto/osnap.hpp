@@ -17,6 +17,7 @@
 #include "noto/vec3.hpp"
 
 #include <cstdint>
+#include <string_view>
 
 namespace noto {
 
@@ -68,6 +69,16 @@ inline constexpr OsnapMask kOsnapQuick = 1024;
 inline constexpr OsnapMask kOsnapAll =
     kOsnapEndpoint | kOsnapMidpoint | kOsnapCenter | kOsnapNode | kOsnapQuadrant |
     kOsnapIntersection | kOsnapInsert | kOsnapPerpendicular | kOsnapTangent | kOsnapNearest;
+
+// Parses an osnap override as typed at a point prompt: "cen", "endp",
+// "int,mid", "none". Case-insensitive; comma or space separated; each token may
+// be the three-letter form, the full name, or any unambiguous prefix of either,
+// which is how R12 takes them.
+//
+// "NON" / "NONE" parses to kOsnapNone with a true return -- an explicit request
+// for no snap on this pick, which is a different thing from failing to parse.
+// Callers that must tell those apart use the return value, not the mask.
+bool parse_osnap_mask(std::string_view text, OsnapMask* out);
 
 OsnapMask osnap_bit(OsnapType t);
 bool osnap_enabled(OsnapMask mask, OsnapType t);

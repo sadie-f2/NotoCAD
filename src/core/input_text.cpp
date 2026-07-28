@@ -3,12 +3,18 @@
 
 #include "noto/input_text.hpp"
 
+#include "noto/osnap.hpp"
+
 #include <cmath>
 #include <cstdlib>
 #include <string>
 
 namespace noto {
 namespace {
+
+bool is_alpha(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
 
 std::string upcase(std::string_view s) {
     std::string out(s);
@@ -175,6 +181,15 @@ bool parse_input(const Prompt& prompt, std::string_view token, InputValue& out,
 
     switch (prompt.kind) {
         case PromptKind::Point: {
+            // An osnap override is tried before coordinates. There is no
+            // ambiguity to worry about: R12 coordinates start with a digit,
+            // sign, decimal point or '@', and every snap name starts with a
+            // letter -- so no input can be read both ways.
+            OsnapMask mask = kOsnapNone;
+            if (!token.empty() && is_alpha(token.front()) && parse_osnap_mask(token, &mask)) {
+                out = InputValue::of_osnap_override(mask);
+                return true;
+            }
             Vec3 p;
             if (!parse_coordinate(prompt, token, p, error)) return false;
             out = InputValue::of_point(p);

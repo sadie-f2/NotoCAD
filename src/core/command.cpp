@@ -73,6 +73,13 @@ InputValue InputValue::of_entity(Handle h) {
     return v;
 }
 
+InputValue InputValue::of_osnap_override(OsnapMask mask) {
+    InputValue v;
+    v.kind = InputKind::OsnapOverride;
+    v.integer = static_cast<std::int32_t>(mask);
+    return v;
+}
+
 // --- Step -------------------------------------------------------------------
 
 Step Step::ask(Prompt p) {
@@ -132,6 +139,20 @@ EngineStatus CommandEngine::supply(const InputValue& value) {
         cancel();
         return status_;
     }
+    // A one-shot osnap override is absorbed here and never reaches the command.
+    // It does not answer the prompt, so the same question stands and the engine
+    // stays Waiting -- which is exactly what typing "cen" mid-prompt should do.
+    if (value.kind == InputKind::OsnapOverride) {
+        osnap_override_ = static_cast<OsnapMask>(value.integer);
+        has_osnap_override_ = true;
+        return status_;
+    }
+
+    // Any value that does answer a prompt spends the override. One pick is the
+    // whole lifetime of one, including a pick that turns out to be a keyword or
+    // an Enter -- otherwise a stale override would surprise the next point.
+    clear_osnap_override();
+
     // Every point entered becomes LASTPOINT, whichever command took it.
     if (value.kind == InputKind::Point) set_last_point(value.point);
 

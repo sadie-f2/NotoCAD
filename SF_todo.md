@@ -37,9 +37,12 @@ R12's OSMODE bit order is not our `OsnapType` declaration order — Quadrant and
 are swapped, and Intersection is last in our enum but mid-mask in R12. `osnap_bit()`
 is a lookup table, pinned by a test asserting the literal values.
 
-Left undone deliberately: there is no OSNAP command and no status line, so `OSMODE`
-is set with `(setvar "OSMODE" 47)` and the active mode is named beside the marker
-glyph instead. Both become phase 6 and 8 work.
+- [x] One-shot osnap overrides: type `cen`, `nea`, `tan`, `non` at a point prompt
+
+`OSMODE` defaults to 37 (END, CEN, INT) — a lean running set, with everything else
+reached as a one-shot override. There is still no OSNAP command and no status line, so
+the active mode is named beside the marker glyph instead. Both become phase 6 and 8
+work.
 
 ## Phase 4b — the grip/stretch vtable
 
@@ -101,6 +104,41 @@ rectangle, and that is not derivable from a set of entity handles.
 window when deciding which points move, even after several selections. If that holds,
 the set carries at most one stretch region rather than a list. Check against the R12
 documentation rather than memory.
+
+---
+
+## Undo and redo — infinite, back to the start of the session
+
+**Requirement:** unlimited undo and redo, reaching all the way back to the beginning
+of a session. Not a depth-limited buffer.
+
+**This wants to land early — probably before phase 5, not after.** Every editing
+command has to be undoable, so building MOVE, COPY, ROTATE, SCALE, MIRROR, ARRAY and
+STRETCH first means revisiting all seven afterwards. The same argument as 4b and as
+ECS: cheaper at three commands than at ten.
+
+It also touches more than entities. A complete undo has to cover database mutations
+(`add` / `erase` / `replace`), symbol-table changes (layers, linetypes), and system
+variables — `(setvar "OSMODE" ...)` inside a command is state a user expects to come
+back. Anything mutable that is not journalled becomes a silent hole in undo, and holes
+in undo are discovered at the worst possible moment.
+
+Shape that fits this codebase, to be confirmed when it is planned properly:
+
+- A journal on `Database` of before/after records, leaning on two things already true:
+  handles are stable and never reused, and every entity can `clone()`.
+- Command-level grouping, so one UNDO reverses one command rather than one primitive.
+  `CommandEngine` already knows where commands begin and end.
+- R12's UNDO had marks and groups (`UNDO Mark` / `Back`); worth matching, and the
+  grouping mechanism is the same one.
+- The LISP path needs the same treatment: `entmake` in a loop over ten thousand faces
+  must not produce ten thousand undo steps, which ties into the suppressed-regen batch
+  mode already planned for phase 13.
+
+Open question: memory. Journalling clones back to session start is unbounded by
+definition, and the mesh workload is tens of thousands of faces. Whether that is
+actually a problem, and whether a compact diff beats storing clones, needs measuring
+rather than guessing.
 
 ---
 

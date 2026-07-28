@@ -25,6 +25,7 @@
 #pragma once
 
 #include "noto/database.hpp"
+#include "noto/osnap.hpp"
 #include "noto/vec3.hpp"
 
 #include <cstdint>
@@ -77,6 +78,13 @@ enum class InputKind : std::uint8_t {
     Keyword,  // one of the prompt's keywords, stored upcased in `text`
     Entity,
     Cancel,   // Escape
+
+    // A one-shot object snap override, typed at a point prompt: "cen", "mid",
+    // "non". Not an answer to the prompt -- the engine absorbs it, records it,
+    // and asks the same question again. Commands never see one, which is the
+    // point: an override is about how the *next* point is found, not about what
+    // the command wanted.
+    OsnapOverride,
 };
 
 struct InputValue {
@@ -95,6 +103,11 @@ struct InputValue {
     static InputValue of_string(std::string s);
     static InputValue of_keyword(std::string s);
     static InputValue of_entity(Handle h);
+
+    // The mask rides in `integer`. kOsnapNone is meaningful here -- it is NON,
+    // "no snap for this pick" -- so the kind, not the value, says an override
+    // is present.
+    static InputValue of_osnap_override(OsnapMask mask);
 };
 
 enum class StepKind : std::uint8_t {
@@ -194,6 +207,20 @@ public:
 
     Database& db() { return ctx_.db; }
 
+    // The pending one-shot osnap override, if any. Set by supplying an
+    // InputValue of kind OsnapOverride, and cleared as soon as any value
+    // actually answers a prompt -- an override lasts for exactly one pick,
+    // which is what makes it safe to reach for mid-command.
+    //
+    // A viewport reads this in place of OSMODE while it is set. Note that an
+    // override of kOsnapNone is a real state: it means snap to nothing.
+    bool has_osnap_override() const { return has_osnap_override_; }
+    OsnapMask osnap_override() const { return osnap_override_; }
+    void clear_osnap_override() {
+        has_osnap_override_ = false;
+        osnap_override_ = kOsnapNone;
+    }
+
     // LASTPOINT. Updated whenever a point is supplied, and readable so a
     // viewport can draw from it.
     const Vec3& last_point() const { return last_point_; }
@@ -213,6 +240,8 @@ private:
     EngineStatus status_{EngineStatus::Idle};
     Vec3 last_point_{};
     bool has_last_point_{false};
+    OsnapMask osnap_override_{kOsnapNone};
+    bool has_osnap_override_{false};
 };
 
 }  // namespace noto
