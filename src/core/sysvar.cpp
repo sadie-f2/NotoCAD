@@ -31,6 +31,20 @@ constexpr SysvarDef kTable[] = {
     {"OSMODE", Sysvar::OsMode, SysvarType::Int, false, true, 37, 0, 2047, 0.0, "", {}},
     {"PICKBOX", Sysvar::PickBox, SysvarType::Int, false, false, 3, 0, 50, 0.0, "", {}},
     {"APERTURE", Sysvar::Aperture, SysvarType::Int, false, false, 10, 1, 50, 0.0, "", {}},
+
+    // Current layer, by name rather than by id: that is what R12 stores, what
+    // getvar returns, and what survives a table whose indices have shifted.
+    {"CLAYER", Sysvar::CLayer, SysvarType::String, false, true, 0, 0, 0, 0.0, "0", {}},
+    // 256 is BYLAYER, 0 is BYBLOCK -- the same encoding DXF group 62 uses, so
+    // no translation is needed anywhere.
+    {"CECOLOR", Sysvar::CEColor, SysvarType::Int, false, true, 256, 0, 256, 0.0, "", {}},
+    {"CELTYPE", Sysvar::CELtype, SysvarType::String, false, true, 0, 0, 0, 0.0, "BYLAYER", {}},
+    {"LTSCALE", Sysvar::LtScale, SysvarType::Real, false, true, 0, 0, 0, 1.0, "", {}},
+
+    {"LIMMIN", Sysvar::LimMin, SysvarType::Point, false, true, 0, 0, 0, 0.0, "", {0.0, 0.0, 0.0}},
+    {"LIMMAX", Sysvar::LimMax, SysvarType::Point, false, true, 0, 0, 0, 0.0, "",
+     {12.0, 9.0, 0.0}},
+    {"LIMCHECK", Sysvar::LimCheck, SysvarType::Int, false, true, 0, 0, 1, 0.0, "", {}},
 };
 
 static_assert(sizeof(kTable) / sizeof(kTable[0]) == static_cast<std::size_t>(Sysvar::kCount),

@@ -50,6 +50,16 @@ enum class Sysvar : std::uint16_t {
     OsMode,
     PickBox,
     Aperture,
+    // Current entity properties. New geometry takes these, which is how R12
+    // decides what layer and colour something is drawn on without asking.
+    CLayer,
+    CEColor,
+    CELtype,
+    LtScale,
+    // Drawing limits, and whether points outside them are refused.
+    LimMin,
+    LimMax,
+    LimCheck,
     kCount,
 };
 

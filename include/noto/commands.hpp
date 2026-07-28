@@ -264,6 +264,43 @@ private:
     Vec3 base_{};
 };
 
+// LAYER: R12's table editor, as one prompt that loops until Enter.
+//
+// ?/Make/Set/New/ON/OFF/Color/Ltype/Freeze/Thaw. Most options take a layer name
+// afterwards, and Color and Ltype take a value first -- so this is a small state
+// machine rather than a switch, and it keeps asking until you leave.
+class LayerCommand final : public Command {
+public:
+    const char* name() const override { return "LAYER"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t {
+        Option,
+        NameForMake,
+        NameForSet,
+        NameForNew,
+        NameForOn,
+        NameForOff,
+        NameForFreeze,
+        NameForThaw,
+        ColorValue,
+        NameForColor,
+        LtypeValue,
+        NameForLtype,
+    };
+
+    Step ask_option(CommandContext& ctx);
+    Step ask_name(State next_state, const char* message);
+    Step apply_to_names(CommandContext& ctx, const std::string& names);
+
+    State state_{State::Option};
+    std::int16_t pending_color_{7};
+    std::string pending_ltype_;
+    std::string report_;
+};
+
 // PLAN: look straight down at the construction plane.
 //
 // R12 asks <Current UCS>/Ucs/World. Until UCS exists all three answers name the

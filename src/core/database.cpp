@@ -171,6 +171,24 @@ void Database::restore_linetype(LinetypeId id, const Linetype& value) {
     if (id == linetypes_.size()) linetypes_.push_back(value);
 }
 
+LayerId Database::current_layer() const {
+    const LayerId id = find_layer(sysvars_.get_string(Sysvar::CLayer));
+    return id == kInvalidLayer ? kLayerZero : id;
+}
+
+EntityProps Database::current_props() const {
+    EntityProps p;
+    p.layer = current_layer();
+    p.color = static_cast<std::int16_t>(sysvars_.get_int(Sysvar::CEColor));
+
+    const std::string& ltype = sysvars_.get_string(Sysvar::CELtype);
+    if (ltype != "BYLAYER" && ltype != "BYBLOCK") {
+        const LinetypeId id = find_linetype(ltype);
+        if (id != kInvalidLinetype) p.linetype = id;
+    }
+    return p;
+}
+
 void Database::clear() {
     entities_.clear();
     order_.clear();

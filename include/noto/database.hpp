@@ -113,6 +113,17 @@ public:
     UndoJournal& journal() { return journal_; }
     const UndoJournal& journal() const { return journal_; }
 
+    // --- current entity properties ------------------------------------------
+
+    // The layer CLAYER names, creating nothing: an unknown name gives layer 0
+    // rather than quietly adding a layer as a side effect of drawing.
+    LayerId current_layer() const;
+
+    // Everything a newly drawn entity takes from the current settings. Commands
+    // call this rather than each remembering which sysvars apply, so a new
+    // command cannot forget one.
+    EntityProps current_props() const;
+
     Handle peek_next_handle() const { return next_handle_; }
 
 private:

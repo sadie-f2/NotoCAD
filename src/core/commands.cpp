@@ -32,6 +32,18 @@ bool keyword_is(const InputValue& v, const char* name) {
 
 // A distance prompt accepts either a number or a second point, since picking two
 // points is how a radius gets specified with a mouse.
+// Everything drawn takes the current layer, colour and linetype. One helper so
+// a new command cannot forget one of the three, and so that adding a fourth
+// current property later is a change in one place.
+EntityPtr with_current_props(const Database& db, EntityPtr e) {
+    if (!e) return e;
+    // An extrusion is geometry, not a current setting, so it survives.
+    const Vec3 normal = e->props().normal;
+    e->props() = db.current_props();
+    e->props().normal = normal;
+    return e;
+}
+
 // An angle, in radians. Typed as degrees -- R12 talks degrees to the user and
 // radians to AutoLISP -- or shown by pointing, in which case it is the direction
 // from the base point to where you pointed.
@@ -114,7 +126,7 @@ Step LineCommand::next(CommandContext& ctx, const InputValue& value) {
 
     if (keyword_is(value, "CLOSE")) {
         if (segments_.size() < 2) return Step::failed("nothing to close");
-        ctx.db.add(std::make_unique<Line>(previous_, first_));
+        ctx.db.add(with_current_props(ctx.db, std::make_unique<Line>(previous_, first_)));
         return Step::done();
     }
 
@@ -131,7 +143,8 @@ Step LineCommand::next(CommandContext& ctx, const InputValue& value) {
 
     if (value.kind != InputKind::Point) return Step::failed("a point is required");
 
-    segments_.push_back(ctx.db.add(std::make_unique<Line>(previous_, value.point)));
+    segments_.push_back(
+        ctx.db.add(with_current_props(ctx.db, std::make_unique<Line>(previous_, value.point))));
     vertices_.push_back(value.point);
     previous_ = value.point;
     return Step::ask(next_prompt());
@@ -178,7 +191,7 @@ Step CircleCommand::next(CommandContext& ctx, const InputValue& value) {
             const double radius = diameter_ ? d * 0.5 : d;
             if (radius <= 0.0) return Step::failed("radius must be positive");
 
-            ctx.db.add(std::make_unique<Circle>(centre_, radius));
+            ctx.db.add(with_current_props(ctx.db, std::make_unique<Circle>(centre_, radius)));
             return Step::done();
         }
     }
@@ -1020,6 +1033,204 @@ Step StretchCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- LAYER ------------------------------------------------------------------
+
+namespace {
+
+// R12 takes comma-separated names and wildcards at these prompts. Only the
+// comma-separated part is here; wildcards want a matcher that LTYPE and PURGE
+// will both want too, so they wait until there is a second caller.
+std::vector<std::string> split_names(const std::string& text) {
+    std::vector<std::string> out;
+    std::string current;
+    for (const char c : text) {
+        if (c == ',' || c == ' ') {
+            if (!current.empty()) out.push_back(upcase(current));
+            current.clear();
+        } else {
+            current.push_back(c);
+        }
+    }
+    if (!current.empty()) out.push_back(upcase(current));
+    return out;
+}
+
+}  // namespace
+
+Step LayerCommand::ask_option(CommandContext&) {
+    state_ = State::Option;
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "?/Make/Set/New/ON/OFF/Color/Ltype/Freeze/Thaw";
+    p.keywords = {"?",      "Make", "Set",  "New",    "ON",
+                  "OFF",    "Color", "Ltype", "Freeze", "Thaw"};
+    p.allow_empty = true;  // Enter leaves
+    return Step::ask(p);
+}
+
+Step LayerCommand::ask_name(State next_state, const char* message) {
+    state_ = next_state;
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = message;
+    return Step::ask(p);
+}
+
+Step LayerCommand::apply_to_names(CommandContext& ctx, const std::string& text) {
+    const std::vector<std::string> names = split_names(text);
+    if (names.empty()) return ask_option(ctx);
+
+    for (const std::string& name : names) {
+        // Make and New create; everything else works on what exists, and says
+        // so rather than creating a layer as a side effect of trying to freeze
+        // one whose name was mistyped.
+        const bool creating = (state_ == State::NameForMake || state_ == State::NameForNew);
+        LayerId id = ctx.db.find_layer(name);
+        if (id == kInvalidLayer) {
+            if (!creating) {
+                report_ = "Layer " + name + " not found";
+                continue;
+            }
+            id = ctx.db.add_layer(name);
+        }
+
+        switch (state_) {
+            case State::NameForMake:
+            case State::NameForSet:
+                // Set refuses a frozen layer: R12 will not make you draw onto
+                // something you cannot see.
+                if (ctx.db.layer(id).frozen) {
+                    report_ = "Layer " + name + " is frozen";
+                    break;
+                }
+                ctx.db.sysvars().set_string(Sysvar::CLayer, ctx.db.layer(id).name);
+                break;
+
+            case State::NameForNew:
+                break;  // created above and nothing more
+
+            case State::NameForOn:
+                ctx.db.set_layer_color(id, ctx.db.layer(id).visible_color());
+                break;
+            case State::NameForOff:
+                // Off is a negative colour in R12, so the colour survives being
+                // turned off and comes back when it is turned on.
+                ctx.db.set_layer_color(id, static_cast<std::int16_t>(-ctx.db.layer(id).visible_color()));
+                break;
+
+            case State::NameForFreeze:
+                if (id == ctx.db.current_layer()) {
+                    report_ = "Cannot freeze the current layer";
+                    break;
+                }
+                ctx.db.set_layer_frozen(id, true);
+                break;
+            case State::NameForThaw:
+                ctx.db.set_layer_frozen(id, false);
+                break;
+
+            case State::NameForColor: {
+                // Setting a colour on a layer that is off keeps it off, or
+                // changing a colour would silently turn layers back on.
+                const bool was_off = ctx.db.layer(id).off();
+                ctx.db.set_layer_color(id, was_off ? static_cast<std::int16_t>(-pending_color_)
+                                                   : pending_color_);
+                break;
+            }
+
+            case State::NameForLtype: {
+                const LinetypeId lt = ctx.db.find_linetype(pending_ltype_);
+                if (lt == kInvalidLinetype) {
+                    report_ = "Linetype " + pending_ltype_ + " not loaded";
+                    break;
+                }
+                ctx.db.set_layer_linetype(id, lt);
+                break;
+            }
+
+            default:
+                break;
+        }
+    }
+    return ask_option(ctx);
+}
+
+Step LayerCommand::start(CommandContext& ctx) { return ask_option(ctx); }
+
+Step LayerCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Option: {
+            if (value.kind == InputKind::None) {
+                return Step::done(report_);
+            }
+            if (keyword_is(value, "?")) {
+                std::string list;
+                for (const Layer& l : ctx.db.layers()) {
+                    if (!list.empty()) list += "\n";
+                    list += l.name;
+                    list += l.off() ? "  Off" : "  On";
+                    if (l.frozen) list += "  Frozen";
+                    if (l.locked) list += "  Locked";
+                    list += "  Color " + std::to_string(l.visible_color());
+                    if (l.linetype < ctx.db.linetypes().size()) {
+                        list += "  " + ctx.db.linetype(l.linetype).name;
+                    }
+                }
+                report_ = list;
+                return ask_option(ctx);
+            }
+            if (keyword_is(value, "MAKE")) return ask_name(State::NameForMake, "New current layer");
+            if (keyword_is(value, "SET")) return ask_name(State::NameForSet, "New current layer");
+            if (keyword_is(value, "NEW")) return ask_name(State::NameForNew, "New layer name(s)");
+            if (keyword_is(value, "ON")) return ask_name(State::NameForOn, "Layer name(s) to turn On");
+            if (keyword_is(value, "OFF")) {
+                return ask_name(State::NameForOff, "Layer name(s) to turn Off");
+            }
+            if (keyword_is(value, "FREEZE")) {
+                return ask_name(State::NameForFreeze, "Layer name(s) to Freeze");
+            }
+            if (keyword_is(value, "THAW")) {
+                return ask_name(State::NameForThaw, "Layer name(s) to Thaw");
+            }
+            if (keyword_is(value, "COLOR")) {
+                state_ = State::ColorValue;
+                Prompt p;
+                p.kind = PromptKind::Integer;
+                p.message = "Color";
+                return Step::ask(p);
+            }
+            if (keyword_is(value, "LTYPE")) {
+                state_ = State::LtypeValue;
+                Prompt p;
+                p.kind = PromptKind::String;
+                p.message = "Linetype";
+                return Step::ask(p);
+            }
+            return Step::failed("unknown option");
+        }
+
+        case State::ColorValue: {
+            if (value.kind != InputKind::Integer) return Step::failed("a colour number is required");
+            if (value.integer < 1 || value.integer > 255) {
+                return Step::failed("colour must be between 1 and 255");
+            }
+            pending_color_ = static_cast<std::int16_t>(value.integer);
+            return ask_name(State::NameForColor, "Layer name(s) for color");
+        }
+
+        case State::LtypeValue: {
+            if (value.kind != InputKind::String) return Step::failed("a linetype name is required");
+            pending_ltype_ = upcase(value.text);
+            return ask_name(State::NameForLtype, "Layer name(s) for linetype");
+        }
+
+        default: {
+            if (value.kind != InputKind::String) return Step::failed("a layer name is required");
+            return apply_to_names(ctx, value.text);
+        }
+    }
+}
+
 // --- PLAN -------------------------------------------------------------------
 
 Step PlanCommand::start(CommandContext&) {
@@ -1369,6 +1580,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "ARRAY") return std::make_unique<ArrayCommand>();
     if (upper == "DIST") return std::make_unique<DistCommand>();
     if (upper == "ID") return std::make_unique<IdCommand>();
+    if (upper == "LAYER") return std::make_unique<LayerCommand>();
     if (upper == "LIST") return std::make_unique<ListCommand>();
     if (upper == "PAN") return std::make_unique<PanCommand>();
     if (upper == "PLAN") return std::make_unique<PlanCommand>();
@@ -1387,7 +1599,7 @@ CommandPtr make_command(std::string_view name) {
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
         "AREA", "ARRAY", "CIRCLE",  "COPY", "DIST",    "DXFOUT",  "ERASE", "ID",
-        "LINE", "LIST",  "MIRROR",  "MOVE", "PAN",     "PLAN",    "REDO",   "ROTATE",
+        "LAYER", "LINE", "LIST",  "MIRROR",  "MOVE", "PAN",    "PLAN",   "REDO",   "ROTATE",
         "SCALE", "STRETCH", "UNDO", "ZOOM"};
     return names;
 }
@@ -1402,6 +1614,7 @@ const std::vector<CommandAlias>& command_aliases() {
         {"DI", "DIST"},
         {"P", "PAN"},
         {"Z", "ZOOM"},
+        {"LA", "LAYER"},
         {"LI", "LIST"},
         {"CP", "COPY"},
         {"L", "LINE"},
