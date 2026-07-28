@@ -53,6 +53,10 @@ CommandLineWidget::CommandLineWidget(QWidget* parent) : QWidget(parent) {
 
     history_ = new QPlainTextEdit(this);
     history_->setReadOnly(true);
+    // Never takes keyboard focus. It is read-only, so anything typed into it
+    // vanishes without a trace -- which is indistinguishable from the
+    // application having stopped responding to the keyboard.
+    history_->setFocusPolicy(Qt::NoFocus);
     history_->setFont(mono);
     history_->setMaximumBlockCount(kMaxScrollbackLines);
     history_->setFrameShape(QFrame::NoFrame);
@@ -119,6 +123,8 @@ void CommandLineWidget::insert_typed_text(const QString& text) {
 }
 
 void CommandLineWidget::focus_input() { input_->setFocus(Qt::OtherFocusReason); }
+
+bool CommandLineWidget::input_has_focus() const { return input_->hasFocus(); }
 
 void CommandLineWidget::on_return_pressed() {
     const QString line = input_->text();

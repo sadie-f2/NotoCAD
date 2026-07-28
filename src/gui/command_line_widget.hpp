@@ -40,6 +40,7 @@ public:
     void insert_typed_text(const QString& text);
 
     void focus_input();
+    bool input_has_focus() const;
 
 signals:
     void lineEntered(const QString& line);

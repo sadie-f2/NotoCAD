@@ -202,12 +202,8 @@ are genuinely screen-space, because a window is a thing you drag on the screen.
 
 ## UI polish — reported from use, not yet built
 
-**Focus is lost to the viewport after a pick.** Once you have selected or worked in the
-viewport, typed characters stop reaching the command line until you click back into it.
-`ViewportWidget` forwards printable keys through `textTyped`, so the plumbing exists;
-something about focus after a click is defeating it. R12 has no focus step at all —
-you just type — and that is the target. (Sadie reports this is still occasionally a UI
-wart in AutoCAD 2026, which is not a reason to keep it.)
+*(The focus loss is fixed — see the commit "Typing always reaches the command line".
+It needs confirming in a real session, since it could not be reproduced headlessly.)*
 
 **Show the selection box while it is being dragged.** The window or crossing rectangle
 should be drawn as it is dragged, and distinguishably: AutoCAD uses a solid outline for

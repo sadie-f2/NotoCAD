@@ -3,6 +3,9 @@
 
 #include "main_window.hpp"
 
+#include <QApplication>
+#include <QKeyEvent>
+
 #include "command_line_widget.hpp"
 #include "sample_drawing.hpp"
 #include "viewport_widget.hpp"
@@ -67,6 +70,34 @@ MainWindow::MainWindow(QWidget* parent)
         "Middle-drag pans, shift+middle orbits, wheel zooms, Home is extents.\n");
     refresh_prompt();
     command_line_->focus_input();
+
+    // Watch every key press in the application, not just this window's, so a
+    // keystroke landing on any widget that does not want it still reaches the
+    // command line.
+    qApp->installEventFilter(this);
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (event->type() != QEvent::KeyPress) return QMainWindow::eventFilter(watched, event);
+
+    // The command line already has it: leave the key alone, or every character
+    // would be inserted twice and Home would stop moving the cursor.
+    if (command_line_->input_has_focus()) return QMainWindow::eventFilter(watched, event);
+
+    auto* key = static_cast<QKeyEvent*>(event);
+    const QString text = key->text();
+
+    // Printable only. Escape, Home and the arrows belong to whatever has focus
+    // -- the viewport uses them for cancelling and for view control.
+    if (text.isEmpty() || !text.at(0).isPrint()) {
+        return QMainWindow::eventFilter(watched, event);
+    }
+    if (key->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) {
+        return QMainWindow::eventFilter(watched, event);
+    }
+
+    command_line_->insert_typed_text(text);
+    return true;
 }
 
 MainWindow::~MainWindow() = default;
