@@ -44,6 +44,15 @@ EntityPtr with_current_props(const Database& db, EntityPtr e) {
     return e;
 }
 
+// R12 prints coordinates and distances to four places by default. Fixed rather
+// than %g, because a column of numbers that switches to exponent form part way
+// down is much harder to read back.
+std::string fmt(double v) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.4f", v);
+    return buf;
+}
+
 // An angle, in radians. Typed as degrees -- R12 talks degrees to the user and
 // radians to AutoLISP -- or shown by pointing, in which case it is the direction
 // from the base point to where you pointed.
@@ -1399,6 +1408,118 @@ Step LtypeCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- COLOR / LTSCALE / LIMITS -----------------------------------------------
+
+Step ColorCommand::start(CommandContext& ctx) {
+    const std::int32_t current = ctx.db.sysvars().get_int(Sysvar::CEColor);
+    std::string shown = std::to_string(current);
+    if (current == kColorByLayer) shown = "BYLAYER";
+    if (current == kColorByBlock) shown = "BYBLOCK";
+
+    Prompt p;
+    p.kind = PromptKind::Integer;
+    p.message = "New entity color <" + shown + ">";
+    p.keywords = {"BYLAYER", "BYBLOCK"};
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step ColorCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind == InputKind::None) return Step::done();  // Enter keeps it
+
+    std::int32_t colour = 0;
+    if (keyword_is(value, "BYLAYER")) {
+        colour = kColorByLayer;
+    } else if (keyword_is(value, "BYBLOCK")) {
+        colour = kColorByBlock;
+    } else if (value.kind == InputKind::Integer) {
+        colour = value.integer;
+        if (colour < 1 || colour > 255) return Step::failed("colour must be between 1 and 255");
+    } else {
+        return Step::failed("a colour number, BYLAYER or BYBLOCK is required");
+    }
+
+    ctx.db.sysvars().set_int(Sysvar::CEColor, colour);
+    return Step::done();
+}
+
+Step LtScaleCommand::start(CommandContext& ctx) {
+    Prompt p;
+    p.kind = PromptKind::Distance;
+    p.message = "New scale factor <" + fmt(ctx.db.sysvars().get_real(Sysvar::LtScale)) + ">";
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step LtScaleCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind == InputKind::None) return Step::done();
+
+    double scale = 0.0;
+    if (!distance_from(value, Vec3{0, 0, 0}, scale)) return Step::failed("a number is required");
+    // Zero or less would make every dash zero-length, which draws nothing and
+    // looks like the linetype having been lost.
+    if (scale <= 0.0) return Step::failed("scale must be positive");
+
+    ctx.db.sysvars().set_real(Sysvar::LtScale, scale);
+    return Step::done("Regenerating drawing.");
+}
+
+Step LimitsCommand::start(CommandContext& ctx) {
+    const Vec3 lower = ctx.db.sysvars().get_point(Sysvar::LimMin);
+
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "ON/OFF/<Lower left corner> <" + fmt(lower.x) + "," + fmt(lower.y) + ">";
+    p.keywords = {"ON", "OFF"};
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step LimitsCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Lower: {
+            // ON and OFF are about limit checking, not about the limits
+            // themselves, so they answer and finish rather than continuing.
+            if (keyword_is(value, "ON")) {
+                ctx.db.sysvars().set_int(Sysvar::LimCheck, 1);
+                return Step::done();
+            }
+            if (keyword_is(value, "OFF")) {
+                ctx.db.sysvars().set_int(Sysvar::LimCheck, 0);
+                return Step::done();
+            }
+            if (value.kind == InputKind::None) return Step::done();
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+            lower_ = value.point;
+            state_ = State::Upper;
+
+            const Vec3 upper = ctx.db.sysvars().get_point(Sysvar::LimMax);
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Upper right corner <" + fmt(upper.x) + "," + fmt(upper.y) + ">";
+            return Step::ask(p);
+        }
+
+        case State::Upper: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+            // Ordered, so that a corner pair given the other way round still
+            // describes a rectangle rather than an inside-out one.
+            const Vec3 a = lower_;
+            const Vec3 b = value.point;
+            const Vec3 lo{std::min(a.x, b.x), std::min(a.y, b.y), 0.0};
+            const Vec3 hi{std::max(a.x, b.x), std::max(a.y, b.y), 0.0};
+            if (lo.x == hi.x || lo.y == hi.y) return Step::failed("limits must enclose an area");
+
+            ctx.db.sysvars().set_point(Sysvar::LimMin, lo);
+            ctx.db.sysvars().set_point(Sysvar::LimMax, hi);
+            return Step::done();
+        }
+    }
+    return Step::failed("internal state error");
+}
+
 // --- PLAN -------------------------------------------------------------------
 
 Step PlanCommand::start(CommandContext&) {
@@ -1441,12 +1562,22 @@ Step ZoomCommand::next(CommandContext& ctx, const InputValue& value) {
 
     switch (state_) {
         case State::Option: {
-            if (keyword_is(value, "EXTENTS") || keyword_is(value, "ALL")) {
-                // All and Extents differ only once LIMITS exists: All shows the
-                // limits or the extents, whichever is larger. Until then they
-                // are the same view, and pretending otherwise would be
-                // decoration.
+            if (keyword_is(value, "EXTENTS")) {
                 ctx.view->zoom_extents();
+                return Step::done();
+            }
+            if (keyword_is(value, "ALL")) {
+                // All shows the limits, or the extents when something has been
+                // drawn outside them -- otherwise geometry off the paper would
+                // become invisible with no way to find it.
+                BBox box = ctx.db.extents();
+                box.expand(ctx.db.sysvars().get_point(Sysvar::LimMin));
+                box.expand(ctx.db.sysvars().get_point(Sysvar::LimMax));
+                if (!box.valid()) {
+                    ctx.view->zoom_extents();
+                    return Step::done();
+                }
+                ctx.view->zoom_window(box.min, box.max);
                 return Step::done();
             }
             if (keyword_is(value, "PREVIOUS")) {
@@ -1534,15 +1665,6 @@ bool command_is_transparent(std::string_view name) {
 // --- inquiry: DIST, ID, AREA, LIST ------------------------------------------
 
 namespace {
-
-// R12 prints coordinates and distances to four places by default. Fixed rather
-// than %g, because a column of numbers that switches to exponent form part way
-// down is much harder to read back.
-std::string fmt(double v) {
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "%.4f", v);
-    return buf;
-}
 
 std::string fmt_point(const Vec3& p) {
     return "X = " + fmt(p.x) + "  Y = " + fmt(p.y) + "  Z = " + fmt(p.z);
@@ -1742,6 +1864,9 @@ CommandPtr make_command(std::string_view name) {
     const std::string upper = upcase(name);
     if (upper == "LINE") return std::make_unique<LineCommand>();
     if (upper == "CIRCLE") return std::make_unique<CircleCommand>();
+    if (upper == "COLOR") return std::make_unique<ColorCommand>();
+    if (upper == "LIMITS") return std::make_unique<LimitsCommand>();
+    if (upper == "LTSCALE") return std::make_unique<LtScaleCommand>();
     if (upper == "ERASE") return std::make_unique<EraseCommand>();
     if (upper == "DXFOUT") return std::make_unique<DxfOutCommand>();
     if (upper == "AREA") return std::make_unique<AreaCommand>();
@@ -1767,7 +1892,8 @@ CommandPtr make_command(std::string_view name) {
 
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
-        "AREA", "ARRAY", "CIRCLE",  "COPY", "DIST",    "DXFOUT",  "ERASE", "ID",
+        "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFOUT", "ERASE", "ID",
+        "LIMITS", "LTSCALE",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PLAN",  "REDO",  "ROTATE",
         "SCALE", "STRETCH", "UNDO", "ZOOM"};
     return names;

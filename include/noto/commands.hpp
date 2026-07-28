@@ -328,6 +328,37 @@ private:
 bool builtin_linetype(std::string_view name, std::string& description,
                       std::vector<double>& pattern);
 
+// COLOR, LTSCALE and LIMITS: one prompt each, straight onto a system variable.
+//
+// Thin by design. The state they set is already journalled and already reachable
+// from getvar, so these commands are the R12 way of typing what (setvar ...)
+// could also say.
+class ColorCommand final : public Command {
+public:
+    const char* name() const override { return "COLOR"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
+class LtScaleCommand final : public Command {
+public:
+    const char* name() const override { return "LTSCALE"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
+class LimitsCommand final : public Command {
+public:
+    const char* name() const override { return "LIMITS"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Lower, Upper };
+    State state_{State::Lower};
+    Vec3 lower_{};
+};
+
 // PLAN: look straight down at the construction plane.
 //
 // R12 asks <Current UCS>/Ucs/World. Until UCS exists all three answers name the

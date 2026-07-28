@@ -225,3 +225,163 @@ TEST_CASE("layer: CLAYER naming a layer that has gone falls back to 0") {
     // end of the table.
     CHECK(db.current_layer() == kLayerZero);
 }
+
+TEST_CASE("color: sets CECOLOR, and BYLAYER goes back to the default") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("COLOR"));
+    engine.supply(InputValue::of_integer(1));
+    CHECK(db.sysvars().get_int(Sysvar::CEColor) == 1);
+
+    engine.begin(make_command("COLOR"));
+    engine.supply(InputValue::of_keyword("BYLAYER"));
+    CHECK(db.sysvars().get_int(Sysvar::CEColor) == kColorByLayer);
+
+    engine.begin(make_command("COLOR"));
+    engine.supply(InputValue::of_keyword("BYBLOCK"));
+    CHECK(db.sysvars().get_int(Sysvar::CEColor) == kColorByBlock);
+}
+
+TEST_CASE("color: Enter keeps what is there, and the range is checked") {
+    Database db;
+    CommandEngine engine(db);
+    db.sysvars().set_int(Sysvar::CEColor, 5);
+
+    engine.begin(make_command("COLOR"));
+    engine.supply(InputValue::none());
+    CHECK(db.sysvars().get_int(Sysvar::CEColor) == 5);
+
+    engine.begin(make_command("COLOR"));
+    engine.supply(InputValue::of_integer(300));
+    CHECK(engine.status() == EngineStatus::Failed);
+    CHECK(db.sysvars().get_int(Sysvar::CEColor) == 5);
+}
+
+TEST_CASE("ltscale: positive only") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("LTSCALE"));
+    engine.supply(InputValue::of_real(2.0));
+    CHECK_NEAR(db.sysvars().get_real(Sysvar::LtScale), 2.0, 1e-12);
+
+    // Zero would make every dash zero-length, which draws nothing and looks
+    // like the linetype having been lost rather than the scale being wrong.
+    engine.begin(make_command("LTSCALE"));
+    engine.supply(InputValue::of_real(0.0));
+    CHECK(engine.status() == EngineStatus::Failed);
+    CHECK_NEAR(db.sysvars().get_real(Sysvar::LtScale), 2.0, 1e-12);
+}
+
+TEST_CASE("limits: two corners, in either order") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("LIMITS"));
+    engine.supply(InputValue::of_point({100, 50, 0}));  // upper right given first
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    CHECK(engine.status() == EngineStatus::Finished);
+
+    // Ordered on the way in, so a pair given the other way round still
+    // describes a rectangle rather than an inside-out one.
+    CHECK_VEC(db.sysvars().get_point(Sysvar::LimMin), 0.0, 0.0, 0.0, 1e-12);
+    CHECK_VEC(db.sysvars().get_point(Sysvar::LimMax), 100.0, 50.0, 0.0, 1e-12);
+}
+
+TEST_CASE("limits: ON and OFF are about checking, not about the corners") {
+    Database db;
+    CommandEngine engine(db);
+    const Vec3 before = db.sysvars().get_point(Sysvar::LimMax);
+
+    engine.begin(make_command("LIMITS"));
+    engine.supply(InputValue::of_keyword("ON"));
+    CHECK(engine.status() == EngineStatus::Finished);
+    CHECK(db.sysvars().get_int(Sysvar::LimCheck) == 1);
+    CHECK_VEC(db.sysvars().get_point(Sysvar::LimMax), before.x, before.y, before.z, 1e-12);
+
+    engine.begin(make_command("LIMITS"));
+    engine.supply(InputValue::of_keyword("OFF"));
+    CHECK(db.sysvars().get_int(Sysvar::LimCheck) == 0);
+}
+
+TEST_CASE("limits: a degenerate rectangle is refused") {
+    Database db;
+    CommandEngine engine(db);
+    engine.begin(make_command("LIMITS"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({0, 50, 0}));
+    CHECK(engine.status() == EngineStatus::Failed);
+}
+
+TEST_CASE("ltype: Load, Set, and refusing what is not loaded") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("LTYPE"));
+    engine.supply(InputValue::of_keyword("LOAD"));
+    engine.supply(InputValue::of_string("DASHED,HIDDEN"));
+    engine.supply(InputValue::none());
+    CHECK(db.find_linetype("DASHED") != kInvalidLinetype);
+    CHECK(db.find_linetype("HIDDEN") != kInvalidLinetype);
+
+    engine.begin(make_command("LTYPE"));
+    engine.supply(InputValue::of_keyword("SET"));
+    engine.supply(InputValue::of_string("DASHED"));
+    engine.supply(InputValue::none());
+    CHECK(db.sysvars().get_string(Sysvar::CELtype) == "DASHED");
+
+    // Setting something that was never loaded is reported rather than invented.
+    engine.begin(make_command("LTYPE"));
+    engine.supply(InputValue::of_keyword("SET"));
+    engine.supply(InputValue::of_string("NOSUCHTYPE"));
+    engine.supply(InputValue::none());
+    CHECK(db.sysvars().get_string(Sysvar::CELtype) == "DASHED");
+    CHECK(engine.message().find("not loaded") != std::string::npos);
+}
+
+TEST_CASE("ltype: Create defines a pattern inline") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("LTYPE"));
+    engine.supply(InputValue::of_keyword("CREATE"));
+    engine.supply(InputValue::of_string("MYDASH"));
+    engine.supply(InputValue::of_string(".5,-.25,0,-.25"));
+    engine.supply(InputValue::none());
+
+    const LinetypeId id = db.find_linetype("MYDASH");
+    CHECK(id != kInvalidLinetype);
+    CHECK(db.linetype(id).pattern.size() == 4);
+    CHECK_NEAR(db.linetype(id).pattern_length(), 1.0, 1e-12);
+}
+
+TEST_CASE("ltype: a pattern that is not numbers is refused") {
+    Database db;
+    CommandEngine engine(db);
+    engine.begin(make_command("LTYPE"));
+    engine.supply(InputValue::of_keyword("CREATE"));
+    engine.supply(InputValue::of_string("BAD"));
+    engine.supply(InputValue::of_string("dash,gap"));
+    CHECK(engine.status() == EngineStatus::Failed);
+    CHECK(db.find_linetype("BAD") == kInvalidLinetype);
+}
+
+TEST_CASE("ltype: new entities take CELTYPE") {
+    Database db;
+    CommandEngine engine(db);
+    engine.begin(make_command("LTYPE"));
+    engine.supply(InputValue::of_keyword("LOAD"));
+    engine.supply(InputValue::of_string("DASHED"));
+    engine.supply(InputValue::of_keyword("SET"));
+    engine.supply(InputValue::of_string("DASHED"));
+    engine.supply(InputValue::none());
+
+    engine.begin(make_command("LINE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({1, 1, 0}));
+    engine.supply(InputValue::none());
+
+    const Entity* e = db.get(db.order().back());
+    CHECK(db.linetype(e->props().linetype).name == "DASHED");
+}
