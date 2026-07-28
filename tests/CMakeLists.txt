@@ -9,6 +9,7 @@ add_executable(noto_tests
   test_lisp.cpp
   test_eval.cpp
   test_entmake.cpp
+  test_getvar.cpp
   test_dxfout.cpp
   test_command.cpp
   test_prompt.cpp
@@ -36,6 +37,11 @@ set_tests_properties(ncad_cli_entmake PROPERTIES PASS_REGULAR_EXPRESSION "ENAME"
 # A LISP error must fail the process, not be swallowed.
 add_test(NAME ncad_cli_error COMMAND ncad -e "(/ 1 0)")
 set_tests_properties(ncad_cli_error PROPERTIES WILL_FAIL TRUE)
+
+add_test(NAME ncad_cli_sysvar COMMAND ncad
+         -e "(setvar \"OSMODE\" 47)"
+         -e "(princ (getvar \"OSMODE\"))")
+set_tests_properties(ncad_cli_sysvar PROPERTIES PASS_REGULAR_EXPRESSION "47")
 
 add_test(NAME ncad_cli_help COMMAND ncad -h)
 set_tests_properties(ncad_cli_help PROPERTIES PASS_REGULAR_EXPRESSION "Usage")

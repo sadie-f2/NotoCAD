@@ -11,6 +11,7 @@
 #include "entity_subrs.hpp"
 #include "command_subr.hpp"
 #include "file_subrs.hpp"
+#include "sysvar_subrs.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -802,6 +803,10 @@ constexpr SubrDef kSubrs[] = {
     {"ENTDEL", subr_entdel, 1, 1},
     {"ENTLAST", subr_entlast, 0, 0},
     {"ENTNEXT", subr_entnext, 0, 1},
+
+    // system variables -- implemented in sysvar_subrs.cpp
+    {"GETVAR", subr_getvar, 1, 1},
+    {"SETVAR", subr_setvar, 2, 2},
 
     // drawing file I/O -- implemented in file_subrs.cpp
     {"COMMAND", subr_command, 0, kNoMax},
