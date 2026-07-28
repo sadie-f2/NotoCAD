@@ -254,9 +254,30 @@ TEST_CASE("intersection: circles that touch, miss, nest or coincide") {
     CHECK(intersect_entities(a, Circle{{0, 0, 0}, 5.0}, p) == 0);   // concentric
 }
 
-TEST_CASE("intersection: non-coplanar circles are declined, as documented") {
+TEST_CASE("intersection: non-coplanar circles meet where they really meet") {
+    // Two circles of radius 5 about the origin, one in XY and one in YZ. They
+    // are not coplanar, and they do intersect -- at (0, +-5, 0), which lies on
+    // both. osnap used to decline this case; the kernel solves it, so INT now
+    // finds the points that are genuinely there.
     Circle a{{0, 0, 0}, 5.0};
     Circle b{{0, 0, 0}, 5.0, kWorldX};
+    Vec3 p[kMaxIntersections];
+    REQUIRE(intersect_entities(a, b, p) == 2);
+
+    const bool got_positive = near_equal(p[0], Vec3{0, 5, 0}, 1e-9) ||
+                              near_equal(p[1], Vec3{0, 5, 0}, 1e-9);
+    const bool got_negative = near_equal(p[0], Vec3{0, -5, 0}, 1e-9) ||
+                              near_equal(p[1], Vec3{0, -5, 0}, 1e-9);
+    CHECK(got_positive);
+    CHECK(got_negative);
+}
+
+TEST_CASE("intersection: circles in crossing planes that miss each other still miss") {
+    // Planes that meet, circles that do not: the second circle's plane cuts the
+    // first, but nowhere near its rim. Crossing the plane is necessary and not
+    // sufficient, which is the check that separates this from the case above.
+    Circle a{{0, 0, 0}, 5.0};
+    Circle b{{0, 50, 0}, 5.0, kWorldX};
     Vec3 p[kMaxIntersections];
     CHECK(intersect_entities(a, b, p) == 0);
 }

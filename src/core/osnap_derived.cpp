@@ -4,6 +4,7 @@
 #include "noto/osnap_derived.hpp"
 
 #include "noto/ecs.hpp"
+#include "noto/intersect.hpp"
 #include "noto/entities.hpp"
 
 #include <algorithm>
@@ -97,129 +98,6 @@ bool line_foot(const Line& l, const Vec3& ref, Vec3* out, double* t_out) {
     return true;
 }
 
-// Intersection of two segments in three dimensions. Skew lines do not meet, so
-// the closest approach has to actually close for this to count.
-int line_line(const Line& a, const Line& b, Vec3 out[kMaxIntersections]) {
-    const Vec3 p = a.start();
-    const Vec3 q = b.start();
-    const Vec3 u = a.direction();
-    const Vec3 v = b.direction();
-
-    const double uu = dot(u, u);
-    const double vv = dot(v, v);
-    if (uu <= kEps * kEps || vv <= kEps * kEps) return 0;
-
-    const Vec3 w = p - q;
-    const double uv = dot(u, v);
-    const double uw = dot(u, w);
-    const double vw = dot(v, w);
-
-    const double denom = uu * vv - uv * uv;
-    // Parallel or collinear. Collinear overlap has no single intersection
-    // point, and R12 does not offer one either.
-    if (std::abs(denom) <= kEps * uu * vv) return 0;
-
-    const double s = (uv * vw - vv * uw) / denom;
-    const double t = (uu * vw - uv * uw) / denom;
-
-    const Vec3 pa = p + u * s;
-    const Vec3 pb = q + v * t;
-    // Skew: the lines pass, they do not meet. The tolerance is on the gap, in
-    // drawing units, which is what "these two lines cross" means to a user.
-    if (!near_equal(pa, pb, 1e-7)) return 0;
-
-    // Both hits must lie on the drawn segments, not their extensions.
-    if (s < -kEps || s > 1.0 + kEps || t < -kEps || t > 1.0 + kEps) return 0;
-
-    out[0] = pa;
-    return 1;
-}
-
-// Segment against a circular entity. The case that matters is coplanar, where
-// it is a quadratic; a line crossing the plane meets the circle only if it
-// happens to land on it.
-int line_circular(const Line& l, const Circular& c, Vec3 out[kMaxIntersections]) {
-    const Vec3 n = normalize(c.normal);
-    const Vec3 p0 = l.start();
-    const Vec3 d = l.direction();
-    const double len_sq = length_sq(d);
-    if (len_sq <= kEps * kEps) return 0;
-
-    const double along = dot(d, n);
-    const double off = dot(p0 - c.center, n);
-
-    int count = 0;
-    auto accept = [&](double t, const Vec3& p) {
-        if (t < -kEps || t > 1.0 + kEps) return;  // off the segment
-        if (!on_sweep(c, p)) return;              // off the arc
-        out[count++] = p;
-    };
-
-    if (std::abs(along) > kEps) {
-        // The line crosses the plane at one point. It meets the circle only if
-        // that point happens to sit on it.
-        const double t = -off / along;
-        const Vec3 p = p0 + d * t;
-        if (std::abs(length(p - c.center) - c.radius) <= 1e-7) accept(t, p);
-        return count;
-    }
-
-    // Parallel to the plane: only coplanar lines can reach the circle.
-    if (std::abs(off) > 1e-7) return 0;
-
-    // |p0 + t*d - centre|^2 = r^2
-    const Vec3 f = p0 - c.center;
-    const double a = len_sq;
-    const double b = 2.0 * dot(f, d);
-    const double cc = dot(f, f) - c.radius * c.radius;
-    const double disc = b * b - 4.0 * a * cc;
-    if (disc < 0.0) return 0;
-
-    const double root = std::sqrt(std::max(0.0, disc));
-    const double t0 = (-b - root) / (2.0 * a);
-    const double t1 = (-b + root) / (2.0 * a);
-
-    accept(t0, p0 + d * t0);
-    if (root > kEps) accept(t1, p0 + d * t1);
-    return count;
-}
-
-// Two coplanar circles. The classic construction: the intersections sit on the
-// radical line, symmetric about it.
-int circular_circular(const Circular& a, const Circular& b, Vec3 out[kMaxIntersections]) {
-    const Vec3 na = normalize(a.normal);
-    const Vec3 nb = normalize(b.normal);
-
-    // Coplanar means parallel planes at the same offset. Non-coplanar circles
-    // are documented as unsupported; see the header.
-    if (!is_zero(cross(na, nb), 1e-9)) return 0;
-    if (std::abs(dot(b.center - a.center, na)) > 1e-7) return 0;
-
-    const Vec3 delta = b.center - a.center;
-    const double dist = length(delta);
-    if (dist <= kEps) return 0;                              // concentric
-    if (dist > a.radius + b.radius + 1e-9) return 0;         // too far apart
-    if (dist < std::abs(a.radius - b.radius) - 1e-9) return 0;  // one inside the other
-
-    // Distance from a's centre to the radical line, along the centre line.
-    const double x = (dist * dist + a.radius * a.radius - b.radius * b.radius) / (2.0 * dist);
-    const double h_sq = a.radius * a.radius - x * x;
-    const double h = std::sqrt(std::max(0.0, h_sq));
-
-    const Vec3 along = delta / dist;
-    const Vec3 across = cross(na, along);  // unit: na and along are orthonormal
-    const Vec3 mid = a.center + along * x;
-
-    int count = 0;
-    auto accept = [&](const Vec3& p) {
-        if (on_sweep(a, p) && on_sweep(b, p)) out[count++] = p;
-    };
-
-    accept(mid + across * h);
-    if (h > kEps) accept(mid - across * h);
-    return count;
-}
-
 }  // namespace
 
 bool nearest_point(const Entity& e, const Vec3& ref, Vec3* out) {
@@ -311,16 +189,32 @@ int tangent_points(const Entity& e, const Vec3& ref, Vec3 out[kMaxTangents]) {
 int intersect_entities(const Entity& a, const Entity& b, Vec3 out[kMaxIntersections]) {
     if (!out) return 0;
 
-    const Line* la = as_line(a);
-    const Line* lb = as_line(b);
-    if (la && lb) return line_line(*la, *lb, out);
+    // Delegated to the kernel rather than solved again here. This function came
+    // first and answered the narrower question osnap asks; intersect.hpp answers
+    // the general one that TRIM and FILLET need. Keeping both implementations
+    // would mean two sets of tolerances deciding whether a corner is closed,
+    // and one of them would eventually be the wrong one.
+    //
+    // What stays osnap's own is the shape of the answer: points only, bounded
+    // only, and at most two of them -- a cursor cannot usefully be offered the
+    // twelve places two polylines cross.
+    IntersectionList hits;
+    intersect(a, b, IntersectMode::Bounded, hits);
 
-    Circular ca;
-    Circular cb;
-    if (la && as_circular(b, cb)) return line_circular(*la, cb, out);
-    if (lb && as_circular(a, ca)) return line_circular(*lb, ca, out);
-    if (as_circular(a, ca) && as_circular(b, cb)) return circular_circular(ca, cb, out);
-    return 0;
+    int count = 0;
+    for (const Intersection& hit : hits) {
+        if (count >= kMaxIntersections) break;
+
+        // Nearly-coincident answers collapse: a polyline that meets a line at a
+        // shared vertex reports it once per adjoining segment, and offering the
+        // same point twice would make pick cycling stutter.
+        bool duplicate = false;
+        for (int i = 0; i < count; ++i) {
+            if (near_equal(out[i], hit.point, 1e-9)) duplicate = true;
+        }
+        if (!duplicate) out[count++] = hit.point;
+    }
+    return count;
 }
 
 }  // namespace noto

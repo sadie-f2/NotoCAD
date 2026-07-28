@@ -13,6 +13,7 @@ add_library(noto_core STATIC
   faces.cpp
   text.cpp
   proxy.cpp
+  intersect.cpp
   osnap_derived.cpp
   selection.cpp
   sysvar.cpp

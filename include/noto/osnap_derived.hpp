@@ -52,10 +52,16 @@ int tangent_points(const Entity& e, const Vec3& ref, Vec3 out[kMaxTangents]);
 // "where do these two entities actually meet", not where their host circles or
 // infinite lines would.
 //
-// Limitation: two circular entities are handled when coplanar. Non-coplanar
-// circles meet only where both planes and both circles agree, which is a
-// measure-zero case that no drawing relies on and that osnap cannot usefully
-// track; it returns none.
+// Delegates to intersect.hpp, which is the general facility; this is the shape
+// osnap wants -- points only, bounded only, and at most two, because a cursor
+// cannot usefully be offered the twelve places two polylines cross. Duplicates
+// are collapsed, so a polyline meeting a line at a shared vertex offers that
+// point once rather than once per adjoining segment.
+//
+// Formerly limited to coplanar circles. It no longer is: two circles in space
+// meet where each crosses the other's plane at the other's radius, and the
+// kernel solves that, so a circle in the XY plane and one in YZ correctly meet
+// at two points rather than being declined.
 int intersect_entities(const Entity& a, const Entity& b, Vec3 out[kMaxIntersections]);
 
 }  // namespace noto

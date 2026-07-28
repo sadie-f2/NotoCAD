@@ -32,6 +32,7 @@ add_executable(noto_tests
   test_pline.cpp
   test_draw_commands.cpp
   test_pedit.cpp
+  test_intersect.cpp
   test_layer.cpp
   test_dash.cpp
   test_dxf_read.cpp

@@ -174,7 +174,7 @@ rather than guessing — the interface hides which one it is.
 | 8 | Tables and settings | *Done, apart from UNITS.* LAYER, LTYPE with built-in patterns, dash rendering, COLOR, LTSCALE, LIMITS, and current entity properties. **UNITS is not built**: R12's is a page of report-format questions, and the formatting they control is hardcoded to four decimal places in DIST, ID, AREA and LIST. LUNITS/LUPREC/AUNITS/AUPREC do not exist yet. Also missing: LTYPE loading from a real `acad.lin`, and wildcards in layer and linetype names. |
 | 8 | *(detail)* | LAYER, LTYPE and dash rendering, COLOR, LTSCALE, UNITS, LIMITS. Linetypes touch three layers at once: the DXF table, dash generation in the render path, and LTSCALE — not just a table entry. |
 | 9 | DXF read and OPEN | *Done.* `dxf_read.hpp`, the `Proxy` entity, and DXFIN with OPEN as its alias. LINE, CIRCLE, ARC and POLYLINE become real entities; everything else becomes a proxy that writes back unchanged. **Not read yet:** the HEADER section's system variables (only `$ACADVER` is looked at), and the BLOCKS section — a file with blocks loses its definitions, though the INSERT entities referring to them survive as proxies. Both want doing before this is trusted with real drawings. |
-| 10 | Geometry editing | TRIM, EXTEND, OFFSET, FILLET, CHAMFER, BREAK, CHANGE/CHPROP. Needs intersection machinery beyond what osnap uses. |
+| 10 | Geometry editing | TRIM, EXTEND, OFFSET, FILLET, CHAMFER, BREAK, CHANGE/CHPROP. **The intersection kernel it needs is built** — `intersect.hpp`. The commands themselves are not. |
 | 11 | Blocks | BLOCK, INSERT, WBLOCK, EXPLODE, MINSERT, BASE. Raises open question 7. |
 | 12 | UCS | `CLAUDE.md` notes ECS is foundational and already in the kernel, but that UCS "has nowhere to live". This gives it one. |
 | 13 | Meshes and surfaces | PFACE, 3DMESH, RULESURF, TABSURF, REVSURF, EDGESURF; AutoLISP file I/O (`open`, `read-line` — `file_subrs.cpp` currently holds only `dxfout`); suppressed-regen batch mode for LISP loops. **The project's stated purpose.** |
@@ -381,6 +381,55 @@ every entity rather than stopping at the first hit.
 the pick box, ordered topmost-first, plus somewhere to remember which one was offered
 last so the next Ctrl+click moves on. The search itself is a small change —
 `pick_entity` already visits them all and simply returns early.
+
+## The intersection kernel — built, and what it decided
+
+`intersect.hpp` / `intersect.cpp`. Phase 10's foundation, built before any of its
+commands because TRIM, EXTEND, FILLET, CHAMFER and BREAK are one question wearing
+five hats, and five implementations of it would be five sets of tolerances
+disagreeing about whether a corner is closed.
+
+**It supersedes `intersect_entities` in `osnap_derived.hpp`, which now delegates
+to it.** That function came first and answered the narrower question osnap asks;
+keeping both would have been the duplicated-judgement problem the project already
+avoids elsewhere. What stays osnap's own is the *shape* of the answer — points
+only, bounded only, at most two, duplicates collapsed — because a cursor cannot
+usefully be offered the twelve places two polylines cross.
+
+Three things the kernel adds over what osnap needed:
+
+- **Parameters.** An intersection carries where it falls on each curve, not only
+  its coordinates. BREAK cannot split a curve without that, and TRIM's "the piece
+  nearer the pick" is a question about parameters. Normalised so [0,1] spans the
+  entity as drawn, whatever it is; `curve_point_at()` evaluates the inverse, and a
+  test pins the round trip because that is what BREAK will depend on.
+- **Extension.** `IntersectMode::Extended` intersects the unbounded carriers — an
+  infinite line, a whole circle — and flags which results actually landed on the
+  entities. That is what EXTEND is *for*. The invariant that makes it safe, and
+  which is tested: extending changes which answers are reported, never where they
+  are.
+- **Non-coplanar circles.** Two circles in space meet where each crosses the
+  other's plane at the other's radius. osnap declined this case as a documented
+  limitation; the kernel solves it, so a circle in XY and one in YZ now correctly
+  meet at two points. **The osnap test that pinned the old limitation was updated
+  rather than worked around** — it was pinning a gap, not a decision.
+
+Decisions worth not re-litigating:
+
+- **Polyline segments are never extended, in either mode.** A polyline's carrier
+  is not a well-defined curve; an interior segment's extension means nothing.
+- **Collinear overlap is not reported.** An overlap is a range, not a point, and
+  every caller here wants points.
+- **A tangent is one intersection, not two.** Emitting it twice would make TRIM
+  believe there are two pieces where there is one.
+- **Everything is decomposed into sub-curves** — a line is one, a circle or arc is
+  one, a polyline is one per segment — and every pair goes through the same three
+  primitives. That is why polylines needed no fourth case, and why a bulged
+  polyline segment meets a circle by exactly the arithmetic a standalone ARC uses.
+
+Not yet done: no spatial index, so `intersect` over a selection set is O(n^2) in
+the set's size. That is open question 5's problem and slots in behind this
+without changing the signature.
 
 ## PEDIT's curve options need a curve representation first
 
