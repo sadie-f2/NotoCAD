@@ -12,6 +12,7 @@ add_executable(noto_tests
   test_dxfout.cpp
   test_command.cpp
   test_prompt.cpp
+  test_osnap_derived.cpp
   test_render.cpp
   test_viewport.cpp
 )

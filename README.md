@@ -20,18 +20,25 @@ R12 (AC1009) writer; and an AutoLISP interpreter — arena, reader, evaluator,
 special forms, the builtin function table, and the entity-access functions
 (`entmake`, `entget`, `entmod`, `entdel`, `entlast`, `entnext`).
 
-Commands are resumable state machines — LINE, CIRCLE and ERASE so far — driven
-interchangeably by script text or by AutoLISP `(command ...)`. A command can be
-started by one `(command ...)` call and finished by a later one, with arbitrary
-LISP in between.
+Commands are resumable state machines — LINE, CIRCLE, ERASE and DXFOUT so far —
+driven interchangeably by script text, by a mouse click, or by AutoLISP
+`(command ...)`. A command can be started by one `(command ...)` call and
+finished by a later one, with arbitrary LISP in between.
+
+Object snaps are complete at the kernel level: the static ones (END/MID/CEN/QUA)
+on the entity vtable, the derived ones (NEA/PER/TAN/INT) as free functions over
+the kernel, headless and tested.
+
+There is a Qt6 shell, `ncad_gui` — a wireframe viewport with pan, zoom and orbit,
+and a command line driving the same engine and interpreter as `ncad`. It is a
+viewer you can type at; picking geometry with the cursor is the next phase.
 
 Geometry can be generated procedurally from LISP and written to DXF today. The
 emitted DXF has been verified to open correctly in AutoCAD 2026, including
 entities on arbitrary tilted planes.
 
-**Not yet:** the remaining R12 entities,
-derived object snaps (perpendicular / tangent / nearest / intersection), a DXF
-reader, UCS, and the Qt6 shell.
+**Not yet:** the remaining R12 entities, a DXF reader, UCS, and in the shell,
+entity hit-testing, osnap cursor tracking and grips.
 
 ## Using it
 
@@ -57,16 +64,16 @@ out.dxf written
 ```
 
 A line starting with `(` is AutoLISP, and an expression also answers a prompt:
-`Specify radius of circle: (* 25.4 2)` works, as does `!r` for a variable. The
-one exception is a file name prompt, which takes the line verbatim — parens are
-ordinary in paths. A name containing spaces has to go on its own line, since a
-space acts as Enter.
+`Specify radius of circle: (* 25.4 2)` works, as does `!r` for a variable —
+which at the command prompt prints it instead. The one exception is a file name
+prompt, which takes the line verbatim, since parens are ordinary in paths; a
+name containing spaces has to go on its own line.
 
- `!name` prints a variable at the command
-prompt, or answers a prompt with its value; a parenthesised expression answers a
-prompt too, so `Specify radius of circle: (* 2.0 5.0)` works. A space acts as
-Enter, so `CIRCLE 50,25 20` is one line. `?` lists commands, `CANCEL` aborts a
-command, and Enter at the command prompt repeats the last one.
+A space acts as Enter, so `CIRCLE 50,25 20` is one line. Points may be written
+`10,20` absolute, `@5,0` relative to the last point, `@30<45` polar in degrees,
+or `@` for the last point itself. Any unambiguous abbreviation of a command
+works. `?` lists commands, `CANCEL` aborts one, and Enter at the command prompt
+repeats the last.
 
 `ncad --lisp` gives a plain AutoLISP REPL instead, which is the better shape for
 piping a generated script in.
@@ -98,6 +105,13 @@ ctest --test-dir build          # unit suite plus CLI smoke tests
 ```
 
 Options: `NOTO_BUILD_GUI` (off), `NOTO_WITH_DWG` (off), `NOTO_BUILD_TESTS` (on).
+
+`-DNOTO_BUILD_GUI=ON` adds `./build/src/gui/ncad_gui`, the Qt shell: the same
+drawing, engine and interpreter as `ncad`, with a viewport. Middle-drag pans,
+shift+middle orbits, the wheel zooms about the cursor, Home is extents and
+Ctrl+Home is plan. Typing anywhere goes to the command line, and a left click
+answers a point prompt. Rendering the same database two ways is a correctness
+check worth having — the two disagreeing is a real signal.
 
 Sanitizer build, worth running after any arena or interpreter work:
 

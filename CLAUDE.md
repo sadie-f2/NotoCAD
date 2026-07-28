@@ -73,8 +73,11 @@ the end:
    out of `ncad`'s `std::cin` loop into `app::PromptSession` so the window and
    the terminal run the same code over a `PromptOutput` sink.
 4. Usable: pick box, entity hit-testing, osnap cursor tracking, grips. This is the
-   expensive one, and most of it is geometry work rather than Qt work — the derived
-   osnaps (PER/TAN/NEA/INT) do not exist yet and are the prerequisite.
+   expensive one, and most of it is geometry work rather than Qt work. The
+   prerequisite is done: the derived osnaps (PER/TAN/NEA/INT) live in
+   `osnap_derived.hpp`, headless and tested. Still to come — hit-testing against a
+   pick box, the candidate search that ranks snaps under the cursor, marker
+   glyphs, and grips.
 
 **QPainter before OpenGL.** R12-era display is wireframe: lines, arcs, text. QPainter
 does that in a fraction of the code with no shader pipeline, no GL context management
@@ -193,7 +196,8 @@ Executables are `ncad*`; libraries are `noto_*`.
 
 ```
 include/noto/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, dxf,
-                     command, commands, input_text, render, scene, viewport
+                     command, commands, input_text, osnap_derived, render, scene,
+                     viewport
 include/noto/lisp/   arena, value, reader, eval
 src/core/            geometry kernel, entities, database, DXF writer, commands
 src/lisp/            interpreter: arena, values, reader, eval, builtins, subrs
