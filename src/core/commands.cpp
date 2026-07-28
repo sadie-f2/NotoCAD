@@ -7,6 +7,7 @@
 #include "noto/scene.hpp"
 
 #include "noto/dxf.hpp"
+#include "noto/dxf_read.hpp"
 #include "noto/entities.hpp"
 
 #include <memory>
@@ -1836,6 +1837,41 @@ Step ListCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::done(out);
 }
 
+// --- DXFIN ------------------------------------------------------------------
+
+Step DxfInCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "File name";
+    return Step::ask(p);
+}
+
+Step DxfInCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind != InputKind::String || value.text.empty()) {
+        return Step::failed("a file name is required");
+    }
+
+    std::string path = value.text;
+    if (path.size() < 4 || path.compare(path.size() - 4, 4, ".dxf") != 0) path += ".dxf";
+
+    const DxfReadResult r = read_dxf_file(ctx.db, path);
+    if (!r.ok) return Step::failed(r.error.empty() ? "could not read the file" : r.error);
+
+    // The selection named entities in a drawing that no longer exists.
+    ctx.selection.clear();
+
+    std::string message = std::to_string(r.entities) + " entities, " +
+                          std::to_string(r.layers) + " layers";
+    if (r.proxies != 0) {
+        // Said plainly rather than buried: these are the parts this program
+        // cannot edit, and knowing before editing beats discovering after.
+        message += ", " + std::to_string(r.proxies) +
+                   " kept as-is (not editable, written back unchanged)";
+    }
+    if (r.newer_version) message += ". Warning: file is " + r.version + ", newer than R12";
+    return Step::done(message);
+}
+
 // --- DXFOUT -----------------------------------------------------------------
 
 Step DxfOutCommand::start(CommandContext&) {
@@ -1868,6 +1904,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "LIMITS") return std::make_unique<LimitsCommand>();
     if (upper == "LTSCALE") return std::make_unique<LtScaleCommand>();
     if (upper == "ERASE") return std::make_unique<EraseCommand>();
+    if (upper == "DXFIN" || upper == "OPEN") return std::make_unique<DxfInCommand>();
     if (upper == "DXFOUT") return std::make_unique<DxfOutCommand>();
     if (upper == "AREA") return std::make_unique<AreaCommand>();
     if (upper == "ARRAY") return std::make_unique<ArrayCommand>();
@@ -1892,7 +1929,8 @@ CommandPtr make_command(std::string_view name) {
 
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
-        "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFOUT", "ERASE", "ID",
+        "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
+        "ID", "OPEN",
         "LIMITS", "LTSCALE",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PLAN",  "REDO",  "ROTATE",
         "SCALE", "STRETCH", "UNDO", "ZOOM"};

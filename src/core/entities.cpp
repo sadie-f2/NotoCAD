@@ -74,6 +74,7 @@ const char* entity_type_name(EntityType t) {
         case EntityType::Arc: return "ARC";
         case EntityType::Polyline: return "POLYLINE";
         case EntityType::Text: return "TEXT";
+        case EntityType::Proxy: return "PROXY";
     }
     return "UNKNOWN";
 }

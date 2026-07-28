@@ -15,6 +15,7 @@
 
 #include "noto/entity.hpp"
 
+#include <string>
 #include <vector>
 
 namespace noto {
@@ -190,6 +191,59 @@ public:
 private:
     std::vector<PolyVertex> vertices_;
     bool closed_{false};
+};
+
+// One DXF group: a code and its value, kept as text.
+//
+// Text rather than parsed, because a proxy's whole job is to give back exactly
+// what it was given. Parsing to double and formatting again would round-trip
+// most values and quietly alter some.
+struct DxfGroup {
+    int code{0};
+    std::string value;
+};
+
+// An entity read from DXF that this program has no class for.
+//
+// It draws nothing, has no snaps and no grips, and refuses to transform. What
+// it does is survive: opening a drawing and saving it writes these back byte
+// for byte, so a file containing TEXT, INSERT, DIMENSION or anything from R13
+// is not silently emptied by a round trip. AutoCAD does the same thing under
+// the same name.
+//
+// Each real entity built later takes its type out of proxy status; nothing else
+// has to change.
+class Proxy final : public Entity {
+public:
+    Proxy() : Entity(EntityType::Proxy) {}
+
+    const std::string& dxf_name() const { return dxf_name_; }
+    void set_dxf_name(std::string name) { dxf_name_ = std::move(name); }
+
+    const std::vector<DxfGroup>& groups() const { return groups_; }
+    void add_group(int code, std::string value) { groups_.push_back({code, std::move(value)}); }
+
+    EntityPtr clone() const override;
+
+    // A no-op. A proxy cannot be moved or scaled, because doing so would mean
+    // understanding which of its groups are coordinates -- which is exactly
+    // what it does not know. R12 and AutoCAD both refuse rather than guess.
+    void transform(const Mat4& m) override;
+
+    // Deliberately invalid: with no geometry there is nothing to bound, and an
+    // invalid box keeps a proxy out of picking, region selection and extents
+    // rather than putting an invisible obstacle at the origin.
+    BBox bbox() const override;
+
+    void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
+    void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
+
+private:
+    std::string dxf_name_;
+    std::vector<DxfGroup> groups_;
 };
 
 }  // namespace noto

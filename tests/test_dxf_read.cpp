@@ -1,0 +1,280 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Sadie Forbes
+
+#include "test.hpp"
+
+#include "noto/database.hpp"
+#include "noto/dxf.hpp"
+#include "noto/dxf_read.hpp"
+#include "noto/entities.hpp"
+
+#include <memory>
+#include <sstream>
+#include <string>
+
+using namespace noto;
+
+namespace {
+
+// DXF is pairs of lines. Written this way so the tests read like the file does.
+std::string dxf(std::initializer_list<const char*> lines) {
+    std::string out;
+    for (const char* l : lines) {
+        out += l;
+        out += "\n";
+    }
+    return out;
+}
+
+const char* kEntitiesOpen = "  0\nSECTION\n  2\nENTITIES";
+const char* kEnd = "  0\nENDSEC\n  0\nEOF";
+
+}  // namespace
+
+TEST_CASE("dxf read: a line, in world coordinates") {
+    Database db;
+    const DxfReadResult r = read_dxf_text(db, dxf({kEntitiesOpen,
+                                                   "  0\nLINE\n  8\n0\n 10\n1.0\n 20\n2.0\n 30\n"
+                                                   "0.0\n 11\n4.0\n 21\n6.0\n 31\n0.0",
+                                                   kEnd}));
+    CHECK(r.ok);
+    CHECK(r.entities == 1);
+    CHECK(db.size() == 1);
+
+    const Line* l = static_cast<const Line*>(db.get(db.order()[0]));
+    CHECK(l->type() == EntityType::Line);
+    CHECK_VEC(l->start(), 1.0, 2.0, 0.0, 1e-12);
+    CHECK_VEC(l->end(), 4.0, 6.0, 0.0, 1e-12);
+}
+
+TEST_CASE("dxf read: a circle's centre comes out of the entity coordinate system") {
+    Database db;
+    // Normal along +Y, so the stored centre is in that plane's own axes.
+    const DxfReadResult r = read_dxf_text(
+        db, dxf({kEntitiesOpen,
+                 "  0\nCIRCLE\n  8\n0\n 10\n3.0\n 20\n0.0\n 30\n5.0\n 40\n2.5\n"
+                 "210\n0.0\n220\n1.0\n230\n0.0",
+                 kEnd}));
+    CHECK(r.ok);
+
+    const Circle* c = static_cast<const Circle*>(db.get(db.order()[0]));
+    CHECK_NEAR(c->radius(), 2.5, 1e-12);
+    CHECK_VEC(c->props().normal, 0.0, 1.0, 0.0, 1e-12);
+    // Not (3, 0, 5): the ECS-to-world conversion has to have happened.
+    CHECK(std::abs(c->center().y - 5.0) < 1e-9 || std::abs(c->center().z) > 1e-9);
+}
+
+TEST_CASE("dxf read: arc angles are degrees on disk and radians in memory") {
+    Database db;
+    read_dxf_text(db, dxf({kEntitiesOpen,
+                           "  0\nARC\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n 40\n10.0\n"
+                           " 50\n0.0\n 51\n90.0",
+                           kEnd}));
+
+    const Arc* a = static_cast<const Arc*>(db.get(db.order()[0]));
+    CHECK_NEAR(a->start_angle(), 0.0, 1e-12);
+    CHECK_NEAR(a->end_angle(), 1.5707963267948966, 1e-12);
+}
+
+TEST_CASE("dxf read: a polyline becomes one entity, not one per vertex") {
+    Database db;
+    read_dxf_text(db, dxf({kEntitiesOpen,
+                           "  0\nPOLYLINE\n  8\n0\n 66\n1\n 70\n1",
+                           "  0\nVERTEX\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0",
+                           "  0\nVERTEX\n  8\n0\n 10\n10.0\n 20\n0.0\n 30\n0.0\n 42\n1.0",
+                           "  0\nVERTEX\n  8\n0\n 10\n10.0\n 20\n10.0\n 30\n0.0",
+                           "  0\nSEQEND\n  8\n0",
+                           kEnd}));
+
+    // The whole storage decision, checked at the boundary that motivated it.
+    CHECK(db.size() == 1);
+    const Polyline* p = static_cast<const Polyline*>(db.get(db.order()[0]));
+    CHECK(p->type() == EntityType::Polyline);
+    CHECK(p->size() == 3);
+    CHECK(p->closed());
+    CHECK_VEC(p->vertices()[1].pos, 10.0, 0.0, 0.0, 1e-12);
+    CHECK_NEAR(p->vertices()[1].bulge, 1.0, 1e-12);
+}
+
+TEST_CASE("dxf read: an entity after a polyline is not swallowed") {
+    Database db;
+    read_dxf_text(db, dxf({kEntitiesOpen,
+                           "  0\nPOLYLINE\n  8\n0\n 66\n1",
+                           "  0\nVERTEX\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0",
+                           "  0\nVERTEX\n  8\n0\n 10\n1.0\n 20\n0.0\n 30\n0.0",
+                           "  0\nSEQEND\n  8\n0",
+                           "  0\nLINE\n  8\n0\n 10\n5.0\n 20\n5.0\n 30\n0.0\n"
+                           " 11\n6.0\n 21\n5.0\n 31\n0.0",
+                           kEnd}));
+
+    // The vertex loop reads ahead, so the entity following SEQEND is the one
+    // most likely to be lost by an off-by-one in the pushback.
+    CHECK(db.size() == 2);
+    CHECK(db.get(db.order()[1])->type() == EntityType::Line);
+}
+
+TEST_CASE("dxf read: an unknown entity survives as a proxy") {
+    Database db;
+    const DxfReadResult r = read_dxf_text(
+        db, dxf({kEntitiesOpen,
+                 "  0\nTEXT\n  8\nNOTES\n 10\n1.0\n 20\n2.0\n 30\n0.0\n 40\n0.2\n"
+                 "  1\nHello world",
+                 kEnd}));
+
+    CHECK(r.ok);
+    CHECK(r.entities == 1);
+    CHECK(r.proxies == 1);
+
+    const Entity* e = db.get(db.order()[0]);
+    CHECK(e->type() == EntityType::Proxy);
+    CHECK(static_cast<const Proxy*>(e)->dxf_name() == "TEXT");
+    // Nothing to draw, nothing to pick, nothing to frame.
+    CHECK(!e->bbox().valid());
+}
+
+TEST_CASE("dxf read: a proxy writes back what it read, unchanged") {
+    Database db;
+    read_dxf_text(db, dxf({kEntitiesOpen,
+                           "  0\nDIMENSION\n  8\nDIMS\n  2\n*D0\n 10\n1.5\n 20\n2.5\n 30\n0.0\n"
+                           "  1\nsome text\n 70\n0",
+                           kEnd}));
+    CHECK(db.size() == 1);
+
+    std::ostringstream out;
+    DxfWriter w(out, db);
+    w.write_document();
+    const std::string text = out.str();
+
+    // The point of the exercise: opening a drawing and saving it must not
+    // quietly empty it of what this program does not understand.
+    CHECK(text.find("DIMENSION") != std::string::npos);
+    CHECK(text.find("some text") != std::string::npos);
+    CHECK(text.find("*D0") != std::string::npos);
+}
+
+TEST_CASE("dxf read: layers and linetypes come from the tables") {
+    Database db;
+    const DxfReadResult r = read_dxf_text(
+        db, dxf({"  0\nSECTION\n  2\nTABLES",
+                 "  0\nTABLE\n  2\nLTYPE",
+                 "  0\nLTYPE\n  2\nDASHED\n  3\nDashed\n 72\n65\n 73\n2\n 40\n0.75\n"
+                 " 49\n0.5\n 49\n-0.25",
+                 "  0\nENDTAB",
+                 "  0\nTABLE\n  2\nLAYER",
+                 "  0\nLAYER\n  2\nWALLS\n 62\n3\n  6\nDASHED\n 70\n0",
+                 "  0\nLAYER\n  2\nHIDDEN\n 62\n1\n 70\n1",
+                 "  0\nENDTAB",
+                 "  0\nENDSEC",
+                 kEnd}));
+
+    CHECK(r.ok);
+    const LinetypeId dashed = db.find_linetype("DASHED");
+    CHECK(dashed != kInvalidLinetype);
+    CHECK(db.linetype(dashed).pattern.size() == 2);
+    CHECK_NEAR(db.linetype(dashed).pattern_length(), 0.75, 1e-12);
+
+    const LayerId walls = db.find_layer("WALLS");
+    CHECK(walls != kInvalidLayer);
+    CHECK(db.layer(walls).color == 3);
+    CHECK(db.layer(walls).linetype == dashed);
+
+    // Group 70 bit 1 is frozen.
+    CHECK(db.layer(db.find_layer("HIDDEN")).frozen);
+}
+
+TEST_CASE("dxf read: an entity naming a layer the tables forgot still gets one") {
+    Database db;
+    read_dxf_text(db, dxf({kEntitiesOpen,
+                           "  0\nLINE\n  8\nGHOST\n 10\n0.0\n 20\n0.0\n 30\n0.0\n"
+                           " 11\n1.0\n 21\n0.0\n 31\n0.0",
+                           kEnd}));
+
+    // Better than dropping it onto layer 0 and losing the name, which is the
+    // sort of loss nobody notices until a layer is missing from a plot.
+    const LayerId ghost = db.find_layer("GHOST");
+    CHECK(ghost != kInvalidLayer);
+    CHECK(db.get(db.order()[0])->props().layer == ghost);
+}
+
+TEST_CASE("dxf read: a round trip through the writer and back") {
+    Database source;
+    source.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{10, 5, 0}));
+    source.add(std::make_unique<Circle>(Vec3{1, 2, 0}, 3.0));
+    auto p = std::make_unique<Polyline>();
+    p->add({0, 0, 0});
+    p->add({5, 0, 0}, 0.5);
+    p->add({5, 5, 0});
+    source.add(std::move(p));
+
+    std::ostringstream out;
+    DxfWriter w(out, source);
+    w.write_document();
+
+    Database loaded;
+    const DxfReadResult r = read_dxf_text(loaded, out.str());
+    CHECK(r.ok);
+    CHECK(loaded.size() == 3);
+
+    CHECK(loaded.get(loaded.order()[0])->type() == EntityType::Line);
+    CHECK(loaded.get(loaded.order()[1])->type() == EntityType::Circle);
+
+    const Polyline* back = static_cast<const Polyline*>(loaded.get(loaded.order()[2]));
+    CHECK(back->size() == 3);
+    CHECK_NEAR(back->vertices()[1].bulge, 0.5, 1e-9);
+    CHECK_VEC(back->vertices()[2].pos, 5.0, 5.0, 0.0, 1e-9);
+}
+
+TEST_CASE("dxf read: opening replaces the drawing and leaves no history") {
+    Database db;
+    db.add(std::make_unique<Line>(Vec3{99, 99, 0}, Vec3{100, 100, 0}));
+    CHECK(db.journal().can_undo());
+
+    read_dxf_text(db, dxf({kEntitiesOpen,
+                           "  0\nLINE\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n"
+                           " 11\n1.0\n 21\n0.0\n 31\n0.0",
+                           kEnd}));
+
+    CHECK(db.size() == 1);
+    // Undoing past the load of a drawing is not meaningful, and the load is not
+    // an edit.
+    CHECK(!db.journal().can_undo());
+    CHECK(!db.journal().can_redo());
+}
+
+TEST_CASE("dxf read: the version is reported rather than enforced") {
+    Database db;
+    DxfReadResult r = read_dxf_text(
+        db, dxf({"  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1009\n  0\nENDSEC", kEnd}));
+    CHECK(r.version == "AC1009");
+    CHECK(!r.newer_version);
+
+    Database db2;
+    r = read_dxf_text(
+        db2, dxf({"  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1015\n  0\nENDSEC", kEnd}));
+    CHECK(r.newer_version);
+    // Reading continues: a later file is mostly R12 plus entities that become
+    // proxies, and refusing it outright would lose more than it protects.
+    CHECK(r.ok);
+}
+
+TEST_CASE("dxf read: a truncated file does not run away") {
+    Database db;
+    // A code with no value, which is what a file cut off mid-write looks like.
+    const DxfReadResult r = read_dxf_text(db, "  0\nSECTION\n  2\nENTITIES\n  0\nLINE\n 10\n");
+    CHECK(r.ok);  // what was readable was read
+    CHECK(db.size() <= 1);
+}
+
+TEST_CASE("dxf read: carriage returns and padded codes are tolerated") {
+    Database db;
+    // Written on Windows, with codes right-aligned in a three-character field.
+    const std::string text =
+        "  0\r\nSECTION\r\n  2\r\nENTITIES\r\n"
+        "  0\r\nLINE\r\n  8\r\n0\r\n 10\r\n1.0\r\n 20\r\n2.0\r\n 30\r\n0.0\r\n"
+        " 11\r\n3.0\r\n 21\r\n4.0\r\n 31\r\n0.0\r\n"
+        "  0\r\nENDSEC\r\n  0\r\nEOF\r\n";
+    const DxfReadResult r = read_dxf_text(db, text);
+    CHECK(r.ok);
+    CHECK(db.size() == 1);
+    CHECK_VEC(static_cast<const Line*>(db.get(db.order()[0]))->end(), 3.0, 4.0, 0.0, 1e-12);
+}

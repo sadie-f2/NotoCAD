@@ -518,7 +518,13 @@ TEST_CASE("commands: abbreviations resolve, exact names win") {
     // DIST changed that, and the shortest-wins rule hands D to DIST -- which is
     // also what a user typing one letter most likely wants.
     CHECK(resolve_command_name("D").name == "DIST");
-    CHECK(resolve_command_name("DX").name == "DXFOUT");
+    // DX used to mean DXFOUT. DXFIN made it ambiguous, and shortest-wins hands
+    // it to the shorter name. This is the third abbreviation the growing
+    // command set has moved, and it is the rule working rather than failing --
+    // the point of the test is that the answer is defined, not that it never
+    // changes.
+    CHECK(resolve_command_name("DX").name == "DXFIN");
+    CHECK(resolve_command_name("DXFO").name == "DXFOUT");
     CHECK(resolve_command_name("DIS").name == "DIST");
     // acad.pgp short forms.
     CHECK(resolve_command_name("C").name == "CIRCLE");

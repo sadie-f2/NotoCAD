@@ -10,6 +10,7 @@ add_library(noto_core STATIC
   entities_grip.cpp
   dash.cpp
   polyline.cpp
+  proxy.cpp
   osnap_derived.cpp
   selection.cpp
   sysvar.cpp
@@ -21,6 +22,7 @@ add_library(noto_core STATIC
   viewport.cpp
   database.cpp
   dxf.cpp
+  dxf_read.cpp
   command.cpp
   commands.cpp
   input_text.cpp

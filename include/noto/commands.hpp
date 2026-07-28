@@ -463,6 +463,18 @@ private:
     SelectionPrompter select_;
 };
 
+// DXFIN: read a DXF file, replacing the drawing.
+//
+// R12 distinguishes OPEN (a DWG) from DXFIN (a DXF). Only DXF exists here, so
+// this is the one that reads a drawing, and OPEN is its alias rather than a
+// separate command that would have nothing else to do.
+class DxfInCommand final : public Command {
+public:
+    const char* name() const override { return "DXFIN"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
 // DXFOUT: prompt for a file name and write the drawing. In R12 this is a
 // command, and it only lived as a LISP function because the command layer did
 // not exist yet. The (dxfout ...) function stays -- scripts want it -- but this
