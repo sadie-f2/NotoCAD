@@ -182,16 +182,16 @@ TEST_CASE("pick: entities on layers that are off or frozen are not pickable") {
     CHECK(pick_entity(db, v, centre(), 3.0).entity == h);
 
     // Off: R12 spells it as a negative colour.
-    db.layer(hidden).color = -7;
+    db.set_layer_color(hidden, -7);
     CHECK(!pick_entity(db, v, centre(), 3.0).hit());
 
-    db.layer(hidden).color = 7;
-    db.layer(hidden).frozen = true;
+    db.set_layer_color(hidden, 7);
+    db.set_layer_frozen(hidden, true);
     CHECK(!pick_entity(db, v, centre(), 3.0).hit());
 
     // Locked is still pickable: R12 permits the selection and refuses the edit.
-    db.layer(hidden).frozen = false;
-    db.layer(hidden).locked = true;
+    db.set_layer_frozen(hidden, false);
+    db.set_layer_locked(hidden, true);
     CHECK(pick_entity(db, v, centre(), 3.0).entity == h);
 }
 

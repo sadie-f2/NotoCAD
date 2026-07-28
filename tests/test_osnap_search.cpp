@@ -274,11 +274,11 @@ TEST_CASE("osnap search: entities on hidden layers contribute nothing") {
 
     CHECK(osnap_search(db, v, at(0, 0), query(kOsnapEndpoint, 0, 0)).valid);
 
-    db.layer(hidden).color = -7;  // off
+    db.set_layer_color(hidden, -7);  // off
     CHECK(!osnap_search(db, v, at(0, 0), query(kOsnapEndpoint, 0, 0)).valid);
 
-    db.layer(hidden).color = 7;
-    db.layer(hidden).frozen = true;
+    db.set_layer_color(hidden, 7);
+    db.set_layer_frozen(hidden, true);
     CHECK(!osnap_search(db, v, at(0, 0), query(kOsnapEndpoint, 0, 0)).valid);
 }
 

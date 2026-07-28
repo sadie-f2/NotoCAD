@@ -10,6 +10,7 @@
 
 #include "noto/entity.hpp"
 #include "noto/sysvar.hpp"
+#include "noto/tables.hpp"
 #include "noto/undo.hpp"
 
 #include <string>
@@ -17,23 +18,6 @@
 #include <vector>
 
 namespace noto {
-
-inline constexpr LayerId kInvalidLayer = 0xFFFF;
-inline constexpr LinetypeId kInvalidLinetype = 0xFFFF;
-
-struct Layer {
-    std::string name;
-    std::int16_t color{7};  // negative means the layer is off, per R12
-    LinetypeId linetype{kLinetypeContinuous};
-    bool frozen{false};
-    bool locked{false};
-};
-
-struct Linetype {
-    std::string name;
-    std::string description;
-    std::vector<double> pattern;  // positive = dash, negative = gap, 0 = dot
-};
 
 class Database {
 public:
@@ -64,6 +48,13 @@ public:
     // draws on top of what, and change the DXF byte for byte.
     bool restore(Handle h, EntityPtr entity, std::size_t order_index);
 
+    // Undo's way back. Not for general use: adds append, so removing one is
+    // only ever valid as the reversal of the add that put it there.
+    void pop_layer();
+    void pop_linetype();
+    void restore_layer(LayerId id, const Layer& value);
+    void restore_linetype(LinetypeId id, const Linetype& value);
+
     // Drawing-order traversal, for AutoLISP's entnext and entlast.
     Handle first() const { return order_.empty() ? kNullHandle : order_.front(); }
     Handle last() const { return order_.empty() ? kNullHandle : order_.back(); }
@@ -86,13 +77,23 @@ public:
                       LinetypeId linetype = kLinetypeContinuous);
     LayerId find_layer(const std::string& name) const;
     const Layer& layer(LayerId id) const { return layers_[id]; }
-    Layer& layer(LayerId id) { return layers_[id]; }
+
+    // Writes go through here rather than through a mutable reference, so that
+    // every change is journalled. Handing out a Layer& would route edits past
+    // undo, which is exactly how undo grows holes -- the same reasoning that
+    // put the journal inside Sysvars.
+    bool set_layer(LayerId id, const Layer& value);
+    bool set_layer_color(LayerId id, std::int16_t color);
+    bool set_layer_frozen(LayerId id, bool frozen);
+    bool set_layer_locked(LayerId id, bool locked);
+    bool set_layer_linetype(LayerId id, LinetypeId linetype);
     const std::vector<Layer>& layers() const { return layers_; }
 
     LinetypeId add_linetype(const std::string& name, const std::string& description,
                             std::vector<double> pattern);
     LinetypeId find_linetype(const std::string& name) const;
     const Linetype& linetype(LinetypeId id) const { return linetypes_[id]; }
+    bool set_linetype(LinetypeId id, const Linetype& value);
     const std::vector<Linetype>& linetypes() const { return linetypes_; }
 
     // --- system variables ---------------------------------------------------

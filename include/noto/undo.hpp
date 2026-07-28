@@ -33,6 +33,7 @@
 
 #include "noto/entity.hpp"
 #include "noto/sysvar.hpp"
+#include "noto/tables.hpp"
 
 #include <cstddef>
 #include <string>
@@ -47,6 +48,26 @@ enum class ChangeKind : std::uint8_t {
     EraseEntity,    // `before` holds what was removed, and where it sat
     ModifyEntity,   // both, same handle
     SetSysvar,
+    AddLayer,
+    ModifyLayer,
+    AddLinetype,
+    ModifyLinetype,
+};
+
+// Table before-and-after states, held behind a pointer rather than inline.
+//
+// A Layer carries a string and a Linetype carries two plus a vector, so putting
+// them in every Change would add a couple of hundred bytes to each of the
+// twenty thousand records a mesh build produces. Table changes are rare and
+// entity changes are not, so the rare case pays the allocation.
+struct TableChange {
+    LayerId layer_id{0};
+    Layer layer_before;
+    Layer layer_after;
+
+    LinetypeId linetype_id{0};
+    Linetype linetype_before;
+    Linetype linetype_after;
 };
 
 // Move-only: it owns entity copies.
@@ -65,6 +86,9 @@ struct Change {
     Sysvar sysvar{Sysvar::OsMode};
     SysvarValue sysvar_before;
     SysvarValue sysvar_after;
+
+    // Null except for the table kinds. See TableChange for why.
+    std::unique_ptr<TableChange> table;
 };
 
 struct UndoGroup {
@@ -90,6 +114,11 @@ public:
     void record_erase(const Entity& removed, std::size_t order_index);
     void record_modify(const Entity& before, const Entity& after);
     void record_sysvar(Sysvar id, const SysvarValue& before, const SysvarValue& after);
+
+    void record_layer_add(LayerId id, const Layer& added);
+    void record_layer_modify(LayerId id, const Layer& before, const Layer& after);
+    void record_linetype_add(LinetypeId id, const Linetype& added);
+    void record_linetype_modify(LinetypeId id, const Linetype& before, const Linetype& after);
 
     bool replaying() const { return replaying_; }
 

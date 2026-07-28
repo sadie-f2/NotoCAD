@@ -4,8 +4,16 @@
 #include "noto/database.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace noto {
+
+double Linetype::pattern_length() const {
+    double total = 0.0;
+    for (const double d : pattern) total += std::abs(d);
+    return total;
+}
+
 
 Database::Database() {
     sysvars_.set_journal(&journal_);
@@ -94,6 +102,75 @@ bool Database::erase(Handle h) {
     return true;
 }
 
+bool Database::set_layer(LayerId id, const Layer& value) {
+    if (id >= layers_.size()) return false;
+    const Layer before = layers_[id];
+    layers_[id] = value;
+    journal_.record_layer_modify(id, before, layers_[id]);
+    return true;
+}
+
+bool Database::set_layer_color(LayerId id, std::int16_t color) {
+    if (id >= layers_.size()) return false;
+    Layer next = layers_[id];
+    next.color = color;
+    return set_layer(id, next);
+}
+
+bool Database::set_layer_frozen(LayerId id, bool frozen) {
+    if (id >= layers_.size()) return false;
+    Layer next = layers_[id];
+    next.frozen = frozen;
+    return set_layer(id, next);
+}
+
+bool Database::set_layer_locked(LayerId id, bool locked) {
+    if (id >= layers_.size()) return false;
+    Layer next = layers_[id];
+    next.locked = locked;
+    return set_layer(id, next);
+}
+
+bool Database::set_layer_linetype(LayerId id, LinetypeId linetype) {
+    if (id >= layers_.size()) return false;
+    Layer next = layers_[id];
+    next.linetype = linetype;
+    return set_layer(id, next);
+}
+
+bool Database::set_linetype(LinetypeId id, const Linetype& value) {
+    if (id >= linetypes_.size()) return false;
+    const Linetype before = linetypes_[id];
+    linetypes_[id] = value;
+    journal_.record_linetype_modify(id, before, linetypes_[id]);
+    return true;
+}
+
+void Database::pop_layer() {
+    if (layers_.size() > 1) layers_.pop_back();  // layer 0 always exists
+}
+
+void Database::pop_linetype() {
+    if (linetypes_.size() > 1) linetypes_.pop_back();  // CONTINUOUS always exists
+}
+
+void Database::restore_layer(LayerId id, const Layer& value) {
+    if (id < layers_.size()) {
+        layers_[id] = value;
+        return;
+    }
+    // Redoing an add: it was the last, so putting it back is appending.
+    if (id == layers_.size()) layers_.push_back(value);
+}
+
+void Database::restore_linetype(LinetypeId id, const Linetype& value) {
+    if (id < linetypes_.size()) {
+        linetypes_[id] = value;
+        return;
+    }
+    if (id == linetypes_.size()) linetypes_.push_back(value);
+}
+
 void Database::clear() {
     entities_.clear();
     order_.clear();
@@ -114,7 +191,9 @@ LayerId Database::add_layer(const std::string& name, std::int16_t color, Linetyp
     if (existing != kInvalidLayer) return existing;
 
     layers_.push_back(Layer{name, color, linetype, false, false});
-    return static_cast<LayerId>(layers_.size() - 1);
+    const LayerId id = static_cast<LayerId>(layers_.size() - 1);
+    journal_.record_layer_add(id, layers_.back());
+    return id;
 }
 
 LayerId Database::find_layer(const std::string& name) const {
@@ -130,7 +209,9 @@ LinetypeId Database::add_linetype(const std::string& name, const std::string& de
     if (existing != kInvalidLinetype) return existing;
 
     linetypes_.push_back(Linetype{name, description, std::move(pattern)});
-    return static_cast<LinetypeId>(linetypes_.size() - 1);
+    const LinetypeId id = static_cast<LinetypeId>(linetypes_.size() - 1);
+    journal_.record_linetype_add(id, linetypes_.back());
+    return id;
 }
 
 LinetypeId Database::find_linetype(const std::string& name) const {

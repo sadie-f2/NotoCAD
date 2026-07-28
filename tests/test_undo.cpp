@@ -300,3 +300,97 @@ TEST_CASE("undo: a restored handle is never reissued") {
     CHECK(db.get(h) != nullptr);
     CHECK(db.get(next) != nullptr);
 }
+
+TEST_CASE("undo: layer changes are journalled") {
+    Database db;
+    const LayerId walls = db.add_layer("WALLS", 3);
+    CHECK(db.layer(walls).color == 3);
+
+    CHECK(db.set_layer_color(walls, 5));
+    CHECK(db.layer(walls).color == 5);
+
+    // Anything mutable that is not journalled is a hole in undo, and a layer is
+    // mutable. Turning a layer off and undoing must bring it back.
+    CHECK(db.journal().undo(db));
+    CHECK(db.layer(walls).color == 3);
+
+    CHECK(db.journal().redo(db));
+    CHECK(db.layer(walls).color == 5);
+}
+
+TEST_CASE("undo: freezing and locking are journalled too") {
+    Database db;
+    const LayerId walls = db.add_layer("WALLS");
+
+    CHECK(db.set_layer_frozen(walls, true));
+    CHECK(db.set_layer_locked(walls, true));
+    CHECK(db.layer(walls).frozen);
+    CHECK(db.layer(walls).locked);
+
+    CHECK(db.journal().undo(db));
+    CHECK(!db.layer(walls).locked);
+    CHECK(db.layer(walls).frozen);  // one step at a time
+
+    CHECK(db.journal().undo(db));
+    CHECK(!db.layer(walls).frozen);
+}
+
+TEST_CASE("undo: adding a layer is a step") {
+    Database db;
+    const std::size_t before = db.layers().size();
+    const LayerId walls = db.add_layer("WALLS");
+    CHECK(db.layers().size() == before + 1);
+    CHECK(walls == before);
+
+    CHECK(db.journal().undo(db));
+    CHECK(db.layers().size() == before);
+
+    CHECK(db.journal().redo(db));
+    CHECK(db.layers().size() == before + 1);
+    CHECK(db.layer(walls).name == "WALLS");
+}
+
+TEST_CASE("undo: layer 0 and CONTINUOUS survive everything") {
+    Database db;
+    db.add_layer("WALLS");
+    db.add_linetype("HIDDEN", "dashed", {0.5, -0.25});
+
+    while (db.journal().can_undo()) db.journal().undo(db);
+
+    // A new drawing is born with these. Undoing past them would leave entities
+    // pointing at a layer table with nothing in it.
+    CHECK(db.layers().size() >= 1);
+    CHECK(db.layer(kLayerZero).name == "0");
+    CHECK(db.linetypes().size() >= 1);
+}
+
+TEST_CASE("undo: a linetype's pattern is journalled") {
+    Database db;
+    const LinetypeId hidden = db.add_linetype("HIDDEN", "dashed", {0.5, -0.25});
+    CHECK_NEAR(db.linetype(hidden).pattern_length(), 0.75, 1e-12);
+
+    Linetype changed = db.linetype(hidden);
+    changed.pattern = {1.0, -1.0, 0.0, -1.0};
+    CHECK(db.set_linetype(hidden, changed));
+    CHECK(db.linetype(hidden).pattern.size() == 4);
+
+    CHECK(db.journal().undo(db));
+    CHECK(db.linetype(hidden).pattern.size() == 2);
+}
+
+TEST_CASE("undo: a layer change inside a command is part of that command's step") {
+    Database db;
+    CommandEngine engine(db);
+    const LayerId walls = db.add_layer("WALLS", 3);
+
+    // Simulate what a LAYER command will do: change a layer inside a group.
+    db.journal().begin_group("LAYER");
+    db.set_layer_color(walls, 1);
+    db.set_layer_frozen(walls, true);
+    db.journal().end_group();
+
+    // Two changes, one command, one undo.
+    CHECK(db.journal().undo(db));
+    CHECK(db.layer(walls).color == 3);
+    CHECK(!db.layer(walls).frozen);
+}

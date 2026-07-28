@@ -179,8 +179,8 @@ TEST_CASE("frozen and switched-off layers are not drawn") {
     const LayerId hidden = db.add_layer("HIDDEN");
     const LayerId off = db.add_layer("OFF");
     const LayerId shown = db.add_layer("SHOWN");
-    db.layer(hidden).frozen = true;
-    db.layer(off).color = -7;  // R12 stores "off" as a negative colour
+    db.set_layer_frozen(hidden, true);
+    db.set_layer_color(off, -7);  // R12 stores "off" as a negative colour
 
     for (LayerId id : {hidden, off, shown}) {
         auto l = std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0});

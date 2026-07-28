@@ -125,9 +125,12 @@ building MOVE, COPY, ROTATE, SCALE, MIRROR, ARRAY and STRETCH first would have m
 revisiting all seven. The same argument as 4b and as ECS: cheaper at four commands
 than at eleven.
 
-**Still open:** layers and linetypes are not journalled yet — no command changes them,
-so there is nothing to lose today, but LAYER in phase 8 must not land without it.
-Memory is unmeasured; see below.
+Layers and linetypes are journalled too, as of phase 8's prerequisite. `Database` no
+longer hands out a mutable `Layer&`: writes go through `set_layer_*`, for the same
+reason `Sysvars` owns its own journalling — a write routed past the journal is how undo
+grows holes.
+
+**Still open:** memory is unmeasured; see below.
 
 Not yet built, and wanted:
 
@@ -151,7 +154,8 @@ rather than guessing — the interface hides which one it is.
 |---|---|---|
 | 6 | View commands | *Mostly done.* ZOOM, PAN, PLAN and the inquiry commands are built, with transparent (`'ZOOM`) support. Still to write: VIEW (named views), REGEN, REDRAW, and ZOOM's Center, Left and Dynamic options. **VPOINT is deferred to phase 12**, since it is interpreted in the current CS and writing it against WCS only would mean writing it twice. |
 | 7 | Entity breadth | PLINE, POINT, SOLID, 3DFACE, TEXT, then PEDIT. Forces the TEXT rendering decision (open question 2). Afterwards, selection, hit-testing, osnap, transforms and DXF are all exercised against a realistic entity set instead of Line/Circle/Arc. |
-| 8 | Tables and settings | LAYER, LTYPE and dash rendering, COLOR, LTSCALE, UNITS, LIMITS. Linetypes touch three layers at once: the DXF table, dash generation in the render path, and LTSCALE — not just a table entry. |
+| 8 | Tables and settings | *In progress.* Layer and linetype journalling is done. |
+| 8 | *(detail)* | LAYER, LTYPE and dash rendering, COLOR, LTSCALE, UNITS, LIMITS. Linetypes touch three layers at once: the DXF table, dash generation in the render path, and LTSCALE — not just a table entry. |
 | 9 | DXF read and OPEN | Closes the write-only gap. `dxf.hpp` has `DxfWriter` and nothing else, so the drawing cannot be reopened — not even our own output — and the "open it in other CAD software" correctness gate runs one way only. Placed after 7–8 so the reader is written once against a fuller entity and table set rather than retrofitted, but see open question 6. |
 | 10 | Geometry editing | TRIM, EXTEND, OFFSET, FILLET, CHAMFER, BREAK, CHANGE/CHPROP. Needs intersection machinery beyond what osnap uses. |
 | 11 | Blocks | BLOCK, INSERT, WBLOCK, EXPLODE, MINSERT, BASE. Raises open question 7. |

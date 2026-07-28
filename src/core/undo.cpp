@@ -109,6 +109,50 @@ void UndoJournal::record_sysvar(Sysvar id, const SysvarValue& before, const Sysv
     push(std::move(c));
 }
 
+void UndoJournal::record_layer_add(LayerId id, const Layer& added) {
+    if (replaying_) return;
+    Change c;
+    c.kind = ChangeKind::AddLayer;
+    c.table = std::make_unique<TableChange>();
+    c.table->layer_id = id;
+    // Kept so redo can put it back; undo only needs to know it was the last.
+    c.table->layer_after = added;
+    push(std::move(c));
+}
+
+void UndoJournal::record_layer_modify(LayerId id, const Layer& before, const Layer& after) {
+    if (replaying_) return;
+    Change c;
+    c.kind = ChangeKind::ModifyLayer;
+    c.table = std::make_unique<TableChange>();
+    c.table->layer_id = id;
+    c.table->layer_before = before;
+    c.table->layer_after = after;
+    push(std::move(c));
+}
+
+void UndoJournal::record_linetype_add(LinetypeId id, const Linetype& added) {
+    if (replaying_) return;
+    Change c;
+    c.kind = ChangeKind::AddLinetype;
+    c.table = std::make_unique<TableChange>();
+    c.table->linetype_id = id;
+    c.table->linetype_after = added;
+    push(std::move(c));
+}
+
+void UndoJournal::record_linetype_modify(LinetypeId id, const Linetype& before,
+                                         const Linetype& after) {
+    if (replaying_) return;
+    Change c;
+    c.kind = ChangeKind::ModifyLinetype;
+    c.table = std::make_unique<TableChange>();
+    c.table->linetype_id = id;
+    c.table->linetype_before = before;
+    c.table->linetype_after = after;
+    push(std::move(c));
+}
+
 const std::string& UndoJournal::undo_name() const {
     return undo_.empty() ? empty_name() : undo_.back().name;
 }
@@ -143,6 +187,21 @@ bool UndoJournal::undo(Database& db) {
                 case ChangeKind::SetSysvar:
                     db.sysvars().set(sysvar_def(c.sysvar).name, c.sysvar_before);
                     break;
+                case ChangeKind::AddLayer:
+                    // Adds append, so the one being undone is the last, and
+                    // anything referring to it was added later and has already
+                    // been undone -- undo is strictly last-in-first-out.
+                    db.pop_layer();
+                    break;
+                case ChangeKind::ModifyLayer:
+                    db.restore_layer(c.table->layer_id, c.table->layer_before);
+                    break;
+                case ChangeKind::AddLinetype:
+                    db.pop_linetype();
+                    break;
+                case ChangeKind::ModifyLinetype:
+                    db.restore_linetype(c.table->linetype_id, c.table->linetype_before);
+                    break;
             }
         }
     }
@@ -173,6 +232,18 @@ bool UndoJournal::redo(Database& db) {
                     break;
                 case ChangeKind::SetSysvar:
                     db.sysvars().set(sysvar_def(c.sysvar).name, c.sysvar_after);
+                    break;
+                case ChangeKind::AddLayer:
+                    db.restore_layer(c.table->layer_id, c.table->layer_after);
+                    break;
+                case ChangeKind::ModifyLayer:
+                    db.restore_layer(c.table->layer_id, c.table->layer_after);
+                    break;
+                case ChangeKind::AddLinetype:
+                    db.restore_linetype(c.table->linetype_id, c.table->linetype_after);
+                    break;
+                case ChangeKind::ModifyLinetype:
+                    db.restore_linetype(c.table->linetype_id, c.table->linetype_after);
                     break;
             }
         }

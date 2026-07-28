@@ -134,7 +134,7 @@ TEST_CASE("selection: ALL takes everything visible") {
     auto l = std::make_unique<Line>(Vec3{0, 9, 0}, Vec3{1, 9, 0});
     l->props().layer = hidden;
     db.add(std::move(l));
-    db.layer(hidden).frozen = true;
+    db.set_layer_frozen(hidden, true);
 
     engine.begin(make_command("ERASE"));
     engine.supply(InputValue::of_keyword("ALL"));
