@@ -275,6 +275,27 @@ Step CircleCommand::start(CommandContext&) {
     return Step::ask(p);
 }
 
+bool CircleCommand::resolve(const InputValue& v, double* radius) const {
+    double d = 0.0;
+    if (!distance_from(v, centre_, d)) return false;
+    const double r = diameter_ ? d * 0.5 : d;
+    if (r <= 0.0) return false;
+    *radius = r;
+    return true;
+}
+
+bool CircleCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+    if (state_ != State::Radius) return false;
+
+    double radius = 0.0;
+    if (!resolve(tentative, &radius)) return false;
+
+    // The circle itself, not a band out to its rim: a line from the centre says
+    // where the radius is measured from and nothing about what is being drawn.
+    out.ghosts.push_back(std::make_unique<Circle>(centre_, radius, construction_normal(ctx)));
+    return true;
+}
+
 Step CircleCommand::next(CommandContext& ctx, const InputValue& value) {
     switch (state_) {
         case State::Centre: {
@@ -302,10 +323,12 @@ Step CircleCommand::next(CommandContext& ctx, const InputValue& value) {
                 return Step::ask(p);
             }
 
-            double d = 0.0;
-            if (!distance_from(value, centre_, d)) return Step::failed("a distance is required");
-            const double radius = diameter_ ? d * 0.5 : d;
-            if (radius <= 0.0) return Step::failed("radius must be positive");
+            double radius = 0.0;
+            if (!resolve(value, &radius)) {
+                return Step::failed(value.kind == InputKind::Point || value.kind == InputKind::Real
+                                        ? "radius must be positive"
+                                        : "a distance is required");
+            }
 
             // In the construction plane, not world XY. Without this a circle
             // drawn in a tilted UCS would look right on screen and serialise
@@ -364,11 +387,12 @@ Step ArcCommand::ask_start_end() {
     return Step::ask(p);
 }
 
-Step ArcCommand::emit(CommandContext& ctx, const Vec3& centre, const Vec3& from, double included) {
+EntityPtr ArcCommand::make_arc(CommandContext& ctx, const Vec3& centre, const Vec3& from,
+                               double included) const {
     const Vec3 n = construction_normal(ctx);
     const double radius = length(from - centre);
-    if (radius <= kIntersectTol) return Step::failed("the arc has no radius");
-    if (std::abs(included) <= kIntersectTol) return Step::failed("the arc has no sweep");
+    if (radius <= kIntersectTol) return nullptr;
+    if (std::abs(included) <= kIntersectTol) return nullptr;
 
     const double a = plane_angle(centre, from, n);
 
@@ -377,18 +401,16 @@ Step ArcCommand::emit(CommandContext& ctx, const Vec3& centre, const Vec3& from,
     // above hand back a signed angle and stop thinking about it.
     const double s = included > 0.0 ? a : a + included;
     const double e = included > 0.0 ? a + included : a;
-
-    ctx.db.add(with_current_props(ctx.db, std::make_unique<Arc>(centre, radius, s, e, n)));
-    return Step::done();
+    return std::make_unique<Arc>(centre, radius, s, e, n);
 }
 
-Step ArcCommand::emit_by_angle(CommandContext& ctx, double included) {
+bool ArcCommand::centre_from_chord(CommandContext& ctx, const Vec3& to, double included,
+                                   Vec3* centre) const {
     const Vec3 n = construction_normal(ctx);
-    const Vec3 chord = end_ - start_;
+    const Vec3 chord = to - start_;
     const double len = length(chord);
-    if (len <= kIntersectTol) return Step::failed("start and end are the same point");
-    if (std::abs(included) <= kIntersectTol) return Step::failed("the arc has no sweep");
-    if (std::abs(included) >= kTwoPi) return Step::failed("the angle is a full turn or more");
+    if (len <= kIntersectTol) return false;
+    if (std::abs(included) <= kIntersectTol || std::abs(included) >= kTwoPi) return false;
 
     const double half = std::abs(included) * 0.5;
     const double radius = (len * 0.5) / std::sin(half);
@@ -397,18 +419,169 @@ Step ArcCommand::emit_by_angle(CommandContext& ctx, double included) {
     // sweep direction puts it. cos goes negative past a half turn, which swings
     // it to the other side without a case for it.
     const Vec3 perp = cross(n, chord);
-    if (is_zero(perp)) return Step::failed("the chord lies along the plane normal");
+    if (is_zero(perp)) return false;
 
-    const Vec3 mid = (start_ + end_) * 0.5;
-    const double offset = radius * std::cos(half);
-    const Vec3 centre =
-        included > 0.0 ? mid + normalize(perp) * offset : mid - normalize(perp) * offset;
+    const Vec3 mid = (start_ + to) * 0.5;
+    const Vec3 off = normalize(perp) * (radius * std::cos(half));
+    *centre = included > 0.0 ? mid + off : mid - off;
+    return true;
+}
 
-    return emit(ctx, centre, start_, included);
+bool ArcCommand::resolve(CommandContext& ctx, const InputValue& v, Vec3* centre, Vec3* from,
+                         double* included, std::string* why) const {
+    const Vec3 n = construction_normal(ctx);
+    *from = start_;
+
+    auto fail = [&](const char* m) {
+        *why = m;
+        return false;
+    };
+
+    // The chord-based options all end the same way: an included angle plus the
+    // two endpoints fix the centre.
+    auto by_angle = [&](const Vec3& to, double inc) {
+        if (!centre_from_chord(ctx, to, inc, centre)) return fail("the arc does not close");
+        *included = inc;
+        return true;
+    };
+
+    switch (state_) {
+        case State::ThreeEnd: {
+            if (v.kind != InputKind::Point) return fail("a point is required");
+            if (!have_middle_) return false;  // not terminal: the End option asks again
+
+            if (!circumcentre(start_, second_, v.point, n, centre)) {
+                return fail("the three points are collinear");
+            }
+
+            // Which way round: the arc must pass through the middle point, so
+            // take the counterclockwise sweep to it and to the end, and keep the
+            // direction that reaches the middle first.
+            const double a0 = plane_angle(*centre, start_, n);
+            const double to_mid = ccw_sweep(a0, plane_angle(*centre, second_, n));
+            const double to_end = ccw_sweep(a0, plane_angle(*centre, v.point, n));
+            *included = to_mid < to_end ? to_end : to_end - kTwoPi;
+            return true;
+        }
+
+        case State::CentreEnd: {
+            if (v.kind != InputKind::Point) return false;  // Angle and Length ask again
+            // The end point gives a direction, not a distance: the radius is
+            // already fixed by the centre and the start, so R12 projects.
+            *centre = centre_;
+            *included = ccw_sweep(plane_angle(centre_, start_, n), plane_angle(centre_, v.point, n));
+            return true;
+        }
+
+        case State::AngleValue: {
+            double inc = 0.0;
+            if (!angle_from(v, have_centre_ ? centre_ : start_, inc)) {
+                return fail("an angle is required");
+            }
+            if (!have_centre_) return by_angle(end_, inc);
+            *centre = centre_;
+            *included = inc;
+            return true;
+        }
+
+        case State::LengthValue: {
+            double chord = 0.0;
+            if (!signed_distance_from(v, start_, chord)) return fail("a length is required");
+            const double radius = length(start_ - centre_);
+            if (radius <= kIntersectTol) return fail("the arc has no radius");
+
+            const double ratio = std::abs(chord) / (2.0 * radius);
+            if (ratio > 1.0) return fail("the chord is longer than the diameter");
+
+            // R12: a negative chord asks for the major arc, the same convention
+            // the bulge sign carries in a polyline.
+            const double minor = 2.0 * std::asin(ratio);
+            *centre = centre_;
+            *included = chord >= 0.0 ? minor : minor - kTwoPi;
+            return true;
+        }
+
+        case State::StartEnd: {
+            if (v.kind != InputKind::Point) return false;  // the keywords ask again
+            *centre = v.point;
+            *included = ccw_sweep(plane_angle(v.point, start_, n), plane_angle(v.point, end_, n));
+            return true;
+        }
+
+        case State::DirectionValue: {
+            double bearing = 0.0;
+            if (!angle_from(v, start_, bearing)) return fail("a direction is required");
+
+            const Basis b = arbitrary_axis(n);
+            const Vec3 dir = b.ax * std::cos(bearing) + b.ay * std::sin(bearing);
+
+            // Leaving along `dir` and reaching end_ fixes the sweep: the included
+            // angle is twice the turn from the tangent to the chord. Same
+            // identity PLINE's arc Direction option uses.
+            const Vec3 chord = end_ - start_;
+            if (is_zero(chord)) return fail("start and end are the same point");
+            return by_angle(end_, 2.0 * signed_angle(dir, normalize(chord), n));
+        }
+
+        case State::RadiusValue: {
+            double radius = 0.0;
+            if (!signed_distance_from(v, start_, radius)) return fail("a radius is required");
+            const double chord = length(end_ - start_);
+            if (chord <= kIntersectTol) return fail("start and end are the same point");
+
+            const double ratio = chord / (2.0 * std::abs(radius));
+            if (ratio > 1.0) return fail("the radius is too small to reach the end point");
+
+            // Negative radius is R12's way of asking for the major arc, matching
+            // the negative chord length above.
+            const double minor = 2.0 * std::asin(ratio);
+            return by_angle(end_, radius >= 0.0 ? minor : kTwoPi - minor);
+        }
+
+        case State::ContinueEnd: {
+            if (v.kind != InputKind::Point) return fail("a point is required");
+            const Vec3 chord = v.point - start_;
+            if (is_zero(chord)) return fail("start and end are the same point");
+            // Measured against the TENTATIVE point rather than against end_.
+            // Passing it in instead of storing it is what keeps this const: a
+            // preview writing to the command's own state would be exactly the
+            // side effect the tentative-value rule forbids.
+            return by_angle(v.point, 2.0 * signed_angle(tangent_, normalize(chord), n));
+        }
+
+        default:
+            return false;  // not a terminal state
+    }
+}
+
+bool ArcCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+    Vec3 centre{};
+    Vec3 from{};
+    double included = 0.0;
+    std::string why;
+    if (!resolve(ctx, tentative, &centre, &from, &included, &why)) return false;
+
+    EntityPtr arc = make_arc(ctx, centre, from, included);
+    if (!arc) return false;
+    out.ghosts.push_back(std::move(arc));
+    return true;
 }
 
 Step ArcCommand::next(CommandContext& ctx, const InputValue& value) {
-    const Vec3 n = construction_normal(ctx);
+    // Every terminal state ends the same way: resolve the parameters, make the
+    // arc, add it. Only the states that ask a further question are spelled out.
+    auto commit = [&]() -> Step {
+        Vec3 centre{};
+        Vec3 from{};
+        double included = 0.0;
+        std::string why = "the arc is degenerate";
+        if (!resolve(ctx, value, &centre, &from, &included, &why)) return Step::failed(why);
+
+        EntityPtr arc = make_arc(ctx, centre, from, included);
+        if (!arc) return Step::failed("the arc is degenerate");
+        ctx.db.add(with_current_props(ctx.db, std::move(arc)));
+        return Step::done();
+    };
 
     switch (state_) {
         case State::Start: {
@@ -529,20 +702,7 @@ Step ArcCommand::next(CommandContext& ctx, const InputValue& value) {
             // which skips it -- and only the flag can say which, since a middle
             // point is free to sit anywhere including on top of the start.
             if (!have_middle_) return ask_start_end();
-
-            Vec3 centre{};
-            if (!circumcentre(start_, second_, end_, n, &centre)) {
-                return Step::failed("the three points are collinear");
-            }
-
-            // Which way round: the arc must pass through the middle point, so
-            // take the counterclockwise sweep to it and to the end, and keep
-            // the direction that reaches the middle first.
-            const double a0 = plane_angle(centre, start_, n);
-            const double to_mid = ccw_sweep(a0, plane_angle(centre, second_, n));
-            const double to_end = ccw_sweep(a0, plane_angle(centre, end_, n));
-            const double included = to_mid < to_end ? to_end : to_end - kTwoPi;
-            return emit(ctx, centre, start_, included);
+            return commit();
         }
 
         case State::CentreEnd: {
@@ -565,41 +725,14 @@ Step ArcCommand::next(CommandContext& ctx, const InputValue& value) {
                 return Step::ask(p);
             }
             if (value.kind != InputKind::Point) return Step::failed("a point is required");
-
-            // The end point gives a direction, not a distance: the radius is
-            // already fixed by the centre and the start, so R12 projects.
-            const double a0 = plane_angle(centre_, start_, n);
-            const double a1 = plane_angle(centre_, value.point, n);
-            return emit(ctx, centre_, start_, ccw_sweep(a0, a1));
+            return commit();
         }
 
-        case State::AngleValue: {
-            // Two routes arrive here. With a centre already given the angle is
-            // the sweep about it; without one, the angle plus the chord decides
-            // where the centre goes.
-            double included = 0.0;
-            const Vec3 base = have_centre_ ? centre_ : start_;
-            if (!angle_from(value, base, included)) return Step::failed("an angle is required");
-            return have_centre_ ? emit(ctx, centre_, start_, included)
-                                : emit_by_angle(ctx, included);
-        }
+        case State::AngleValue:
+            return commit();
 
-        case State::LengthValue: {
-            double chord = 0.0;
-            if (!signed_distance_from(value, start_, chord)) {
-                return Step::failed("a length is required");
-            }
-            const double radius = length(start_ - centre_);
-            if (radius <= kIntersectTol) return Step::failed("the arc has no radius");
-
-            const double ratio = std::abs(chord) / (2.0 * radius);
-            if (ratio > 1.0) return Step::failed("the chord is longer than the diameter");
-
-            // R12: a negative chord asks for the major arc, the same convention
-            // the bulge sign carries in a polyline.
-            const double minor = 2.0 * std::asin(ratio);
-            return emit(ctx, centre_, start_, chord >= 0.0 ? minor : minor - kTwoPi);
-        }
+        case State::LengthValue:
+            return commit();
 
         case State::StartEnd: {
             if (keyword_is(value, "ANGLE")) {
@@ -633,50 +766,17 @@ Step ArcCommand::next(CommandContext& ctx, const InputValue& value) {
 
             centre_ = value.point;
             have_centre_ = true;
-            const double a0 = plane_angle(centre_, start_, n);
-            const double a1 = plane_angle(centre_, end_, n);
-            return emit(ctx, centre_, start_, ccw_sweep(a0, a1));
+            return commit();
         }
 
-        case State::DirectionValue: {
-            double bearing = 0.0;
-            if (!angle_from(value, start_, bearing)) return Step::failed("a direction is required");
+        case State::DirectionValue:
+            return commit();
 
-            const Basis b = arbitrary_axis(n);
-            const Vec3 dir = b.ax * std::cos(bearing) + b.ay * std::sin(bearing);
+        case State::RadiusValue:
+            return commit();
 
-            // Leaving along `dir` and reaching `end_` fixes the sweep: the
-            // included angle is twice the turn from the tangent to the chord.
-            // Same identity PLINE's arc Direction option uses.
-            const Vec3 chord = end_ - start_;
-            if (is_zero(chord)) return Step::failed("start and end are the same point");
-            return emit_by_angle(ctx, 2.0 * signed_angle(dir, normalize(chord), n));
-        }
-
-        case State::RadiusValue: {
-            double radius = 0.0;
-            if (!signed_distance_from(value, start_, radius)) {
-                return Step::failed("a radius is required");
-            }
-            const double chord = length(end_ - start_);
-            if (chord <= kIntersectTol) return Step::failed("start and end are the same point");
-
-            const double ratio = chord / (2.0 * std::abs(radius));
-            if (ratio > 1.0) return Step::failed("the radius is too small to reach the end point");
-
-            // Negative radius is R12's way of asking for the major arc, matching
-            // the negative chord length above.
-            const double minor = 2.0 * std::asin(ratio);
-            return emit_by_angle(ctx, radius >= 0.0 ? minor : kTwoPi - minor);
-        }
-
-        case State::ContinueEnd: {
-            if (value.kind != InputKind::Point) return Step::failed("a point is required");
-            end_ = value.point;
-            const Vec3 chord = end_ - start_;
-            if (is_zero(chord)) return Step::failed("start and end are the same point");
-            return emit_by_angle(ctx, 2.0 * signed_angle(tangent_, normalize(chord), n));
-        }
+        case State::ContinueEnd:
+            return commit();
     }
     return Step::failed("internal state error");
 }

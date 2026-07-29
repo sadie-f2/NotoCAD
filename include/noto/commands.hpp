@@ -44,9 +44,14 @@ public:
     const char* name() const override { return "CIRCLE"; }
     Step start(CommandContext& ctx) override;
     Step next(CommandContext& ctx, const InputValue& value) override;
+    bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) override;
 
 private:
     enum class State : std::uint8_t { Centre, Radius };
+
+    // The radius a value would give, or false. One derivation, so the ghost
+    // cannot show a circle the command will not draw.
+    bool resolve(const InputValue& v, double* radius) const;
 
     State state_{State::Centre};
     Vec3 centre_{};
@@ -70,6 +75,7 @@ public:
     const char* name() const override { return "ARC"; }
     Step start(CommandContext& ctx) override;
     Step next(CommandContext& ctx, const InputValue& value) override;
+    bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) override;
 
 private:
     enum class State : std::uint8_t {
@@ -92,12 +98,22 @@ private:
     Step ask_centre_end();
     Step ask_start_end();
 
-    // The one exit. `included` is signed: positive sweeps counterclockwise from
-    // `from`, negative clockwise, and the entity is built accordingly.
-    Step emit(CommandContext& ctx, const Vec3& centre, const Vec3& from, double included);
+    // The parameters every option path converges on, worked out in one place.
+    // next() commits them and preview() draws them, so the ghost cannot show an
+    // arc the command is not going to make. False when the state is not a
+    // terminal one, or the answer does not describe an arc; `why` is filled in
+    // for the caller that reports failures.
+    bool resolve(CommandContext& ctx, const InputValue& v, Vec3* centre, Vec3* from,
+                 double* included, std::string* why) const;
 
-    // Start and end known, plus a signed included angle: derive the centre.
-    Step emit_by_angle(CommandContext& ctx, double included);
+    // Start and end known, plus a signed included angle: where the centre goes.
+    bool centre_from_chord(CommandContext& ctx, const Vec3& to, double included,
+                           Vec3* centre) const;
+
+    // `included` is signed: positive sweeps counterclockwise from `from`,
+    // negative clockwise, and the entity is built accordingly.
+    EntityPtr make_arc(CommandContext& ctx, const Vec3& centre, const Vec3& from,
+                       double included) const;
 
     State state_{State::Start};
 

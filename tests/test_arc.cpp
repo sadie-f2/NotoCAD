@@ -15,6 +15,7 @@
 #include "noto/commands.hpp"
 #include "noto/database.hpp"
 #include "noto/entities.hpp"
+#include "noto/inflight.hpp"
 
 #include <cmath>
 #include <memory>
@@ -351,4 +352,107 @@ TEST_CASE("arc: Continue with nothing to continue from fails rather than guesses
 TEST_CASE("arc: A is the R12 alias") {
     CHECK(resolve_command_name("A").name == "ARC");
     CHECK(resolve_command_name("arc").name == "ARC");
+}
+
+TEST_CASE("arc: the preview is the arc, and it is the arc that gets committed") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("ARC"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({1, 1, 0}));
+
+    InFlight f;
+    REQUIRE(engine.preview(InputValue::of_point({2, 0, 0}), f));
+    REQUIRE(f.ghosts.size() == 1);
+    REQUIRE(f.ghosts[0]->type() == EntityType::Arc);
+    // A draw command replaces nothing, so nothing is hidden behind the ghost.
+    CHECK(f.suppressed.empty());
+    CHECK(db.empty());
+
+    const Arc ghost = *static_cast<const Arc*>(f.ghosts[0].get());
+
+    // The drift test: what was shown is what arrives.
+    engine.supply(InputValue::of_point({2, 0, 0}));
+    const Arc* made = last_arc(db);
+    REQUIRE(made != nullptr);
+    CHECK_VEC(made->center(), ghost.center().x, ghost.center().y, ghost.center().z, 1e-12);
+    CHECK_NEAR(made->radius(), ghost.radius(), 1e-12);
+    CHECK_NEAR(made->start_angle(), ghost.start_angle(), 1e-12);
+    CHECK_NEAR(made->end_angle(), ghost.end_angle(), 1e-12);
+}
+
+TEST_CASE("arc: previewing Continue does not disturb the command's own state") {
+    // The tentative point is passed through rather than stored. If it were
+    // stored, moving the mouse would rewrite end_ and the committed arc would
+    // depend on where the cursor had been on its way there.
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("LINE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({2, 0, 0}));
+    engine.supply(InputValue::none());
+
+    engine.begin(make_command("ARC"));
+    engine.supply(InputValue::none());  // Continue
+
+    for (int i = 1; i < 20; ++i) {
+        InFlight f;
+        engine.preview(InputValue::of_point({4, static_cast<double>(i), 0}), f);
+    }
+
+    InFlight f;
+    REQUIRE(engine.preview(InputValue::of_point({4, 2, 0}), f));
+    const Arc ghost = *static_cast<const Arc*>(f.ghosts[0].get());
+
+    engine.supply(InputValue::of_point({4, 2, 0}));
+    const Arc* made = last_arc(db);
+    REQUIRE(made != nullptr);
+    CHECK_VEC(made->center(), ghost.center().x, ghost.center().y, ghost.center().z, 1e-12);
+    CHECK_NEAR(made->radius(), ghost.radius(), 1e-12);
+}
+
+TEST_CASE("arc: nothing is previewed at a prompt that is still asking questions") {
+    Database db;
+    CommandEngine engine(db);
+
+    InFlight f;
+    engine.begin(make_command("ARC"));
+    // The first point decides nothing about an arc.
+    CHECK(!engine.preview(InputValue::of_point({1, 1, 0}), f));
+
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    // Nor does the second: it might yet be a middle point or the End keyword.
+    CHECK(!engine.preview(InputValue::of_point({1, 1, 0}), f));
+
+    engine.supply(InputValue::of_point({1, 1, 0}));
+    CHECK(engine.preview(InputValue::of_point({2, 0, 0}), f));
+}
+
+TEST_CASE("circle: the preview is the circle, not a line out to its rim") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("CIRCLE"));
+    InFlight f;
+    // Nothing to show before there is a centre.
+    CHECK(!engine.preview(InputValue::of_point({1, 0, 0}), f));
+
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    REQUIRE(engine.preview(InputValue::of_point({3, 4, 0}), f));
+    REQUIRE(f.ghosts.size() == 1);
+    REQUIRE(f.ghosts[0]->type() == EntityType::Circle);
+    CHECK_NEAR(static_cast<const Circle*>(f.ghosts[0].get())->radius(), 5.0, 1e-12);
+    CHECK(db.empty());
+
+    // Diameter halves it, and the ghost has to agree.
+    engine.supply(InputValue::of_keyword("DIAMETER"));
+    InFlight g;
+    REQUIRE(engine.preview(InputValue::of_point({3, 4, 0}), g));
+    CHECK_NEAR(static_cast<const Circle*>(g.ghosts[0].get())->radius(), 2.5, 1e-12);
+
+    engine.supply(InputValue::of_point({3, 4, 0}));
+    REQUIRE(db.size() == 1);
+    CHECK_NEAR(static_cast<const Circle*>(db.get(db.order()[0]))->radius(), 2.5, 1e-12);
 }
