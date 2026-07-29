@@ -47,6 +47,7 @@ add_executable(noto_tests
   test_numeric.cpp
   test_inflight.cpp
   test_arc.cpp
+  test_registry.cpp
 )
 
 target_include_directories(noto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -170,6 +170,28 @@ for visualisation via LISP-driven `entmake`.
 **Out, for now:** grid snap (SNAP/F9) — later, rarely used. Dynamic blocks, ActiveX/.NET,
 ribbon UI, cloud/collaboration — excluded by definition.
 
+**R12 is the starting point, not the ceiling.** Where a modern method is plainly
+better, take it — the R12 target exists to give the tool a coherent shape and a
+finished feel, not to reproduce 1992's limitations. Sadie's framing, and it
+settles a question that had been answered case by case up to now.
+
+What that does *not* license is drifting: each divergence should be a decision
+with a reason, recorded where the thing lives. The ones taken so far all have
+that shape — CURSORSIZE is AutoCAD's rather than R12's because R12 gave no way
+to shorten the crosshair; MEASUREGEOM exists because R12's answer was "draw a
+dimension and erase it"; REDRAW and REGEN are *not* built because they manage a
+display list this design does not have.
+
+Two guardrails, both about not losing what R12 fidelity buys:
+
+- **A divergence must not break DXF R12 interchange.** Modern geometry may be
+  richer in the database than AC1009 can name, but it has to degrade honestly on
+  the way out — the same boundary discipline as DWG being a compile-time module.
+- **Where R12's behaviour is a considered design choice rather than a
+  limitation, keep it.** Escape preserving committed work, the counterclockwise
+  arc convention, the negative-radius-means-major-arc rule: those are not old,
+  they are right.
+
 **R13 is a stated future direction**, including a solid modeling kernel. That is not
 being built and does not change the R12 target, but it does mean the design should
 avoid showstoppers. The places it would actually bite are recorded in `SF_todo.md`
