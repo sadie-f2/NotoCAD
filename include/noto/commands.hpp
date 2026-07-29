@@ -298,6 +298,35 @@ private:
     Vec3 first_{};
 };
 
+// SPLINE: pick points, get a curve through them.
+//
+// R12 has no such command -- its "spline" was PEDIT fitting a polyline -- so
+// this is R13's, with one decision taken deliberately against the DXF entity's
+// own shape: the points you pick are FIT points, and the curve passes through
+// them. A NURBS curve is usually described by control points that it does not
+// touch, which is the right representation and the wrong thing to ask a
+// designer to click on. The control points are solved for.
+//
+// Entering control points directly is still possible, through entmake, which is
+// where a caller who genuinely wants them will be.
+class SplineCommand final : public Command {
+public:
+    const char* name() const override { return "SPLINE"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+    bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) override;
+
+private:
+    Prompt next_prompt() const;
+
+    // The curve through the points collected so far, plus one more. Shared by
+    // the commit and the ghost so they cannot disagree.
+    EntityPtr resolve(CommandContext& ctx, const Vec3* extra) const;
+
+    std::vector<Vec3> points_;
+    Handle handle_{kNullHandle};
+};
+
 // SETVAR: read or write any system variable by name, from the command line.
 //
 // The variables and their types have existed since phase 4a and were reachable

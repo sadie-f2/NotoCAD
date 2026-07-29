@@ -10,6 +10,7 @@ add_library(noto_core STATIC
   entities_grip.cpp
   dash.cpp
   polyline.cpp
+  spline.cpp
   faces.cpp
   text.cpp
   proxy.cpp

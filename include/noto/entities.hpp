@@ -247,6 +247,103 @@ private:
     double end_param_{kFullTurn};
 };
 
+// SPLINE -- a NURBS curve, and the largest divergence from R12 so far.
+//
+// R12's "spline" was not a curve. PEDIT fitted a quadratic or cubic B-spline
+// through a polyline's vertices and stored the RESULT as more polyline
+// vertices, so the drawing never knew what the spline had been and Decurve
+// worked only by keeping the originals around. AC1009 has no SPLINE entity to
+// say it in.
+//
+// This is the real thing: degree, control points, a knot vector, and optional
+// weights. It degrades to a polyline on DXF write exactly as Ellipse does, and
+// for the same reason -- CLAUDE.md's rule is that richer geometry is welcome in
+// the database provided it leaves honestly.
+//
+// FIT POINTS are kept when the curve was built by interpolation, which is the
+// usual case: a designer picks points they want the curve to PASS THROUGH, and
+// control points are an implementation detail they never asked about. Holding
+// both means a grip can move a fit point and the curve be re-solved, rather
+// than the user being handed control points and told they are the same thing.
+// DXF R13 carries both for the same reason (groups 10 and 11).
+class Spline final : public Entity {
+public:
+    Spline() : Entity(EntityType::Spline) {}
+
+    // The general form. `knots` must hold control_points.size() + degree + 1
+    // entries; `weights` is either empty (non-rational, the common case) or the
+    // same length as the control points.
+    Spline(int degree, std::vector<Vec3> control_points, std::vector<double> knots,
+           std::vector<double> weights = {}, const Vec3& normal = kWorldZ);
+
+    // A curve through the given points, degree 3 unless there are too few.
+    // This is what the SPLINE command makes and what most callers want.
+    static EntityPtr interpolating(const std::vector<Vec3>& through, int degree = 3,
+                                   const Vec3& normal = kWorldZ);
+
+    int degree() const { return degree_; }
+    const std::vector<Vec3>& control_points() const { return control_; }
+    const std::vector<double>& knots() const { return knots_; }
+    const std::vector<double>& weights() const { return weights_; }
+    const std::vector<Vec3>& fit_points() const { return fit_; }
+
+    bool is_rational() const { return !weights_.empty(); }
+    bool has_fit_points() const { return !fit_.empty(); }
+
+    // Whether the curve is valid enough to evaluate. A spline read from a file
+    // or built by entmake can be none of those things, and every method below
+    // returns something harmless rather than reading past an array when it is
+    // not -- these run in the render path, where an exception is not an option.
+    bool valid() const;
+
+    // The usable parameter range: knots[degree] to knots[n], outside which the
+    // basis functions do not sum to one.
+    double domain_min() const;
+    double domain_max() const;
+
+    // De Boor. Clamped to the domain rather than extrapolating, which a NURBS
+    // curve cannot meaningfully do.
+    Vec3 point_at(double u) const;
+
+    // Unit tangent, or a zero vector at a degenerate point. Needed by osnaps
+    // and by anything that continues from the end of a curve.
+    Vec3 tangent_at(double u) const;
+
+    Vec3 start_point() const { return point_at(domain_min()); }
+    Vec3 end_point() const { return point_at(domain_max()); }
+
+    // True when the first and last control points coincide. Not periodicity --
+    // a closed knot vector is a different thing and is not built here.
+    bool is_closed() const;
+
+    // Re-solves the control points from the fit points, after one has moved.
+    // Does nothing when there are no fit points, since then the control points
+    // are the authored data and there is nothing to solve from.
+    void refit();
+
+    EntityPtr clone() const override;
+    void transform(const Mat4& m) override;
+    BBox bbox() const override;
+    void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
+    void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
+
+    // How finely to flatten, for a given chord tolerance. Exposed because the
+    // DXF degrade and the renderer must agree about what the curve looks like.
+    int segment_count(double chord_tolerance) const;
+
+private:
+    void set_fit_points(std::vector<Vec3> pts) { fit_ = std::move(pts); }
+
+    int degree_{3};
+    std::vector<Vec3> control_;
+    std::vector<double> knots_;
+    std::vector<double> weights_;
+    std::vector<Vec3> fit_;
+};
+
 class Polyline final : public Entity {
 public:
     Polyline() : Entity(EntityType::Polyline) {}

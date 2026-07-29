@@ -51,6 +51,23 @@ Value alist_get(const Value& alist, std::int32_t code, bool& found) {
     return make_nil();
 }
 
+// Every value carried under `code`, in the order written.
+//
+// alist_get returns the FIRST match, which is right for every entity that came
+// before: a circle has one group 40 and asking for a second would be a mistake.
+// A spline has one group 40 per KNOT and one group 10 per control point, so the
+// distinction is real and this is the accessor for it.
+std::vector<Value> alist_all(const Value& alist, std::int32_t code) {
+    std::vector<Value> out;
+    for (Value cur = alist; is_cons(cur); cur = cdr(cur)) {
+        const Value pair = car(cur);
+        if (is_cons(pair) && car(pair).type == Type::Int && car(pair).i == code) {
+            out.push_back(cdr(pair));
+        }
+    }
+    return out;
+}
+
 std::string upcase(std::string_view s) {
     std::string out(s);
     for (char& c : out) {
@@ -168,6 +185,93 @@ bool build_entity(Interp& in, Database& db, const Value& alist, EntityPtr& out,
         if (!parse_point(in, 11, p11, point11)) return false;
         // Both endpoints are already world coordinates; LINE is the exception.
         out = std::make_unique<Line>(point10, point11);
+
+    } else if (type == "SPLINE") {
+        // Two ways to describe one, and R13's group codes carry both:
+        // control points with knots (10 and 40), or fit points to interpolate
+        // through (11). Fit points win when present, because they are what the
+        // caller actually meant and solving from them cannot disagree with
+        // itself the way a hand-written knot vector can.
+        const std::vector<Value> fit_raw = alist_all(alist, 11);
+        const std::vector<Value> ctrl_raw = alist_all(alist, 10);
+
+        const Value v71 = alist_get(alist, 71, found);
+        double degree_real = 3.0;
+        if (found && !parse_real(in, 71, v71, degree_real)) return false;
+        int degree = static_cast<int>(degree_real);
+        if (degree < 1) return group_error(in, 71, "degree must be at least 1");
+
+        const Mat4 to_world = ecs_to_world(normal);
+
+        if (!fit_raw.empty()) {
+            std::vector<Vec3> fit;
+            fit.reserve(fit_raw.size());
+            for (const Value& v : fit_raw) {
+                Vec3 p{};
+                if (!parse_point(in, 11, v, p)) return false;
+                fit.push_back(to_world.transform_point(p));
+            }
+            if (fit.size() < 2) return group_error(in, 11, "a spline needs at least two points");
+
+            out = Spline::interpolating(fit, degree, normal);
+            if (!out) return group_error(in, 11, "those points do not describe a curve");
+
+        } else {
+            if (ctrl_raw.size() < 2) {
+                return in.fail(EvalStatus::BadArgumentType,
+                               "SPLINE: needs group 11 fit points or group 10 control points");
+            }
+
+            std::vector<Vec3> control;
+            control.reserve(ctrl_raw.size());
+            for (const Value& v : ctrl_raw) {
+                Vec3 p{};
+                if (!parse_point(in, 10, v, p)) return false;
+                control.push_back(to_world.transform_point(p));
+            }
+
+            if (static_cast<std::size_t>(degree) + 1 > control.size()) {
+                degree = static_cast<int>(control.size()) - 1;
+            }
+
+            std::vector<double> knots;
+            for (const Value& v : alist_all(alist, 40)) {
+                double k = 0.0;
+                if (!parse_real(in, 40, v, k)) return false;
+                knots.push_back(k);
+            }
+
+            // An omitted knot vector is filled in as a clamped uniform one,
+            // which is the only knot vector most callers would have wanted and
+            // is far easier to get right here than in LISP.
+            if (knots.empty()) {
+                const std::size_t n = control.size();
+                const std::size_t p = static_cast<std::size_t>(degree);
+                const std::size_t interior = n - p - 1;
+                for (std::size_t i = 0; i <= p; ++i) knots.push_back(0.0);
+                for (std::size_t i = 1; i <= interior; ++i) {
+                    knots.push_back(static_cast<double>(i) / static_cast<double>(interior + 1));
+                }
+                for (std::size_t i = 0; i <= p; ++i) knots.push_back(1.0);
+            }
+
+            std::vector<double> weights;
+            for (const Value& v : alist_all(alist, 41)) {
+                double wt = 0.0;
+                if (!parse_real(in, 41, v, wt)) return false;
+                weights.push_back(wt);
+            }
+            if (!weights.empty() && weights.size() != control.size()) {
+                return group_error(in, 41, "one weight per control point, or none");
+            }
+
+            auto sp = std::make_unique<Spline>(degree, std::move(control), std::move(knots),
+                                               std::move(weights), normal);
+            if (!sp->valid()) {
+                return group_error(in, 40, "the knot count does not match the control points");
+            }
+            out = std::move(sp);
+        }
 
     } else if (type == "ELLIPSE") {
         if (!has_p10) return in.fail(EvalStatus::BadArgumentType, "ELLIPSE: missing group 10");
@@ -291,6 +395,31 @@ Value entity_to_alist(Context& ctx, const Database& db, const Entity& ent) {
             const Mat4 to_ecs = world_to_ecs(props.normal);
             items.push_back(pair_point(ctx, 10, to_ecs.transform_point(circle.center())));
             items.push_back(pair_real(ctx, 40, circle.radius()));
+            break;
+        }
+        case EntityType::Spline: {
+            // R13's codes, and both descriptions when both exist. A caller that
+            // made the curve from fit points gets those back and can hand them
+            // straight to entmake; one reading a curve it did not author gets
+            // the control points, which is the only complete description.
+            const Spline& sp = static_cast<const Spline&>(ent);
+            const Mat4 to_ecs = world_to_ecs(props.normal);
+
+            items.push_back(pair_int(ctx, 71, sp.degree()));
+            items.push_back(pair_int(ctx, 72, static_cast<std::int32_t>(sp.knots().size())));
+            items.push_back(
+                pair_int(ctx, 73, static_cast<std::int32_t>(sp.control_points().size())));
+            items.push_back(
+                pair_int(ctx, 74, static_cast<std::int32_t>(sp.fit_points().size())));
+
+            for (double k : sp.knots()) items.push_back(pair_real(ctx, 40, k));
+            for (double wt : sp.weights()) items.push_back(pair_real(ctx, 41, wt));
+            for (const Vec3& c : sp.control_points()) {
+                items.push_back(pair_point(ctx, 10, to_ecs.transform_point(c)));
+            }
+            for (const Vec3& f : sp.fit_points()) {
+                items.push_back(pair_point(ctx, 11, to_ecs.transform_point(f)));
+            }
             break;
         }
         case EntityType::Ellipse: {

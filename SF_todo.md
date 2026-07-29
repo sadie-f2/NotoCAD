@@ -397,6 +397,45 @@ once is still open.
 
 ---
 
+## Spline: what was left undone
+
+The NURBS curve landed with its evaluator, interpolation, entity vtable, DXF
+degrade and AutoLISP conversion. Four things were deliberately not done.
+
+**No intersection support, so TRIM, BREAK, EXTEND and the INT osnap ignore it.**
+`intersect.cpp`'s `SubCurve` models a line segment or a circular arc and nothing
+else, so a NURBS span fits neither — this is a structural change to that file
+rather than a new case label, which is why it was not smuggled in. The
+behaviour meanwhile is safe: `decompose()` returns an empty vector, so
+`intersect()` reports no hits and the cutting functions return null. Nothing
+misbehaves; splines are simply invisible to those commands.
+
+**Ellipse is in exactly the same state**, which was not noticed when it landed
+and is worth saying plainly: it appears nowhere in `intersect.cpp`,
+`curve_edit.cpp` or `osnap_derived.cpp` either. So neither new entity can be
+trimmed, broken, or snapped to with NEAREST, PERPENDICULAR or TANGENT.
+
+The likely shape of the fix, when it happens: give `SubCurve` a third form that
+carries a flattened polyline with its parameter mapping, and let any curve that
+cannot describe itself exactly decompose into that. It costs exactness at the
+intersection — the answer becomes as good as the flattening — which is a real
+decision and the reason it is recorded rather than assumed.
+
+**NEAREST is the osnap users will miss first** on both entities. It needs a
+projection onto the curve, which for a spline is a Newton iteration on the
+distance function. Bounded work, and independent of the intersection question.
+
+**The interpolation solver is dense.** The system is banded with bandwidth
+degree+1 and a banded solve would make it O(n) rather than O(n^3). For a spline
+picked by hand — tens of points — the difference is unmeasurable. It would start
+to matter for a spline generated from analysis data, which is phase 13's
+territory and does not exist yet.
+
+**The tangent is by finite difference**, not by the analytic derivative. For a
+rational curve that derivative is the quotient rule over two B-spline
+derivatives, and the result is normalised away immediately. If anything ever
+needs curvature rather than direction, this is where it goes.
+
 ## Writing DXF versions later than R12
 
 **Wanted eventually, not now.** Sadie's: modern AutoCAD offers a range of write

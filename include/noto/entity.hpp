@@ -46,6 +46,12 @@ enum class EntityType : std::uint8_t {
     // database keeps geometry the interchange format cannot name. See
     // CLAUDE.md on divergences.
     Ellipse,
+    // Also not an R12 entity, and a larger divergence than Ellipse: AC1009 has
+    // no SPLINE, and R12's own "spline" was PEDIT fitting a quadratic or cubic
+    // through polyline vertices rather than a curve in its own right. This is a
+    // NURBS curve -- degree, control points, knots, optional weights -- and it
+    // degrades to a polyline on DXF write like Ellipse does.
+    Spline,
     Polyline,
     Text,
     Point,

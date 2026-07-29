@@ -1524,6 +1524,82 @@ Step MeasureGeomCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- SPLINE -----------------------------------------------------------------
+
+Step SplineCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "First point";
+    return Step::ask(p);
+}
+
+Prompt SplineCommand::next_prompt() const {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = points_.size() < 2 ? "Next point" : "Next point or <Enter to finish>";
+    // Two points make a curve, so from there on Enter is a valid answer.
+    p.allow_empty = points_.size() >= 2;
+    if (!points_.empty()) {
+        p.base = points_.back();
+        p.has_base = true;
+    }
+    return p;
+}
+
+EntityPtr SplineCommand::resolve(CommandContext& ctx, const Vec3* extra) const {
+    std::vector<Vec3> pts = points_;
+    if (extra != nullptr) {
+        // A point on top of the last one adds nothing and makes the
+        // parameterisation singular, so it is dropped rather than refused --
+        // the cursor passes over the previous point on its way anywhere.
+        if (pts.empty() || !near_equal(pts.back(), *extra, kIntersectTol)) pts.push_back(*extra);
+    }
+    if (pts.size() < 2) return nullptr;
+    return Spline::interpolating(pts, 3, construction_normal(ctx));
+}
+
+bool SplineCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+    if (tentative.kind != InputKind::Point || points_.empty()) return false;
+
+    EntityPtr curve = resolve(ctx, &tentative.point);
+    if (!curve) return false;
+
+    out.ghosts.push_back(std::move(curve));
+    // The curve committed so far is already in the drawing and the ghost is the
+    // whole curve including it, so the committed one has to go or the two draw
+    // over each other -- which reads as a thick line rather than as a preview.
+    if (handle_ != kNullHandle) out.suppressed.push_back(handle_);
+    return true;
+}
+
+Step SplineCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind == InputKind::None) {
+        if (points_.size() < 2) return Step::failed("a spline needs at least two points");
+        return Step::done();
+    }
+    if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+    if (!points_.empty() && near_equal(points_.back(), value.point, kIntersectTol)) {
+        return Step::failed("that repeats the last point");
+    }
+    points_.push_back(value.point);
+
+    // Grown in the database as it goes, the way PLINE is, so that Escape keeps
+    // what has been drawn. The whole curve is re-solved and replaced each time
+    // rather than extended: interpolation is global, so a new point moves the
+    // control points everywhere, and there is no incremental form of it.
+    EntityPtr curve = resolve(ctx, nullptr);
+    if (curve) {
+        if (handle_ == kNullHandle) {
+            handle_ = ctx.db.add(with_current_props(ctx.db, std::move(curve)));
+        } else {
+            ctx.db.replace(handle_, with_current_props(ctx.db, std::move(curve)));
+        }
+    }
+
+    return Step::ask(next_prompt());
+}
+
 // --- SETVAR -----------------------------------------------------------------
 
 Step SetVarCommand::start(CommandContext&) {
@@ -5343,6 +5419,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "LINE") return std::make_unique<LineCommand>();
     if (upper == "ARC") return std::make_unique<ArcCommand>();
     if (upper == "ELLIPSE") return std::make_unique<EllipseCommand>();
+    if (upper == "SPLINE") return std::make_unique<SplineCommand>();
     if (upper == "MEASUREGEOM") return std::make_unique<MeasureGeomCommand>();
     if (upper == "SETVAR") return std::make_unique<SetVarCommand>();
     if (upper == "OSNAP") return std::make_unique<OsnapCommand>();
@@ -5397,7 +5474,7 @@ CommandPtr make_command(std::string_view name) {
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
         "ARC", "AREA", "ARRAY", "CIRCLE", "ELLIPSE",
-        "MEASUREGEOM", "ORTHO", "OSNAP", "SETVAR", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
+        "MEASUREGEOM", "ORTHO", "OSNAP", "SETVAR", "SPLINE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
         "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
@@ -5411,6 +5488,7 @@ const std::vector<CommandAlias>& command_aliases() {
     static const std::vector<CommandAlias> aliases = {
         {"A", "ARC"},
         {"EL", "ELLIPSE"},
+        {"SPL", "SPLINE"},
         {"MEA", "MEASUREGEOM"},
         {"C", "CIRCLE"},
         {"E", "ERASE"},

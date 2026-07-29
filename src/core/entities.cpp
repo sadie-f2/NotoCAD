@@ -73,6 +73,7 @@ const char* entity_type_name(EntityType t) {
         case EntityType::Circle: return "CIRCLE";
         case EntityType::Arc: return "ARC";
         case EntityType::Ellipse: return "ELLIPSE";
+        case EntityType::Spline: return "SPLINE";
         case EntityType::Polyline: return "POLYLINE";
         case EntityType::Text: return "TEXT";
         case EntityType::Point: return "POINT";

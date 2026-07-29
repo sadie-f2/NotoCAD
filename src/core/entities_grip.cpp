@@ -137,6 +137,49 @@ void Ellipse::stretch(const Vec3& delta, const GripIndex* indices, std::size_t c
     }
 }
 
+void Spline::grips(std::vector<Grip>& out) const {
+    if (!valid()) return;
+
+    // Fit points when there are any, control points otherwise.
+    //
+    // This is the whole reason fit points are kept. A designer picked points
+    // for the curve to pass THROUGH; handing them control points instead means
+    // dragging a handle that is not on the curve to move a curve that is
+    // somewhere else. When the spline was authored as control points -- read
+    // from a file, or made by entmake -- those ARE the authored data and are
+    // the right thing to offer.
+    const std::vector<Vec3>& handles = has_fit_points() ? fit_points() : control_points();
+    for (GripIndex i = 0; i < static_cast<GripIndex>(handles.size()); ++i) {
+        out.push_back(Grip{handles[i], GripKind::Stretch, i});
+    }
+}
+
+void Spline::stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) {
+    if (!valid()) return;
+
+    const bool by_fit = has_fit_points();
+    const std::size_t n = by_fit ? fit_.size() : control_.size();
+
+    bool moved = false;
+    for (GripIndex i = 0; i < static_cast<GripIndex>(n); ++i) {
+        if (!names(indices, count, i)) continue;
+        if (by_fit) {
+            fit_[i] = fit_[i] + delta;
+        } else {
+            control_[i] = control_[i] + delta;
+        }
+        moved = true;
+    }
+    if (!moved) return;
+
+    // Naming EVERY grip has to equal translating the entity, which is the
+    // property STRETCH degenerating into MOVE depends on. It holds here without
+    // a special case: moving every fit point by the same delta re-solves to a
+    // translated curve, because interpolation is affine-equivariant. Re-solving
+    // rather than short-cutting keeps that a consequence rather than a claim.
+    if (by_fit) refit();
+}
+
 // --- Arc --------------------------------------------------------------------
 
 // 0 = start point, 1 = end point, 2 = midpoint of the sweep, 3 = centre.
