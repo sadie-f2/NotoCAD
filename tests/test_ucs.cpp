@@ -611,3 +611,102 @@ TEST_CASE("ucs: the previous system is session state, not drawing state") {
     // the session.
     CHECK(engine.memory().has_previous_ucs);
 }
+
+TEST_CASE("ucs: deleting the current frame clears its name, not the frame") {
+    // Sadie's: make a UCS, name it, work in it, delete it. Two different
+    // questions get answered here and they must not be confused.
+    //
+    // The FRAME survives. Deleting a saved definition is not "go back to
+    // world" -- the current UCS is five system variables rather than a
+    // reference into the table -- and sending the user to world would throw
+    // away the plane they are drawing in.
+    //
+    // The NAME does not survive, and that was the bug: UCSNAME went on naming
+    // a system the table no longer held.
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("UCS"));
+    engine.supply(InputValue::of_keyword("3POINT"));
+    engine.supply(InputValue::of_point({1, 2, 3}));
+    engine.supply(InputValue::of_point({2, 2, 3}));
+    engine.supply(InputValue::of_point({1, 2, 4}));
+
+    engine.begin(make_command("UCS"));
+    engine.supply(InputValue::of_keyword("SAVE"));
+    engine.supply(InputValue::of_string("SIDE"));
+    CHECK(db.sysvars().get_string(Sysvar::UcsName) == "SIDE");
+
+    const Ucs before = db.current_ucs();
+
+    engine.begin(make_command("UCS"));
+    engine.supply(InputValue::of_keyword("DELETE"));
+    engine.supply(InputValue::of_string("SIDE"));
+
+    // The definition is gone.
+    CHECK(db.find_ucs("SIDE") == kInvalidUcs);
+
+    // The frame is not: still tilted, still exactly where it was.
+    const Ucs after = db.current_ucs();
+    CHECK(near_equal(after.origin, before.origin, 1e-12));
+    CHECK(near_equal(after.xdir, before.xdir, 1e-12));
+    CHECK(near_equal(after.zdir(), before.zdir(), 1e-12));
+    CHECK(!after.is_world());
+    CHECK(db.sysvars().get_int(Sysvar::WorldUcs) == 0);
+
+    // And nothing claims otherwise. Without this, UCS ? reports "current: SIDE"
+    // beside a listing SIDE has just left, and DXFOUT writes $UCSNAME=SIDE into
+    // a file whose UCS table cannot supply it -- a malformed drawing, not
+    // merely a confusing session.
+    CHECK(db.sysvars().get_string(Sysvar::UcsName).empty());
+}
+
+TEST_CASE("ucs: deleting some other frame leaves the current name alone") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("UCS"));
+    engine.supply(InputValue::of_keyword("SAVE"));
+    engine.supply(InputValue::of_string("ONE"));
+
+    engine.begin(make_command("UCS"));
+    engine.supply(InputValue::of_keyword("SAVE"));
+    engine.supply(InputValue::of_string("TWO"));
+    CHECK(db.sysvars().get_string(Sysvar::UcsName) == "TWO");
+
+    engine.begin(make_command("UCS"));
+    engine.supply(InputValue::of_keyword("DELETE"));
+    engine.supply(InputValue::of_string("ONE"));
+
+    CHECK(db.find_ucs("ONE") == kInvalidUcs);
+    CHECK(db.find_ucs("TWO") != kInvalidUcs);
+    // Only the matching name is cleared, so deleting a frame you are not in
+    // does not quietly make you nameless.
+    CHECK(db.sysvars().get_string(Sysvar::UcsName) == "TWO");
+}
+
+TEST_CASE("ucs: undoing a delete restores the name with the definition") {
+    // The name is cleared through set_owned, which bypasses the read-only flag
+    // and never the journal -- so both halves of the delete are in the command's
+    // undo group and come back together. If only one did, undo would leave the
+    // drawing in a state the command could not have produced.
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("UCS"));
+    engine.supply(InputValue::of_keyword("ORIGIN"));
+    engine.supply(InputValue::of_point({4, 5, 6}));
+
+    engine.begin(make_command("UCS"));
+    engine.supply(InputValue::of_keyword("SAVE"));
+    engine.supply(InputValue::of_string("HERE"));
+
+    engine.begin(make_command("UCS"));
+    engine.supply(InputValue::of_keyword("DELETE"));
+    engine.supply(InputValue::of_string("HERE"));
+    CHECK(db.sysvars().get_string(Sysvar::UcsName).empty());
+
+    engine.begin(make_command("UNDO"));
+    CHECK(db.find_ucs("HERE") != kInvalidUcs);
+    CHECK(db.sysvars().get_string(Sysvar::UcsName) == "HERE");
+}

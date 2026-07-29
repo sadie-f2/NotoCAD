@@ -259,8 +259,25 @@ bool Database::erase_ucs(UcsId id) {
     // records ids. UCS Delete is rare enough that emptying the name is an
     // honest answer: the entry stops being findable and nothing else moves.
     UcsDef cleared = ucs_table_[id];
+    const std::string erased = cleared.name;
     cleared.name.clear();
-    return set_ucs(id, cleared);
+    if (!set_ucs(id, cleared)) return false;
+
+    // The current UCS is five system variables, not a reference into this
+    // table, so deleting the entry correctly leaves you working where you were.
+    // But UCSNAME would go on naming a system the table no longer holds, and
+    // then everything that reads it lies: UCS ? prints "current: FOO" beside a
+    // listing FOO has just vanished from, (getvar "UCSNAME") returns it, and
+    // DXFOUT writes $UCSNAME into a file whose UCS table cannot supply it --
+    // which is a malformed drawing, not merely a confusing one.
+    //
+    // Only the NAME is cleared. Where you are working is not a delete's
+    // business, and sending the user back to world would lose the frame they
+    // are drawing in.
+    if (!erased.empty() && sysvars_.get_string(Sysvar::UcsName) == erased) {
+        sysvars_.set_owned(Sysvar::UcsName, SysvarValue::of_string(std::string{}));
+    }
+    return true;
 }
 
 void Database::pop_ucs() {
