@@ -397,6 +397,71 @@ once is still open.
 
 ---
 
+## REDRAW and REGEN are not wanted, and the reason is structural
+
+Raised by Sadie: do we even need them? No — and it is worth writing down why,
+because "R12 had it" is otherwise a standing argument for building it.
+
+R12 kept a **display list** of vectors separate from the database. Circles were
+tessellated once at `VIEWRES` and stored, so zooming in did not retessellate and
+they went visibly blocky until you regenerated. REGEN rebuilt that list from the
+database; REDRAW merely repainted from it, clearing blipmarks and the holes an
+erase left behind. Both commands exist to manage a cache.
+
+There is no cache here. `paintEvent` walks the database every frame, and
+`DrawContext::chord_tolerance` comes from `world_per_pixel()`, so tessellation is
+recomputed at the current zoom on every repaint. Circles cannot go blocky.
+REGEN would have nothing to do and REDRAW nothing to clear, and a command that
+silently does nothing is worse than an absent one — it teaches the user it did
+something.
+
+Modern AutoCAD still has both, and REGEN is still occasionally needed there, for
+exactly the same reason: it still keeps a display list.
+
+**The corollary, which is the part worth remembering:** if the `QPixmap` scene
+cache ever lands, we will have reinvented the display list, and REDRAW becomes
+meaningful again as its invalidation. So this is "not until there is a cache",
+not "never". `REGENAUTO` and `VIEWRES` follow the same reasoning and the same
+condition.
+
+---
+
+## TEXT: bundle a Hershey font, and it is not a hack
+
+Open question 2 has been "SHX, bundle a vector font, or approximate on screen"
+since phase 7. Sadie's memory that R12's text was "simple pure stroke" is right,
+and it settles the question rather than dodging it.
+
+R12's SHX files are compiled shape definitions, and the good ones — `romans`,
+`romand`, `italicc` — are single-stroke vector fonts descended from the
+**Hershey** set (A.V. Hershey, US National Bureau of Standards, 1967). A glyph is
+literally a list of polylines, which is exactly what `Entity::draw()` emits. So
+bundling Hershey is not an approximation of what R12 did; it is a
+reimplementation of the same thing from the same ancestry.
+
+It also satisfies the constraint that ruled out the third option: the core stays
+headless. No Qt fonts, so `CLAUDE.md`'s "rendering the same database two ways is
+a correctness check" survives, and DXF-written TEXT and screen TEXT come from one
+source.
+
+And it does not preclude doing it "properly" later. An SHX parser — which would
+let a drawing use the user's own AutoCAD fonts — sits behind the same
+glyph-to-polylines interface. Same layering as DXF-first with DWG optional: the
+in-tree implementation is complete on its own, and the compatibility path is an
+addition rather than a rewrite.
+
+**Check before it goes in-tree:** the Hershey data is public-domain in origin,
+but the commonly circulated distributions carry an attribution condition from
+their packaging rather than from the original work. Given how carefully this
+project handles licensing — the whole DWG and Qt reasoning — that wants reading
+rather than assuming.
+
+**Consequence for dimensioning:** TEXT is a prerequisite, and it is now unblocked
+in principle. But see MEASUREGEOM below: most of what dimensions were wanted for
+turned out not to need them.
+
+---
+
 ## The viewport cannot zoom out past 1e12
 
 **Recorded, not fixed. Deliberately parked** -- Sadie's call, and right: the

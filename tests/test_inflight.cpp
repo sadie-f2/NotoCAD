@@ -241,3 +241,89 @@ TEST_CASE("inflight: repeated previews leave no trace on the drawing") {
     engine.supply(InputValue::of_point({0, 1, 0}));
     CHECK_VEC(line_at(db, 0)->start(), 0.0, 1.0, 0.0, 1e-12);
 }
+
+TEST_CASE("measuregeom: reports a distance and leaves the drawing alone") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("MEASUREGEOM"));
+    engine.supply(InputValue::none());  // Distance is the default
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({3, 4, 0}));
+
+    CHECK(engine.status() == EngineStatus::Finished);
+    CHECK(engine.message().find("Distance = 5.0000") != std::string::npos);
+    // The whole point of the command: nothing to erase afterwards.
+    CHECK(db.empty());
+}
+
+TEST_CASE("measuregeom: the ghost is a dimension, and it is only a ghost") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("MEASUREGEOM"));
+    engine.supply(InputValue::none());
+    engine.supply(InputValue::of_point({0, 0, 0}));
+
+    InFlight f;
+    REQUIRE(engine.preview(InputValue::of_point({10, 0, 0}), f));
+
+    // Two extension lines, a dimension line, and four arrow barbs.
+    CHECK(f.ghosts.size() == 7);
+    CHECK(f.suppressed.empty());
+    for (const EntityPtr& e : f.ghosts) CHECK(e->type() == EntityType::Line);
+
+    // The dimension line is offset from what is being measured, and parallel to
+    // it -- that is what makes it read as a dimension rather than as a chord.
+    const Line* dim = static_cast<const Line*>(f.ghosts[2].get());
+    CHECK_NEAR(dim->start().x, 0.0, 1e-9);
+    CHECK_NEAR(dim->end().x, 10.0, 1e-9);
+    CHECK_NEAR(dim->start().y, dim->end().y, 1e-12);
+    CHECK(std::abs(dim->start().y) > 1e-6);
+
+    CHECK(db.empty());
+
+    // And committing the same point still leaves nothing behind.
+    engine.supply(InputValue::of_point({10, 0, 0}));
+    CHECK(db.empty());
+}
+
+TEST_CASE("measuregeom: nothing to show before the first point is given") {
+    Database db;
+    CommandEngine engine(db);
+
+    InFlight f;
+    engine.begin(make_command("MEASUREGEOM"));
+    CHECK(!engine.preview(InputValue::of_point({1, 1, 0}), f));
+
+    engine.supply(InputValue::none());
+    CHECK(!engine.preview(InputValue::of_point({1, 1, 0}), f));
+
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    CHECK(engine.preview(InputValue::of_point({1, 1, 0}), f));
+
+    // A zero-length measurement has no direction to offset the ghost along, so
+    // it shows nothing rather than a degenerate smear.
+    InFlight g;
+    CHECK(!engine.preview(InputValue::of_point({0, 0, 0}), g));
+}
+
+TEST_CASE("measuregeom: Radius reports an arc or circle and refuses anything else") {
+    Database db;
+    CommandEngine engine(db);
+    const Handle c = db.add(std::make_unique<Circle>(Vec3{0, 0, 0}, 7.0));
+    const Handle l = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+
+    engine.begin(make_command("MEASUREGEOM"));
+    engine.supply(InputValue::of_keyword("RADIUS"));
+    engine.supply(InputValue::of_entity(c));
+    CHECK(engine.message().find("Radius = 7.0000") != std::string::npos);
+    CHECK(engine.message().find("Diameter = 14.0000") != std::string::npos);
+
+    engine.begin(make_command("MEASUREGEOM"));
+    engine.supply(InputValue::of_keyword("RADIUS"));
+    engine.supply(InputValue::of_entity(l));
+    CHECK(engine.status() == EngineStatus::Failed);
+
+    CHECK(db.size() == 2);
+}

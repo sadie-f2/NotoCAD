@@ -56,6 +56,11 @@ std::string fmt(double v) {
     return buf;
 }
 
+// R12 reports angles in degrees whatever the input convention.
+std::string fmt_degrees(double radians) {
+    return fmt(radians * 180.0 / std::numbers::pi);
+}
+
 // An angle, in radians. Typed as degrees -- R12 talks degrees to the user and
 // radians to AutoLISP -- or shown by pointing, in which case it is the direction
 // from the base point to where you pointed.
@@ -1108,6 +1113,133 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
             const double included =
                 2.0 * signed_angle(tangent_, normalize(chord), construction_normal(ctx));
             return add_vertex(ctx, value.point, included, true);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- MEASUREGEOM ------------------------------------------------------------
+
+void MeasureGeomCommand::build(CommandContext& ctx, const Vec3& a, const Vec3& b,
+                               std::vector<EntityPtr>& out) const {
+    const Vec3 d = b - a;
+    if (is_zero(d)) return;
+
+    const Vec3 n = construction_normal(ctx);
+    const Vec3 side = cross(n, d);
+    if (is_zero(side)) return;  // measuring along the plane normal: nothing to offset by
+
+    const Vec3 perp = normalize(side);
+    const Vec3 along = normalize(d);
+
+    // Sized in pixels when there is a screen to have pixels on. DrawContext's
+    // tolerance is half a world unit per pixel, so doubling it is the scale
+    // factor -- and the ghost then stays the same size on screen at any zoom,
+    // which is what an annotation should do. Without a view (`ncad` has none)
+    // fall back to a fraction of what is being measured.
+    const double world_per_px =
+        ctx.view != nullptr ? ctx.view->draw_context().chord_tolerance * 2.0 : 0.0;
+    const bool screen = world_per_px > 0.0;
+    const double offset = screen ? world_per_px * 24.0 : length(d) * 0.15;
+    const double barb = screen ? world_per_px * 9.0 : length(d) * 0.05;
+
+    const Vec3 oa = a + perp * offset;
+    const Vec3 ob = b + perp * offset;
+
+    // Extension lines, run a little past the dimension line as R12 draws them,
+    // and lifted slightly off the geometry so they do not sit on top of it.
+    out.push_back(std::make_unique<Line>(a + perp * (barb * 0.3), oa + perp * (barb * 0.6)));
+    out.push_back(std::make_unique<Line>(b + perp * (barb * 0.3), ob + perp * (barb * 0.6)));
+    out.push_back(std::make_unique<Line>(oa, ob));
+
+    // Arrowheads: tips at the ends, barbs trailing inward.
+    const double spread = 0.30;
+    out.push_back(std::make_unique<Line>(oa, oa + rotate_about(along, n, spread) * barb));
+    out.push_back(std::make_unique<Line>(oa, oa + rotate_about(along, n, -spread) * barb));
+    out.push_back(std::make_unique<Line>(ob, ob - rotate_about(along, n, spread) * barb));
+    out.push_back(std::make_unique<Line>(ob, ob - rotate_about(along, n, -spread) * barb));
+}
+
+Step MeasureGeomCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Distance/Radius <Distance>";
+    p.keywords = {"Distance", "Radius"};
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+bool MeasureGeomCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+    if (state_ != State::DistSecond || tentative.kind != InputKind::Point) return false;
+    build(ctx, first_, tentative.point, out.ghosts);
+    // Nothing is being stood in for: the drawing is not changing, and that is
+    // the whole point of the command.
+    return !out.ghosts.empty();
+}
+
+Step MeasureGeomCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Mode: {
+            if (keyword_is(value, "RADIUS")) {
+                state_ = State::RadiusEntity;
+                Prompt p;
+                p.kind = PromptKind::Entity;
+                p.message = "Select arc or circle";
+                return Step::ask(p);
+            }
+            if (value.kind != InputKind::None && !keyword_is(value, "DISTANCE")) {
+                return Step::failed("answer Distance or Radius");
+            }
+            state_ = State::DistFirst;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "First point";
+            return Step::ask(p);
+        }
+
+        case State::DistFirst: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            first_ = value.point;
+            state_ = State::DistSecond;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Second point";
+            p.base = first_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::DistSecond: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+            const Vec3 d = value.point - first_;
+            const double planar = std::sqrt(d.x * d.x + d.y * d.y);
+
+            // The same report DIST gives, because it is the same question and
+            // two spellings of the answer would be one too many.
+            std::string out = "Distance = " + fmt(length(d));
+            out += ",  Angle in X-Y Plane = " + fmt_degrees(std::atan2(d.y, d.x));
+            out += ",  Angle from X-Y Plane = " + fmt_degrees(std::atan2(d.z, planar));
+            out += "\nDelta X = " + fmt(d.x) + "   Delta Y = " + fmt(d.y) + "   Delta Z = " +
+                   fmt(d.z);
+            return Step::done(out);
+        }
+
+        case State::RadiusEntity: {
+            if (value.kind != InputKind::Entity) return Step::failed("an entity is required");
+            const Entity* e = ctx.db.get(value.entity);
+            if (e == nullptr) return Step::failed("no such entity");
+
+            double radius = 0.0;
+            if (e->type() == EntityType::Circle) {
+                radius = static_cast<const Circle*>(e)->radius();
+            } else if (e->type() == EntityType::Arc) {
+                radius = static_cast<const Arc*>(e)->radius();
+            } else {
+                return Step::failed("not an arc or circle");
+            }
+
+            return Step::done("Radius = " + fmt(radius) + ",  Diameter = " + fmt(radius * 2.0));
         }
     }
     return Step::failed("internal state error");
@@ -4706,10 +4838,6 @@ std::string fmt_point(const Vec3& p) {
     return "X = " + fmt(p.x) + "  Y = " + fmt(p.y) + "  Z = " + fmt(p.z);
 }
 
-std::string fmt_degrees(double radians) {
-    return fmt(radians * 180.0 / std::numbers::pi);
-}
-
 Prompt ask_point(const char* message, const Vec3* base) {
     Prompt p;
     p.kind = PromptKind::Point;
@@ -4935,6 +5063,7 @@ CommandPtr make_command(std::string_view name) {
     const std::string upper = upcase(name);
     if (upper == "LINE") return std::make_unique<LineCommand>();
     if (upper == "ARC") return std::make_unique<ArcCommand>();
+    if (upper == "MEASUREGEOM") return std::make_unique<MeasureGeomCommand>();
     if (upper == "SETVAR") return std::make_unique<SetVarCommand>();
     if (upper == "OSNAP") return std::make_unique<OsnapCommand>();
     if (upper == "ORTHO") return std::make_unique<OrthoCommand>();
@@ -4988,7 +5117,7 @@ CommandPtr make_command(std::string_view name) {
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
         "ARC", "AREA", "ARRAY", "CIRCLE",
-        "ORTHO", "OSNAP", "SETVAR", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
+        "MEASUREGEOM", "ORTHO", "OSNAP", "SETVAR", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
         "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
@@ -5001,6 +5130,7 @@ const std::vector<CommandAlias>& command_aliases() {
     // The R12 acad.pgp short forms for the commands that exist so far.
     static const std::vector<CommandAlias> aliases = {
         {"A", "ARC"},
+        {"MEA", "MEASUREGEOM"},
         {"C", "CIRCLE"},
         {"E", "ERASE"},
         {"AA", "AREA"},

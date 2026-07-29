@@ -198,6 +198,39 @@ private:
     Vec3 pending_second_{};
 };
 
+// MEASUREGEOM: measure something and leave nothing behind.
+//
+// Sadie's, and it is worth saying why it is not called MEASURE: R12's MEASURE
+// places points or blocks at intervals ALONG an entity, which is a different
+// command that should keep its name. MEASUREGEOM is modern AutoCAD's, and it is
+// exactly this -- report a distance or a radius, draw nothing.
+//
+// The reason it earns its place beside DIST, which already reports a distance,
+// is the picture. The workflow it replaces is "draw a dimension, read it, erase
+// it before it gets in the way": what is actually wanted is to SEE the
+// measurement while choosing it. So the second point prompt previews a
+// dimension-shaped ghost through InFlight -- extension lines, a dimension line
+// and arrowheads -- and commits none of it.
+//
+// No text on the ghost. The number goes to the command line, where DIST already
+// puts it, which means this needs nothing from the unsettled font question.
+class MeasureGeomCommand final : public Command {
+public:
+    const char* name() const override { return "MEASUREGEOM"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+    bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) override;
+
+private:
+    enum class State : std::uint8_t { Mode, DistFirst, DistSecond, RadiusEntity };
+
+    void build(CommandContext& ctx, const Vec3& a, const Vec3& b,
+               std::vector<EntityPtr>& out) const;
+
+    State state_{State::Mode};
+    Vec3 first_{};
+};
+
 // SETVAR: read or write any system variable by name, from the command line.
 //
 // The variables and their types have existed since phase 4a and were reachable
