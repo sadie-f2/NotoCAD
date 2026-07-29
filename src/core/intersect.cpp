@@ -346,18 +346,49 @@ void intersect_line_circle(const Vec3& a0, const Vec3& a1, const Vec3& centre, d
     // Parallel to the plane: either coplanar, or missing it entirely.
     if (std::abs(offset) > kIntersectTol) return;
 
-    // Coplanar, so it is the ordinary quadratic.
+    // Coplanar. Solved about the point of closest approach rather than as the
+    // ordinary quadratic, because the two are worlds apart in conditioning.
+    //
+    // The textbook form builds disc = qb^2 - 4*qa*qc from terms of order
+    // |a0 - centre|^4 to recover a discriminant of far lower order, and the
+    // subtraction cancels away every digit that separates them. For a circle of
+    // radius R sitting R from the origin -- a survey coordinate, or millimetres
+    // on a site plan -- that is fifteen orders at R = 1e12, and the answer comes
+    // back over one percent wrong. AutoCAD holds one ULP of the coordinate on
+    // the same construction, so this is arithmetic we were losing, not a limit
+    // of double precision. Pinned in test_numeric.cpp.
+    //
+    // Two changes buy it back. The distance from the centre to the line comes
+    // from a vector projection, whose error stays proportional to the operands
+    // rather than to their squares. And the half chord is factored:
+    //
+    //     sqrt(r^2 - h^2)  ==  sqrt((r - h) * (r + h))
+    //
+    // which trades a subtraction of two numbers of size r^2 for one of two
+    // numbers of size r. Same value, and it keeps the digits that tell the
+    // chord from the tangent.
     const Vec3 f = a0 - centre;
     const double qa = dot(d, d);
-    const double qb = 2.0 * dot(f, d);
-    const double qc = dot(f, f) - radius * radius;
 
-    const double disc = qb * qb - 4.0 * qa * qc;
-    if (disc < 0.0) return;
+    // Parameter of the point on the line nearest the centre, and the offset
+    // from the centre to it.
+    const double mid = -dot(f, d) / qa;
+    const double h = length(f + d * mid);
 
-    const double root = std::sqrt(std::max(0.0, disc));
-    const double t0 = (-qb - root) / (2.0 * qa);
-    const double t1 = (-qb + root) / (2.0 * qa);
+    const double gap = radius - h;
+    if (gap < 0.0) return;
+
+    // Half the chord, as a distance first: that is what gets compared against a
+    // tolerance in drawing units below. The old code tested sqrt(disc), which
+    // has units of length squared, so the tangency threshold meant something
+    // different at every scale.
+    const double half_length = std::sqrt(gap * (radius + h));
+
+    // Back into the line's own parameterisation, where 1 spans a0 to a1.
+    const double half = half_length / std::sqrt(qa);
+
+    const double t0 = mid - half;
+    const double t1 = mid + half;
 
     auto emit = [&](double t) {
         const Vec3 p = a0 + d * t;
@@ -371,7 +402,7 @@ void intersect_line_circle(const Vec3& a0, const Vec3& a1, const Vec3& centre, d
     emit(t0);
     // A tangent line touches once; emitting it twice would make TRIM believe
     // there are two pieces where there is one.
-    if (root > kIntersectTol) emit(t1);
+    if (half_length > kIntersectTol) emit(t1);
 }
 
 void intersect_circle_circle(const Vec3& c0, double r0, const Vec3& n0, const Vec3& c1, double r1,

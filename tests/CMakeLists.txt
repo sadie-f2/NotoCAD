@@ -44,6 +44,7 @@ add_executable(noto_tests
   test_rotate3d.cpp
   test_render.cpp
   test_viewport.cpp
+  test_numeric.cpp
 )
 
 target_include_directories(noto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
