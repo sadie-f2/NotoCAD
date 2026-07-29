@@ -50,6 +50,12 @@ enum class Sysvar : std::uint16_t {
     OsMode,
     PickBox,
     Aperture,
+
+    // Crosshair length, as a percentage of the smaller viewport dimension.
+    // AutoCAD's, not R12's -- R12 had a full-screen crosshair and no way to
+    // shorten it -- and 100 reproduces exactly that, which is why the range
+    // runs all the way there rather than stopping somewhere tidy.
+    CursorSize,
     // Current entity properties. New geometry takes these, which is how R12
     // decides what layer and colour something is drawn on without asking.
     CLayer,

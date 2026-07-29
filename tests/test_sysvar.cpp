@@ -201,3 +201,28 @@ TEST_CASE("osnap: every type round-trips through its bit") {
     CHECK(!osnap_type_from_bit(kOsnapNone, &unused));
     CHECK(!osnap_type_from_bit(47, &unused));  // a combination, not a single bit
 }
+
+TEST_CASE("sysvar: CURSORSIZE is a percentage, clamped to a usable range") {
+    Database db;
+    Sysvars& v = db.sysvars();
+
+    // AutoCAD's default. R12 had no such variable -- its crosshair was always
+    // full screen -- which 100 reproduces, and is why the range runs that far
+    // rather than stopping somewhere tidier.
+    CHECK(v.get_int(Sysvar::CursorSize) == 5);
+
+    CHECK(v.set_int(Sysvar::CursorSize, 100) == Sysvars::SetStatus::Ok);
+    CHECK(v.get_int(Sysvar::CursorSize) == 100);
+
+    // Out of range is REFUSED and the value left alone, not clamped -- the same
+    // rule as every other variable here, so a bad (setvar ...) says so instead
+    // of quietly doing something adjacent. Zero would be a cursor with no arms.
+    CHECK(v.set_int(Sysvar::CursorSize, 0) == Sysvars::SetStatus::OutOfRange);
+    CHECK(v.get_int(Sysvar::CursorSize) == 100);
+
+    CHECK(v.set_int(Sysvar::CursorSize, 5000) == Sysvars::SetStatus::OutOfRange);
+    CHECK(v.get_int(Sysvar::CursorSize) == 100);
+
+    CHECK(v.set_int(Sysvar::CursorSize, 1) == Sysvars::SetStatus::Ok);
+    CHECK(v.get_int(Sysvar::CursorSize) == 1);
+}

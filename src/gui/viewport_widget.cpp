@@ -137,7 +137,9 @@ ViewportWidget::ViewportWidget(const Database& db, QWidget* parent) : QWidget(pa
     // Qt would otherwise paint the widget background before paintEvent, which
     // costs a full-window fill we immediately overwrite.
     setAttribute(Qt::WA_OpaquePaintEvent);
-    setCursor(Qt::CrossCursor);
+    // The window system's crosshair is screen-aligned and cannot know about the
+    // UCS, so it is hidden and one is drawn in paintEvent instead.
+    setCursor(Qt::BlankCursor);
     viewport_.set_size(width(), height());
 }
 
@@ -325,6 +327,88 @@ void ViewportWidget::draw_rubber_band(QPainter& painter) const {
     painter.drawLine(QPointF(base.x, base.y), QPointF(cursor.x, cursor.y));
 }
 
+ViewportWidget::AxisFrame ViewportWidget::ucs_axis_frame() const {
+    AxisFrame f;
+
+    const Ucs ucs = db_.current_ucs().normalized();
+    const ScreenPoint o = viewport_.project(ucs.origin);
+    if (!std::isfinite(o.x) || !std::isfinite(o.y)) return f;
+
+    auto screen_delta = [&](const Vec3& dir) {
+        const ScreenPoint p = viewport_.project(ucs.origin + dir);
+        if (!std::isfinite(p.x) || !std::isfinite(p.y)) return QPointF(0, 0);
+        // Y is flipped on the way in already; this is pure screen space.
+        return QPointF(p.x - o.x, p.y - o.y);
+    };
+
+    const QPointF raw[3] = {screen_delta(ucs.xdir), screen_delta(ucs.ydir),
+                            screen_delta(ucs.zdir())};
+    f.colour[0] = kAxisX;
+    f.colour[1] = kAxisY;
+    f.colour[2] = kAxisZ;
+
+    // An axis is judged edge-on by its length RELATIVE to the longest of the
+    // three, never against a constant: a screen delta for a unit world vector
+    // scales with the zoom, so zoomed far out all three are tiny and none of
+    // them is edge-on. Getting this wrong makes the whole frame vanish when you
+    // zoom out, which is exactly when you want it.
+    double longest = 0.0;
+    double len[3];
+    for (int i = 0; i < 3; ++i) {
+        len[i] = std::hypot(raw[i].x(), raw[i].y());
+        longest = std::max(longest, len[i]);
+    }
+    if (longest <= 0.0) return f;
+
+    for (int i = 0; i < 3; ++i) {
+        f.usable[i] = len[i] >= longest * 0.05;
+        if (f.usable[i]) f.dir[i] = QPointF(raw[i].x() / len[i], raw[i].y() / len[i]);
+    }
+    f.valid = true;
+    return f;
+}
+
+void ViewportWidget::draw_cursor(QPainter& painter) const {
+    if (!cursor_inside_) return;
+
+    const AxisFrame frame = ucs_axis_frame();
+    if (!frame.valid) return;
+
+    // CURSORSIZE is a percentage of the SMALLER viewport dimension, so the
+    // crosshair keeps its proportions in a window of any shape. At 100 the arms
+    // reach the nearer edge from the centre, which is R12's full-screen
+    // crosshair -- the reason the range runs that far.
+    const double span = static_cast<double>(std::min(width(), height()));
+    const double arm = span * 0.5 *
+                       (static_cast<double>(db_.sysvars().get_int(Sysvar::CursorSize)) / 100.0);
+    if (arm <= 0.0) return;
+
+    const QPointF c(static_cast<double>(cursor_pos_.x()), static_cast<double>(cursor_pos_.y()));
+
+    painter.save();
+    for (int i = 0; i < 3; ++i) {
+        // Z is skipped in a plan view rather than drawn as a stub, which is what
+        // makes the cursor say "you are looking straight down the construction
+        // plane" without anything having to announce it.
+        if (!frame.usable[i]) continue;
+
+        QPen pen(frame.colour[i]);
+        pen.setWidth(0);
+        painter.setPen(pen);
+        // Both ways from the cursor, so it reads as crosshairs rather than as a
+        // corner. The negative arm is drawn dimmer so the positive direction of
+        // each axis is still legible -- the whole point of colouring them.
+        painter.drawLine(c, c + frame.dir[i] * arm);
+
+        QColor back = frame.colour[i];
+        back.setAlpha(90);
+        pen.setColor(back);
+        painter.setPen(pen);
+        painter.drawLine(c, c - frame.dir[i] * arm);
+    }
+    painter.restore();
+}
+
 void ViewportWidget::draw_ucs_icon(QPainter& painter) const {
     const int mode = db_.sysvars().get_int(Sysvar::UcsIcon);
     if (mode == 0) return;  // UCSICON OFF
@@ -345,57 +429,26 @@ void ViewportWidget::draw_ucs_icon(QPainter& painter) const {
         }
     }
 
-    // Orientation comes from projecting each axis; the drawn length is fixed in
-    // pixels, so the icon reads the same at any zoom. Screen deltas for a unit
-    // world vector scale with the zoom, so an axis is judged edge-on by its
-    // size RELATIVE to the largest of the three rather than against a constant
-    // -- zoomed far out, all three are tiny and none of them is edge-on.
-    struct Axis {
-        QPointF d;
-        double len;
-        QColor colour;
-        const char* label;
-    };
-
-    auto screen_delta = [&](const Vec3& dir) {
-        const ScreenPoint p = viewport_.project(ucs.origin + dir);
-        if (!std::isfinite(p.x) || !std::isfinite(p.y)) return QPointF(0, 0);
-        // Y is flipped on the way in already; this is pure screen space.
-        return QPointF(p.x - o.x, p.y - o.y);
-    };
-
-    Axis axes[3] = {
-        {screen_delta(ucs.xdir), 0.0, kAxisX, "X"},
-        {screen_delta(ucs.ydir), 0.0, kAxisY, "Y"},
-        {screen_delta(ucs.zdir()), 0.0, kAxisZ, "Z"},
-    };
-
-    double longest = 0.0;
-    for (Axis& a : axes) {
-        a.len = std::hypot(a.d.x(), a.d.y());
-        longest = std::max(longest, a.len);
-    }
-    if (longest <= 0.0) return;
+    const AxisFrame frame = ucs_axis_frame();
+    if (!frame.valid) return;
 
     painter.save();
     QFont font = painter.font();
     font.setPointSizeF(std::max(6.0, font.pointSizeF() - 1.0));
     painter.setFont(font);
 
-    for (const Axis& a : axes) {
-        // Pointing at or away from the eye: it would draw as a stub of
-        // meaningless direction, so it is left out. Seeing Z disappear as the
-        // view goes to plan is correct and is how R12's icon behaves.
-        if (a.len < longest * 0.05) continue;
+    static const char* const kLabel[3] = {"X", "Y", "Z"};
+    for (int i = 0; i < 3; ++i) {
+        if (!frame.usable[i]) continue;
 
-        const QPointF unit(a.d.x() / a.len, a.d.y() / a.len);
+        const QPointF unit = frame.dir[i];
         const QPointF tip = anchor + unit * kIconLength;
 
-        QPen pen(a.colour);
+        QPen pen(frame.colour[i]);
         pen.setWidth(0);
         painter.setPen(pen);
         painter.drawLine(anchor, tip);
-        painter.drawText(tip + unit * 6.0 + QPointF(-3, 4), QString::fromLatin1(a.label));
+        painter.drawText(tip + unit * 6.0 + QPointF(-3, 4), QString::fromLatin1(kLabel[i]));
     }
 
     // R12 marks the world system with a W on the icon. It is the cheapest way
@@ -518,6 +571,7 @@ void ViewportWidget::paintEvent(QPaintEvent*) {
         draw_entities(flight.ghosts, ctx, hi);
     }
 
+    draw_cursor(painter);
     draw_ucs_icon(painter);
     draw_rubber_band(painter);
     draw_osnap_marker(painter);
@@ -596,12 +650,18 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event) {
     cursor_inside_ = true;
 
     if (drag_ == Drag::None) {
-        // Repaint only when something actually follows the cursor, so an idle
-        // mouse over a large drawing costs nothing.
-        if (wants_pick()) {
-            update_osnap();
-            update();
-        }
+        // The snap search is still only worth running when a prompt could use
+        // one -- it walks the drawing, and nothing shows the result otherwise.
+        if (wants_pick()) update_osnap();
+
+        // The repaint, though, is now unconditional. It used to be skipped
+        // unless something followed the cursor, on the grounds that an idle
+        // mouse over a large drawing should cost nothing; the crosshairs are
+        // that something, and they follow it always. Hiding the system cursor
+        // means every mouse move is a frame, so this is the cost of drawing our
+        // own -- and the QPixmap scene cache in SF_todo.md is where it goes if
+        // it starts to drag.
+        update();
         QWidget::mouseMoveEvent(event);
         return;
     }

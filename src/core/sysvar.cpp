@@ -31,6 +31,9 @@ constexpr SysvarDef kTable[] = {
     {"OSMODE", Sysvar::OsMode, SysvarType::Int, false, true, 37, 0, 2047, 0.0, "", {}},
     {"PICKBOX", Sysvar::PickBox, SysvarType::Int, false, false, 3, 0, 50, 0.0, "", {}},
     {"APERTURE", Sysvar::Aperture, SysvarType::Int, false, false, 10, 1, 50, 0.0, "", {}},
+    // Not journalled, like PICKBOX and APERTURE beside it: a display preference
+    // is not drawing state, and undoing back through one would be surprising.
+    {"CURSORSIZE", Sysvar::CursorSize, SysvarType::Int, false, false, 5, 1, 100, 0.0, "", {}},
 
     // Current layer, by name rather than by id: that is what R12 stores, what
     // getvar returns, and what survives a table whose indices have shifted.

@@ -21,7 +21,9 @@
 #include "noto/view_control.hpp"
 #include "noto/viewport.hpp"
 
+#include <QColor>
 #include <QPoint>
+#include <QPointF>
 #include <QWidget>
 
 #include <vector>
@@ -121,6 +123,25 @@ private:
     // reason as the markers above: it is a fixed pixel size showing an
     // orientation, not geometry that lives in the drawing.
     void draw_ucs_icon(QPainter& painter) const;
+
+    // The crosshairs, drawn rather than left to the window system, so they lie
+    // along the current UCS instead of along the screen. Length from CURSORSIZE.
+    void draw_cursor(QPainter& painter) const;
+
+    // The current UCS axes as unit screen directions. Shared by the icon and
+    // the cursor so the two cannot disagree about which way the construction
+    // plane points -- they are the same statement drawn at two sizes.
+    //
+    // `usable` is false for an axis pointing at or away from the eye, which
+    // projects to nothing and would otherwise draw as a stub in a meaningless
+    // direction.
+    struct AxisFrame {
+        QPointF dir[3]{};
+        QColor colour[3]{};
+        bool usable[3]{false, false, false};
+        bool valid{false};
+    };
+    AxisFrame ucs_axis_frame() const;
 
     // Refreshes snap_ from the cursor position. Cheap when OSMODE is zero,
     // which is a drawing's default state.
