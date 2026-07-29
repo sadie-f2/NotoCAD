@@ -50,9 +50,10 @@ add_executable(noto_tests
   test_registry.cpp
   test_ellipse.cpp
   test_spline.cpp
+  test_iperl.cpp
 )
 
-target_include_directories(noto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(noto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/app)
 target_link_libraries(noto_tests PRIVATE noto_core noto_lisp noto_app noto_flags)
 
 add_test(NAME noto_tests COMMAND noto_tests)

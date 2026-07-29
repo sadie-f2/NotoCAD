@@ -3,6 +3,8 @@
 
 #include "prompt.hpp"
 
+#include "iperl.hpp"
+
 #include "noto/commands.hpp"
 #include "noto/input_text.hpp"
 #include "noto/lisp/command_input.hpp"
@@ -66,6 +68,15 @@ private:
     std::string error_;
 };
 
+// One iperl for the process. Not a member of either class that uses it: both
+// the command prompt and the answer prompt reach it, they are different
+// objects, and two co-processes would mean two RPN stacks writing over each
+// other's save file.
+IperlSession& iperl() {
+    static IperlSession session;
+    return session;
+}
+
 bool PromptLineSource::from_lisp(const Prompt& prompt, const std::string& source,
                                  InputValue& out) {
     in_.clear_error();
@@ -85,13 +96,32 @@ bool PromptLineSource::from_lisp(const Prompt& prompt, const std::string& source
 bool PromptLineSource::next_value(const Prompt& prompt, InputValue& out) {
     if (pos_ >= tokens_.size()) return false;
 
-    const std::string token = tokens_[pos_++];
+    std::string token = tokens_[pos_++];
 
     // !name -- substitute the value of a LISP variable. Evaluating the bare
     // name gets variable lookup, unbound reporting and case-insensitivity for
     // free rather than reimplementing them.
     if (token.size() > 1 && token[0] == '!') {
         return from_lisp(prompt, token.substr(1), out);
+    }
+
+    // =expr -- iperl. The result comes back as text and goes through the same
+    // parser a typed answer does, so it can answer ANY prompt: `=2*$pi*5` at a
+    // radius, `=p("3 4 +")` at a distance, a comma-separated pair at a point.
+    // Nothing here knows what kind of answer was wanted, which is what makes
+    // one branch enough.
+    if (token.size() > 1 && token[0] == '=') {
+        std::string text;
+        if (!iperl().evaluate(token.substr(1), text)) {
+            error_ = text;
+            return false;
+        }
+        // The result REPLACES the token and falls through to the ordinary
+        // parser below rather than being parsed here. That is what lets it
+        // answer any prompt -- a radius, an angle, a comma-separated point --
+        // and it means iperl's answer is read by exactly the same code as a
+        // typed one, so the two cannot come to disagree.
+        token = text;
     }
 
     // A parenthesised expression is evaluated and its value used as the answer,
@@ -323,6 +353,19 @@ bool PromptSession::feed_line(const std::string& line) {
     if (upper == "QUIT" || upper == "EXIT") return false;
     if (head == "?") {
         list_commands();
+        return true;
+    }
+
+    // =expr at the command prompt prints the result, the way !name does for a
+    // LISP variable. Being able to just ask is most of what a calculator is
+    // for, and it is also how you find out whether iperl is there at all.
+    if (head.size() > 1 && head[0] == '=') {
+        std::string text;
+        if (!iperl().evaluate(head.substr(1), text)) {
+            out_.write_error("; " + text + "\n");
+        } else {
+            out_.write(text + "\n");
+        }
         return true;
     }
 

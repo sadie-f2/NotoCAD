@@ -3,7 +3,8 @@
 
 # The prompt logic is a library so the test suite can reach it; main.cpp stays
 # argument parsing and wiring only.
-add_library(noto_app STATIC prompt.cpp)
+add_library(noto_app STATIC prompt.cpp
+  iperl.cpp)
 target_include_directories(noto_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(noto_app PUBLIC noto_core noto_lisp)
 target_link_libraries(noto_app PRIVATE noto_flags)
