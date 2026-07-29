@@ -25,12 +25,31 @@
 ;;;   LISP arithmetic; reading it back measures the whole path through the
 ;;;   command, the database and entity storage, which is what we care about.
 ;;;
-;;; Usage:  (load "t2_chain.lsp")  then  (t2all)  or e.g.  (t2 800 1.0)
+;;; Usage:  (load "t2_chain.lsp")  then  (t2all)
+;;;         a single run, echoing only:  (t2 800 1.0 nil)
+;;;
+;;; (t2all) writes CSV to the path in *t2-out* as well as echoing to the
+;;; command line, because copying sixteen-digit numbers out of the command
+;;; history is a good way to lose one and not notice. Set *t2-out* to nil to
+;;; echo only. Forward slashes in the path even on Windows.
 
 (setq *t2-accumulate* T)
+(setq *t2-out* "c:/temp/t2_chain.csv")
 
-;;; One run. N segments of length LEN, reporting the closure error.
-(defun t2 (n len / os cm bm ss i ang p0 p1 start err)
+;;; Open for write, or nil. Kept separate so a bad path is a warning and a
+;;; still-usable run rather than a failed one.
+(defun t2-port (/ p)
+  (if *t2-out*
+    (progn
+      (setq p (open *t2-out* "w"))
+      (if (null p) (princ (strcat "\n  cannot write " *t2-out* " -- echoing only")))
+      p)
+    nil))
+
+;;; One run. N segments of length LEN, reporting the closure error. Echoes a
+;;; CSV row and, if PORT is non-nil, writes the same row to it. Returns the
+;;; error so a caller can do its own arithmetic on it.
+(defun t2 (n len port / os cm bm ss i ang p0 p1 start err row)
 
   (setq os (getvar "OSMODE")
         cm (getvar "CMDECHO")
@@ -66,31 +85,44 @@
 
   (setq err (distance p0 start))
 
-  ;; Reported relative to the segment length, because that is the only way the
-  ;; L = 1 and L = 1e6 rows can be read against each other. Scaled by 1e15 so
-  ;; the interesting digits are visible without relying on how many places rtos
-  ;; is willing to give.
-  (princ "\n  N=")        (princ n)
-  (princ "  L=")          (princ (rtos len 2 4))
-  (princ "   end=(")      (princ (rtos (car p0) 2 12))
-  (princ ", ")            (princ (rtos (cadr p0) 2 12))
-  (princ ")   err=")      (princ (rtos err 2 12))
-  (princ "   err/L*1e15=") (princ (rtos (/ (* err 1e15) len) 2 3))
+  ;; err/L is the column that matters: relative to the segment length is the
+  ;; only way the L = 1 and L = 1e9 rows can be read against each other. It is
+  ;; scaled by 1e15 so the interesting digits survive rtos, which reports
+  ;; DECIMAL PLACES rather than significant ones -- at L = 1 the raw error is
+  ;; down around 1e-16 and would print as a row of zeros.
+  (setq row (strcat (itoa n) ","
+                    (rtos len 2 4) ","
+                    (rtos (car p0) 2 14) ","
+                    (rtos (cadr p0) 2 14) ","
+                    (rtos err 2 14) ","
+                    (rtos (/ (* err 1e15) len) 2 6)))
+
+  (princ (strcat "\n  " row))
+  (if port (write-line row port))
 
   (setvar "OSMODE" os)
   (setvar "CMDECHO" cm)
   (setvar "BLIPMODE" bm)
-  (princ))
+  err)
 
 ;;; The sweep. Magnitude across the columns, chain length down the rows, so a
 ;;; drift that scales with coordinate size and one that scales with step count
 ;;; are told apart by which way the table grows.
-(defun t2all (/ )
+(defun t2all (/ port head)
+  (setq port (t2-port)
+        head "n,len,end_x,end_y,err,err_over_len_x1e15")
+
   (princ "\nT2 closed chain -- accumulate=")
   (princ (if *t2-accumulate* "yes" "no"))
+  (princ "\n  ") (princ head)
+  (if port (write-line head port))
+
   (foreach len '(1.0 1.0e3 1.0e6 1.0e9)
-    (princ "\n")
     (foreach n '(8 80 800 8000)
-      (t2 n len)))
+      (t2 n len port)))
+
+  (if port
+    (progn (close port)
+           (princ (strcat "\n\n  written to " *t2-out*))))
   (princ "\n")
   (princ))
