@@ -119,6 +119,11 @@ private:
     // been drawn this way.
     void draw_osnap_marker(QPainter& painter) const;
 
+    // The UCS icon, honouring UCSICON's 0/1/2. Screen-space for the same
+    // reason as the markers above: it is a fixed pixel size showing an
+    // orientation, not geometry that lives in the drawing.
+    void draw_ucs_icon(QPainter& painter) const;
+
     // Refreshes snap_ from the cursor position. Cheap when OSMODE is zero,
     // which is a drawing's default state.
     void update_osnap();

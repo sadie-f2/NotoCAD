@@ -27,6 +27,17 @@ const QColor kCrosshair(90, 90, 100);
 
 const QColor kOsnapMarker(250, 200, 60);
 
+// AutoCAD's axis colours, which are near enough universal now: X red, Y green,
+// Z blue. Dimmed from full saturation because full red on the dark background
+// glares next to width-0 wireframe.
+const QColor kAxisX(220, 70, 70);
+const QColor kAxisY(90, 200, 90);
+const QColor kAxisZ(90, 140, 230);
+
+// Fixed pixel geometry: the icon shows an orientation, not a size.
+constexpr double kIconLength = 34.0;
+constexpr double kIconMargin = 46.0;
+
 // One wheel notch is 120 eighths of a degree; this is the zoom per notch.
 constexpr double kZoomPerNotch = 1.15;
 constexpr double kDegreesPerNotch = 120.0;
@@ -303,6 +314,92 @@ void ViewportWidget::draw_rubber_band(QPainter& painter) const {
     painter.drawLine(QPointF(base.x, base.y), QPointF(cursor.x, cursor.y));
 }
 
+void ViewportWidget::draw_ucs_icon(QPainter& painter) const {
+    const int mode = db_.sysvars().get_int(Sysvar::UcsIcon);
+    if (mode == 0) return;  // UCSICON OFF
+
+    const Ucs ucs = db_.current_ucs().normalized();
+    const ScreenPoint o = viewport_.project(ucs.origin);
+    if (!std::isfinite(o.x) || !std::isfinite(o.y)) return;
+
+    // Where the icon sits. Mode 2 is "at the origin", but only when the origin
+    // is actually on screen -- R12 falls back to the corner rather than drawing
+    // it somewhere it cannot be seen, which is also what stops the icon
+    // vanishing the moment you pan away from it.
+    QPointF anchor(kIconMargin, height() - kIconMargin);
+    if (mode == 2) {
+        const QPoint op(static_cast<int>(o.x), static_cast<int>(o.y));
+        if (rect().adjusted(kIconLength, kIconLength, -kIconLength, -kIconLength).contains(op)) {
+            anchor = QPointF(o.x, o.y);
+        }
+    }
+
+    // Orientation comes from projecting each axis; the drawn length is fixed in
+    // pixels, so the icon reads the same at any zoom. Screen deltas for a unit
+    // world vector scale with the zoom, so an axis is judged edge-on by its
+    // size RELATIVE to the largest of the three rather than against a constant
+    // -- zoomed far out, all three are tiny and none of them is edge-on.
+    struct Axis {
+        QPointF d;
+        double len;
+        QColor colour;
+        const char* label;
+    };
+
+    auto screen_delta = [&](const Vec3& dir) {
+        const ScreenPoint p = viewport_.project(ucs.origin + dir);
+        if (!std::isfinite(p.x) || !std::isfinite(p.y)) return QPointF(0, 0);
+        // Y is flipped on the way in already; this is pure screen space.
+        return QPointF(p.x - o.x, p.y - o.y);
+    };
+
+    Axis axes[3] = {
+        {screen_delta(ucs.xdir), 0.0, kAxisX, "X"},
+        {screen_delta(ucs.ydir), 0.0, kAxisY, "Y"},
+        {screen_delta(ucs.zdir()), 0.0, kAxisZ, "Z"},
+    };
+
+    double longest = 0.0;
+    for (Axis& a : axes) {
+        a.len = std::hypot(a.d.x(), a.d.y());
+        longest = std::max(longest, a.len);
+    }
+    if (longest <= 0.0) return;
+
+    painter.save();
+    QFont font = painter.font();
+    font.setPointSizeF(std::max(6.0, font.pointSizeF() - 1.0));
+    painter.setFont(font);
+
+    for (const Axis& a : axes) {
+        // Pointing at or away from the eye: it would draw as a stub of
+        // meaningless direction, so it is left out. Seeing Z disappear as the
+        // view goes to plan is correct and is how R12's icon behaves.
+        if (a.len < longest * 0.05) continue;
+
+        const QPointF unit(a.d.x() / a.len, a.d.y() / a.len);
+        const QPointF tip = anchor + unit * kIconLength;
+
+        QPen pen(a.colour);
+        pen.setWidth(0);
+        painter.setPen(pen);
+        painter.drawLine(anchor, tip);
+        painter.drawText(tip + unit * 6.0 + QPointF(-3, 4), QString::fromLatin1(a.label));
+    }
+
+    // R12 marks the world system with a W on the icon. It is the cheapest way
+    // to answer "am I typing coordinates in the system I think I am", which is
+    // the question the icon exists for.
+    if (ucs.is_world()) {
+        QPen pen(kRubberBand);
+        pen.setWidth(0);
+        painter.setPen(pen);
+        painter.drawText(anchor + QPointF(-14, 14), QStringLiteral("W"));
+    }
+
+    painter.restore();
+}
+
 void ViewportWidget::refresh_osnap() {
     update_osnap();
     update();
@@ -377,6 +474,7 @@ void ViewportWidget::paintEvent(QPaintEvent*) {
     // the whole window.
     draw_database(db_, viewport_.draw_context(), dashed);
 
+    draw_ucs_icon(painter);
     draw_rubber_band(painter);
     draw_osnap_marker(painter);
 }
