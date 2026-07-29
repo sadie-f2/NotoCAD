@@ -397,6 +397,51 @@ once is still open.
 
 ---
 
+## The viewport cannot zoom out past 1e12
+
+**Recorded, not fixed. Deliberately parked** -- Sadie's call, and right: the
+geometry is correct at that size, only the view is limited, and nothing in the
+stated workflow needs it yet.
+
+`kMaxViewHeight = 1e12` (`src/core/viewport.cpp:18`), clamped in
+`set_view_height()`. A drawing taller than that cannot be zoomed out far enough
+to see, so ZOOM Extents saturates and the rest falls off the edges. It reads as
+clipping and is not: `Viewport::project()` is a plain parallel projection with
+no near or far plane anywhere in it. The kernel is fine at that size --
+`test_numeric.cpp` has `curve_point_at` within 1-2 ULP at 1e12 -- so this is a
+display limit sitting on top of arithmetic that does not have one.
+
+`kMinViewHeight` next to it carries a stated reason ("a long enough zoom-in
+reaches denormals"). The maximum does not, and is probably just conservative.
+What to check before raising it, rather than guessing: `world_per_pixel()`
+inverts to a scale factor, and `project()` multiplies a world-sized offset by
+it, so the question is where that product stops being exact -- not whether it
+overflows, which at 1e16 it plainly does not. Tessellation is not a concern:
+`draw_context()` derives the chord tolerance from `world_per_pixel()`, so a
+coarser view asks for coarser curves by construction.
+
+**The bar, measured in AutoCAD 2026 by Sadie.** No such limit there. A circle of
+radius 1e16 placed that far from the origin reports its quadrant at the origin,
+while drawing about 1.2274 units off it:
+
+| coordinate | offset | ULP there | in ULP | relative |
+|---|---|---|---|---|
+| 1e12 | 0.0001 | 1.221e-4 | 0.82 | 1.00e-16 |
+| 1e16 | 1.2274 | 2.0 | 0.61 | 1.23e-16 |
+
+Both are BELOW one ULP -- at 1e16 the representable spacing is 2.0 units, so the
+offset is smaller than the smallest distinguishable one -- and the relative error
+holds at about half of 2^-52 across four orders. Correctly rounded, not merely
+close. Together with the closed-chain measurement (`tests/acad/t2_chain.lsp`),
+which showed `err/L` constant from L = 1 to 1e9, that is scale invariance
+demonstrated over sixteen orders of magnitude, and it is the standard the
+tolerance work is aimed at.
+
+**Unverified:** whether R12 itself had a comparable view limit. Plausible, and it
+would make the current behaviour faithful rather than merely restrictive -- but
+it is a guess, and the difference decides whether raising the cap is a fix or a
+divergence.
+
 ## CIRCLE is missing its construction options
 
 `CIRCLE` takes centre-then-radius only. R12 also has **2P**, **3P** and **TTR**
