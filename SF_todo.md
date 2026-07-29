@@ -329,10 +329,31 @@ Two genuinely new pieces, and one that is only volume:
    *not* arrived" — the cursor is somewhere, the command has not been told. Small,
    but it is a new concept in the engine's model rather than an extension of one.
 
-3. **Extraction across the editing commands.** Mechanical, and bounded at about
-   seven. **Check first** whether their commit paths interleave deriving the
-   change with writing to the database and the journal; if they do, the
-   extraction is fiddlier than it looks and that changes the estimate.
+3. **Extraction across the editing commands.** Mechanical, and smaller than it
+   looks — **checked, and the answer is good.** The worry was that the commit
+   paths interleave deriving the change with writing it, which would have made
+   the extraction a rewrite. They do not. Four of the five already split at
+   exactly the right seam, with `next()` deriving the value and a private
+   `apply()` taking it:
+
+   | Command | Signature | `commands.hpp` |
+   |---|---|---|
+   | MOVE / COPY | `apply(ctx, const Vec3& delta)` | 359 |
+   | ROTATE / SCALE / MIRROR | `apply(ctx, const Mat4& m, bool erase_originals)` | 394 |
+   | ROTATE3D | `apply(ctx, double radians)` | 432 |
+   | STRETCH | `apply(ctx, const Vec3& delta)` | 514 |
+
+   And the bodies are already the right shape: `MoveCommand::apply` is a loop of
+   `clone()`, `transform(m)`, then write. Splitting off "produce the modified
+   clones" from "write them" is a handful of lines each, not a restructure.
+
+   `TransformCommand`'s `erase_originals` is a nice confirmation that the shape
+   is right — it is exactly `suppressed`, already parameterised, and it is the
+   same distinction as MOVE-versus-COPY wearing MIRROR's clothes.
+
+   **ARRAY is the one exception**: no `apply()`, just `ask_rows`/`ask_columns`/
+   `ask_spacing`. It is the command already being deferred on repaint cost, so
+   the outlier and the deferral are the same command.
 
 Optional, and worth considering alongside rather than after: **cache the static
 scene in a `QPixmap` and blit it**, drawing only the ghosts on top. This is the
@@ -340,6 +361,25 @@ modern form of what R12 got from XOR — rasterise the unchanging geometry once 
 without the raster-op dependency, and it survives phase 14's move to
 `QOpenGLWidget`. It matters most over X11 forwarding, where the repaint cost is
 already felt.
+
+**But it helps in-flight only, and does nothing for orbit or zoom.** Sadie's
+observation, and worth keeping straight because the two feel identical from the
+outside. A shift+middle orbit and a wheel zoom already repaint the whole database
+per input event, which is why they drag over SSH — but they change the *view*
+while the geometry stands still, so the cached raster is invalid on every frame
+and there is nothing to reuse. In-flight is the mirror image: the camera holds
+still and a handful of entities move, so one blit plus a few ghosts is the whole
+frame. Same symptom, opposite cause, and only one of them has a cheap fix. Orbit
+wants level-of-detail during the drag, or phase 14.
+
+The other half of that observation: orbit is **not** a partial implementation of
+in-flight, and there is no pending state in it to build on. What it does give is
+the control-flow precedent — event, mutate one piece of widget state, `update()`,
+let `paintEvent` re-derive everything — which in-flight follows exactly, with the
+tentative value standing where the camera does. So it needs no new event
+plumbing, only new state and a branch in the paint path. `paintEvent` also keeps
+its unconditional full walk over the database; in-flight adds skipping the
+suppressed handles on the way past, then a second short walk over the ghosts.
 
 ### Do it before phase 10's remainder and before grips
 
