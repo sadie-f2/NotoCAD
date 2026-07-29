@@ -6,6 +6,7 @@
 #include "noto/database.hpp"
 #include "noto/ecs.hpp"
 #include "noto/entities.hpp"
+#include "noto/highlight.hpp"
 #include "noto/render.hpp"
 #include "noto/scene.hpp"
 
@@ -206,4 +207,115 @@ TEST_CASE("begin_entity carries the props of the entity that follows") {
 
     CHECK(r.polys.size() == 1);
     CHECK(r.polys[0].props.color == 3);
+}
+
+TEST_CASE("render: HighlightRenderer forces the colour and touches nothing else") {
+    RecordingRenderer rec;
+    HighlightRenderer hi(rec, 6);
+
+    EntityProps props;
+    props.color = kColorByLayer;
+    props.layer = 3;
+    props.linetype = 2;
+    hi.begin_entity(props);
+
+    const Vec3 pts[3] = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}};
+    hi.polyline(pts, 3, false);
+
+    REQUIRE(rec.polys.size() == 1);
+    CHECK(rec.polys[0].props.color == 6);
+    // Everything else survives, which is what lets it chain over DashRenderer:
+    // the linetype still has to reach the backend to be cut into dashes.
+    CHECK(rec.polys[0].props.layer == 3);
+    CHECK(rec.polys[0].props.linetype == 2);
+    CHECK(rec.polys[0].pts.size() == 3);
+    CHECK(!rec.polys[0].closed);
+    CHECK_VEC(rec.polys[0].pts[2], 1.0, 1.0, 0.0, 1e-12);
+}
+
+TEST_CASE("render: draw_database can skip handles") {
+    Database db;
+    const Handle a = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+    const Handle b = db.add(std::make_unique<Line>(Vec3{0, 1, 0}, Vec3{1, 1, 0}));
+    const Handle c = db.add(std::make_unique<Line>(Vec3{0, 2, 0}, Vec3{1, 2, 0}));
+
+    RecordingRenderer all;
+    draw_database(db, DrawContext{}, all);
+    CHECK(all.polys.size() == 3);
+
+    RecordingRenderer some;
+    draw_database(db, DrawContext{}, some, std::vector<Handle>{b});
+    REQUIRE(some.polys.size() == 2);
+    // Drawing order is preserved for what remains -- skipping is a filter, not
+    // a reordering.
+    CHECK_VEC(some.polys[0].pts[0], 0.0, 0.0, 0.0, 1e-12);
+    CHECK_VEC(some.polys[1].pts[0], 0.0, 2.0, 0.0, 1e-12);
+
+    // An empty skip list is the ordinary walk, which is what COPY passes.
+    RecordingRenderer none;
+    draw_database(db, DrawContext{}, none, std::vector<Handle>{});
+    CHECK(none.polys.size() == 3);
+
+    RecordingRenderer every;
+    draw_database(db, DrawContext{}, every, std::vector<Handle>{a, b, c});
+    CHECK(every.polys.empty());
+}
+
+TEST_CASE("render: draw_handles takes a subset, in the order given") {
+    Database db;
+    const Handle a = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+    const Handle b = db.add(std::make_unique<Line>(Vec3{0, 1, 0}, Vec3{1, 1, 0}));
+    db.add(std::make_unique<Line>(Vec3{0, 2, 0}, Vec3{1, 2, 0}));
+
+    RecordingRenderer rec;
+    // Selection order, which is deliberately not drawing order.
+    draw_handles(db, DrawContext{}, rec, std::vector<Handle>{b, a});
+    REQUIRE(rec.polys.size() == 2);
+    CHECK_VEC(rec.polys[0].pts[0], 0.0, 1.0, 0.0, 1e-12);
+    CHECK_VEC(rec.polys[1].pts[0], 0.0, 0.0, 0.0, 1e-12);
+
+    // A dangling handle is skipped rather than crashing: a selection can
+    // outlive the entities in it.
+    db.erase(a);
+    RecordingRenderer after;
+    draw_handles(db, DrawContext{}, after, std::vector<Handle>{b, a});
+    CHECK(after.polys.size() == 1);
+}
+
+TEST_CASE("render: draw_handles still honours layer visibility") {
+    // A handle held by AutoLISP can name an entity on a frozen layer. Drawing
+    // it because it happens to be selected would put geometry on screen that
+    // the drawing says is not there.
+    Database db;
+    const LayerId hidden = db.add_layer("HIDDEN");
+    auto l = std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0});
+    l->props().layer = hidden;
+    const Handle h = db.add(std::move(l));
+
+    RecordingRenderer visible;
+    draw_handles(db, DrawContext{}, visible, std::vector<Handle>{h});
+    CHECK(visible.polys.size() == 1);
+
+    db.set_layer_frozen(hidden, true);
+    RecordingRenderer frozen;
+    draw_handles(db, DrawContext{}, frozen, std::vector<Handle>{h});
+    CHECK(frozen.polys.empty());
+}
+
+TEST_CASE("render: draw_entities draws things the database has never seen") {
+    // In-flight ghosts are clones a command is holding and has not committed,
+    // so they have no handle and no place in drawing order.
+    std::vector<EntityPtr> ghosts;
+    ghosts.push_back(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{5, 0, 0}));
+    ghosts.push_back(std::make_unique<Circle>(Vec3{0, 0, 0}, 2.0));
+    ghosts.push_back(nullptr);  // tolerated rather than dereferenced
+
+    RecordingRenderer rec;
+    draw_entities(ghosts, DrawContext{0.01}, rec);
+
+    CHECK(rec.begin_calls == 2);
+    REQUIRE(rec.polys.size() >= 2);
+    CHECK_VEC(rec.polys[0].pts[1], 5.0, 0.0, 0.0, 1e-12);
+    // The circle is flattened by the same tolerance the database walk uses.
+    CHECK(rec.polys[1].pts.size() > 8);
 }

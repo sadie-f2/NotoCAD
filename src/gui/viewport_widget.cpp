@@ -5,6 +5,7 @@
 
 #include "noto/dash.hpp"
 #include "noto/database.hpp"
+#include "noto/highlight.hpp"
 #include "noto/pick.hpp"
 #include "noto/scene.hpp"
 #include "noto/sysvar.hpp"
@@ -37,6 +38,12 @@ const QColor kAxisZ(90, 140, 230);
 // Fixed pixel geometry: the icon shows an orientation, not a size.
 constexpr double kIconLength = 34.0;
 constexpr double kIconMargin = 46.0;
+
+// ACI 6, magenta: not a colour much geometry is drawn in, which is the only
+// real requirement -- a highlight that matches the entity underneath says
+// nothing. R12 highlighted by dashing instead, which is not available here
+// without naming a linetype the drawing may not have.
+constexpr std::int16_t kHighlightColor = 6;
 
 // One wheel notch is 120 eighths of a degree; this is the zoom per notch.
 constexpr double kZoomPerNotch = 1.15;
@@ -472,7 +479,17 @@ void ViewportWidget::paintEvent(QPaintEvent*) {
     // The tolerance comes from the viewport, so tessellation tracks zoom: the
     // same circle costs eight segments across three pixels and hundreds across
     // the whole window.
-    draw_database(db_, viewport_.draw_context(), dashed);
+    const DrawContext ctx = viewport_.draw_context();
+    draw_database(db_, ctx, dashed);
+
+    // Then the selection, over the top and in one colour. A second pass rather
+    // than a flag on the first: the alternative is teaching draw_database what
+    // a selection is, and the whole point of the wrapper is that it does not
+    // need to know. Costs one extra walk of the selection, not of the drawing.
+    if (engine_ != nullptr && !engine_->selection().empty()) {
+        HighlightRenderer hi(dashed, kHighlightColor);
+        draw_handles(db_, ctx, hi, engine_->selection().handles());
+    }
 
     draw_ucs_icon(painter);
     draw_rubber_band(painter);

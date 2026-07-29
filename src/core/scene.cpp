@@ -6,6 +6,8 @@
 #include "noto/database.hpp"
 #include "noto/entity.hpp"
 
+#include <algorithm>
+
 namespace noto {
 
 bool entity_visible(const Database& db, const Entity& e) {
@@ -19,6 +21,35 @@ void draw_database(const Database& db, const DrawContext& ctx, Renderer& r) {
     for (const Handle h : db.order()) {
         const Entity* e = db.get(h);
         if (!e || !entity_visible(db, *e)) continue;
+        r.begin_entity(e->props());
+        e->draw(ctx, r);
+    }
+}
+
+void draw_database(const Database& db, const DrawContext& ctx, Renderer& r,
+                   const std::vector<Handle>& skip) {
+    for (const Handle h : db.order()) {
+        if (std::find(skip.begin(), skip.end(), h) != skip.end()) continue;
+        const Entity* e = db.get(h);
+        if (!e || !entity_visible(db, *e)) continue;
+        r.begin_entity(e->props());
+        e->draw(ctx, r);
+    }
+}
+
+void draw_handles(const Database& db, const DrawContext& ctx, Renderer& r,
+                  const std::vector<Handle>& handles) {
+    for (const Handle h : handles) {
+        const Entity* e = db.get(h);
+        if (!e || !entity_visible(db, *e)) continue;
+        r.begin_entity(e->props());
+        e->draw(ctx, r);
+    }
+}
+
+void draw_entities(const std::vector<EntityPtr>& entities, const DrawContext& ctx, Renderer& r) {
+    for (const EntityPtr& e : entities) {
+        if (!e) continue;
         r.begin_entity(e->props());
         e->draw(ctx, r);
     }
