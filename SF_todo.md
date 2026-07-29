@@ -244,6 +244,12 @@ Items 2, 3 and 4 above are all the same missing construct. See the next section.
 
 ## `InFlight` — geometry a command has changed but not committed
 
+**Built.** `inflight.hpp`, `Command::preview()`, `CommandEngine::preview()`, and
+MOVE, COPY, ROTATE, SCALE, MIRROR, ROTATE3D and STRETCH. ARRAY is still out, and
+still for the reason below. What follows is the reasoning as it was recorded
+before building; two estimates in it turned out wrong in the same direction, and
+are marked where they appear.
+
 Sadie's, and the name is hers: not "preview", which sounds like a display effect,
 but **state that exists between a command starting and committing**. The display
 is only its most visible consumer.

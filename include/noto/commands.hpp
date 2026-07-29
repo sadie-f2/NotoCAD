@@ -352,9 +352,16 @@ public:
     const char* name() const override { return copy_ ? "COPY" : "MOVE"; }
     Step start(CommandContext& ctx) override;
     Step next(CommandContext& ctx, const InputValue& value) override;
+    bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) override;
 
 private:
     enum class State : std::uint8_t { Selecting, Base, Displacement };
+
+    // The modified clones and the handles they came from, without touching the
+    // database. apply() writes them; preview() draws them. One derivation, so
+    // the ghost cannot show something the commit will not do.
+    void build(CommandContext& ctx, const Vec3& delta, std::vector<EntityPtr>& ghosts,
+               std::vector<Handle>& sources) const;
 
     Step apply(CommandContext& ctx, const Vec3& delta);
 
@@ -385,6 +392,7 @@ public:
     const char* name() const override;
     Step start(CommandContext& ctx) override;
     Step next(CommandContext& ctx, const InputValue& value) override;
+    bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) override;
 
 private:
     // Mirror asks for a second point of the axis rather than a magnitude, and
@@ -417,6 +425,7 @@ public:
     const char* name() const override { return "ROTATE3D"; }
     Step start(CommandContext& ctx) override;
     Step next(CommandContext& ctx, const InputValue& value) override;
+    bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) override;
 
 private:
     enum class State : std::uint8_t {
@@ -507,9 +516,16 @@ public:
     const char* name() const override { return "STRETCH"; }
     Step start(CommandContext& ctx) override;
     Step next(CommandContext& ctx, const InputValue& value) override;
+    bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) override;
 
 private:
     enum class State : std::uint8_t { Selecting, Base, Displacement };
+
+    // Grips inside the crossing region moved, the rest left alone -- the case
+    // that cannot be written as a matrix, which is why InFlight asks for the
+    // result rather than for a transform.
+    void build(CommandContext& ctx, const Vec3& delta, std::vector<EntityPtr>& ghosts,
+               std::vector<Handle>& sources) const;
 
     Step apply(CommandContext& ctx, const Vec3& delta);
 

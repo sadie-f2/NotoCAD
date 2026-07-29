@@ -25,11 +25,12 @@
 #pragma once
 
 #include "noto/database.hpp"
+#include "noto/inflight.hpp"
 #include "noto/osnap.hpp"
 #include "noto/selection.hpp"
 #include "noto/tables.hpp"
-#include "noto/view_control.hpp"
 #include "noto/vec3.hpp"
+#include "noto/view_control.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -247,6 +248,28 @@ public:
 
     // Hands over the value answering the previous prompt.
     virtual Step next(CommandContext& ctx, const InputValue& value) = 0;
+
+    // What the drawing WOULD look like if `tentative` answered the standing
+    // prompt. False when this command has nothing to show for that value, which
+    // is the default and is why this is not pure -- most commands never grow
+    // one, and a command that has not reached its last prompt has nothing to
+    // preview either.
+    //
+    // `tentative` has NOT arrived. It is where the cursor happens to be, and the
+    // command has not been told about it -- so an implementation must not touch
+    // its own state, the database or the undo journal. See inflight.hpp; a
+    // mouse-move that reached the journal would make every pixel of cursor
+    // travel an undo step.
+    //
+    // The rule that keeps it honest: preview and commit must derive the change
+    // with the SAME code, differing only in whether the result is written back.
+    // Anything else drifts, and drifts silently, because nothing compares them.
+    virtual bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+        (void)ctx;
+        (void)tentative;
+        (void)out;
+        return false;
+    }
 };
 
 using CommandPtr = std::unique_ptr<Command>;
@@ -323,6 +346,15 @@ public:
     const char* command_name() const { return command_ ? command_->name() : ""; }
 
     Database& db() { return ctx_.db; }
+
+    // Asks the running command what it would do with `tentative`. False when
+    // nothing would be shown -- no command, not waiting, or a command with no
+    // preview of its own, which is most of them.
+    //
+    // Deliberately not routed through supply(): that consumes a value and
+    // advances the state machine, and this must do neither. It is the one place
+    // the engine's model of "a value arrived" is set aside.
+    bool preview(const InputValue& tentative, InFlight& out);
 
     // The current selection, which survives between commands so that Previous
     // means something.

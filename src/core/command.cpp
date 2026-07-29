@@ -323,4 +323,17 @@ EngineStatus CommandEngine::apply(const Step& step) {
     return status_;
 }
 
+
+bool CommandEngine::preview(const InputValue& tentative, InFlight& out) {
+    out.clear();
+
+    // A transparent command is a ZOOM or a PAN over the top of the real one.
+    // It changes no drawing state, so it has nothing to show, and the outer
+    // command is suspended rather than standing at a prompt.
+    if (transparent_ != nullptr) return false;
+    if (command_ == nullptr || status_ != EngineStatus::Waiting) return false;
+
+    return command_->preview(ctx_, tentative, out);
+}
+
 }  // namespace noto

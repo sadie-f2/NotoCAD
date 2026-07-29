@@ -45,6 +45,10 @@ constexpr double kIconMargin = 46.0;
 // without naming a linetype the drawing may not have.
 constexpr std::int16_t kHighlightColor = 6;
 
+// ACI 4, cyan: distinct from both the highlight and from what is likely to be
+// underneath, since a ghost is read against the geometry it is about to become.
+constexpr std::int16_t kGhostColor = 4;
+
 // One wheel notch is 120 eighths of a degree; this is the zoom per notch.
 constexpr double kZoomPerNotch = 1.15;
 constexpr double kDegreesPerNotch = 120.0;
@@ -480,15 +484,38 @@ void ViewportWidget::paintEvent(QPaintEvent*) {
     // same circle costs eight segments across three pixels and hundreds across
     // the whole window.
     const DrawContext ctx = viewport_.draw_context();
-    draw_database(db_, ctx, dashed);
+
+    // What the running command would do if the cursor were clicked now. Derived
+    // afresh every paint and never stored, which is what stops it going stale
+    // behind an undo -- see inflight.hpp. Cheap when nothing is running: the
+    // engine answers false without asking the command.
+    InFlight flight;
+    if (engine_ != nullptr && cursor_inside_ && wants_point()) {
+        // The same point a click would supply, snap included. A ghost that
+        // ignored the snap would sit somewhere the click will not land, which
+        // is worse than no ghost.
+        const Vec3 p = snap_.valid ? snap_.pos : pick_point(cursor_pos_);
+        engine_->preview(InputValue::of_point(p), flight);
+    }
+
+    draw_database(db_, ctx, dashed, flight.suppressed);
 
     // Then the selection, over the top and in one colour. A second pass rather
     // than a flag on the first: the alternative is teaching draw_database what
     // a selection is, and the whole point of the wrapper is that it does not
     // need to know. Costs one extra walk of the selection, not of the drawing.
-    if (engine_ != nullptr && !engine_->selection().empty()) {
+    //
+    // Skipped while ghosts are showing: the ghosts already say which entities
+    // are in play, and highlighting the originals underneath them as well would
+    // draw the selection twice in two colours.
+    if (engine_ != nullptr && flight.empty() && !engine_->selection().empty()) {
         HighlightRenderer hi(dashed, kHighlightColor);
         draw_handles(db_, ctx, hi, engine_->selection().handles());
+    }
+
+    if (!flight.empty()) {
+        HighlightRenderer hi(dashed, kGhostColor);
+        draw_entities(flight.ghosts, ctx, hi);
     }
 
     draw_ucs_icon(painter);

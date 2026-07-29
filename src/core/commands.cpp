@@ -2625,33 +2625,66 @@ Prompt displacement_prompt(const Vec3& base) {
 
 }  // namespace
 
-Step MoveCommand::apply(CommandContext& ctx, const Vec3& delta) {
-    const Mat4 m = Mat4::translation(delta);
-
-    // Snapshotted, because COPY adds to the database while iterating it and a
-    // fresh clone must not then be copied again.
-    const std::vector<Handle> handles = ctx.selection.handles();
-
-    std::size_t n = 0;
-    for (const Handle h : handles) {
+// Clone the selection and put one matrix through it, touching nothing.
+//
+// MOVE, COPY, ROTATE, SCALE, MIRROR and ROTATE3D all reduce to exactly this, so
+// there is one copy of it -- which is also what stops any of them growing a
+// second derivation for its preview that could drift from what it commits.
+void build_transformed(CommandContext& ctx, const Mat4& m, std::vector<EntityPtr>& ghosts,
+                       std::vector<Handle>& sources) {
+    for (const Handle h : ctx.selection.handles()) {
         const Entity* e = ctx.db.get(h);
         if (!e) continue;  // erased since selection; skip rather than fail
 
         EntityPtr moved = e->clone();
         moved->transform(m);
+        ghosts.push_back(std::move(moved));
+        sources.push_back(h);
+    }
+}
 
+void MoveCommand::build(CommandContext& ctx, const Vec3& delta, std::vector<EntityPtr>& ghosts,
+                        std::vector<Handle>& sources) const {
+    build_transformed(ctx, Mat4::translation(delta), ghosts, sources);
+}
+
+Step MoveCommand::apply(CommandContext& ctx, const Vec3& delta) {
+    std::vector<EntityPtr> ghosts;
+    std::vector<Handle> sources;
+    build(ctx, delta, ghosts, sources);
+
+    // Building first also removes the reason the old code snapshotted the
+    // handle list: COPY used to add to the database while iterating it, and a
+    // fresh clone must not then be copied again. Nothing is written until every
+    // clone exists.
+    for (std::size_t i = 0; i < ghosts.size(); ++i) {
         // The one line that differs. MOVE replaces in place so the handle
         // survives -- AutoLISP may be holding it, and undo records the swap.
         if (copy_) {
-            ctx.db.add(std::move(moved));
+            ctx.db.add(std::move(ghosts[i]));
         } else {
-            ctx.db.replace(h, std::move(moved));
+            ctx.db.replace(sources[i], std::move(ghosts[i]));
         }
-        ++n;
     }
 
+    const std::size_t n = ghosts.size();
     placed_ += n;
     return Step::done(std::to_string(n) + (copy_ ? " copied" : " moved"));
+}
+
+bool MoveCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+    // Only once there is a base point to measure from. Before that the cursor
+    // is choosing the base itself and there is nothing to show.
+    if (state_ != State::Displacement || tentative.kind != InputKind::Point) return false;
+
+    build(ctx, tentative.point - base_, out.ghosts, out.suppressed);
+
+    // COPY leaves the originals where they are, so nothing is stood in for.
+    // This is the whole difference between the two commands as far as the
+    // viewport is concerned.
+    if (copy_) out.suppressed.clear();
+
+    return !out.ghosts.empty();
 }
 
 Step MoveCommand::next(CommandContext& ctx, const InputValue& value) {
@@ -2754,26 +2787,64 @@ Prompt TransformCommand::amount_prompt() const {
 }
 
 Step TransformCommand::apply(CommandContext& ctx, const Mat4& m, bool erase_originals) {
-    // Snapshotted: MIRROR without deletion adds while iterating, as COPY does.
-    const std::vector<Handle> handles = ctx.selection.handles();
+    std::vector<EntityPtr> ghosts;
+    std::vector<Handle> sources;
+    build_transformed(ctx, m, ghosts, sources);
 
-    std::size_t n = 0;
-    for (const Handle h : handles) {
-        const Entity* e = ctx.db.get(h);
-        if (!e) continue;
-
-        EntityPtr moved = e->clone();
-        moved->transform(m);
-
+    // Building first also removes the reason this used to snapshot the handle
+    // list: MIRROR without deletion added while iterating, as COPY did.
+    for (std::size_t i = 0; i < ghosts.size(); ++i) {
         if (erase_originals) {
             // In place, so the handle survives an AutoLISP ename.
-            ctx.db.replace(h, std::move(moved));
+            ctx.db.replace(sources[i], std::move(ghosts[i]));
         } else {
-            ctx.db.add(std::move(moved));
+            ctx.db.add(std::move(ghosts[i]));
         }
-        ++n;
     }
-    return Step::done(std::to_string(n) + " changed");
+    return Step::done(std::to_string(ghosts.size()) + " changed");
+}
+
+bool TransformCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+    switch (state_) {
+        case State::Amount: {
+            if (kind_ == Kind::Rotate) {
+                double radians = 0.0;
+                if (!angle_from(tentative, base_, radians)) return false;
+                build_transformed(ctx, Mat4::rotation(base_, construction_normal(ctx), radians),
+                                  out.ghosts, out.suppressed);
+                break;
+            }
+
+            double factor = 0.0;
+            if (!distance_from(tentative, base_, factor) || factor <= 0.0) return false;
+            build_transformed(ctx,
+                              Mat4::translation(base_) * Mat4::uniform_scaling(factor) *
+                                  Mat4::translation(base_ * -1.0),
+                              out.ghosts, out.suppressed);
+            break;
+        }
+
+        case State::MirrorSecond: {
+            if (tentative.kind != InputKind::Point) return false;
+            const Vec3 along = tentative.point - base_;
+            const Vec3 normal = cross(along, construction_normal(ctx));
+            if (is_zero(normal)) return false;
+            build_transformed(ctx, Mat4::mirror(base_, normalize(normal)), out.ghosts,
+                              out.suppressed);
+            // Whether the originals go is not asked until the next prompt, and
+            // R12 defaults to keeping them -- so the mirrored copy is shown
+            // alongside, which is also the answer that shows the most.
+            out.suppressed.clear();
+            break;
+        }
+
+        default:
+            // Selecting, Base, and MirrorDelete: no geometry is determined yet,
+            // or the standing prompt is not a point at all.
+            return false;
+    }
+
+    return !out.ghosts.empty();
 }
 
 Step TransformCommand::next(CommandContext& ctx, const InputValue& value) {
@@ -2925,6 +2996,21 @@ Step Rotate3dCommand::apply(CommandContext& ctx, double radians) {
         ++n;
     }
     return Step::done(std::to_string(n) + " rotated");
+}
+
+bool Rotate3dCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+    if (state_ != State::Angle || is_zero(direction_)) return false;
+
+    double radians = 0.0;
+    if (!angle_from(tentative, origin_, radians)) return false;
+
+    // Note what is NOT done here: apply() also writes the axis into
+    // ctx.memory for ROTATE3D's Last option. A preview that recorded it would
+    // make the Last axis depend on where the mouse had been, which is exactly
+    // the class of side effect the tentative-value rule forbids.
+    build_transformed(ctx, Mat4::rotation(origin_, normalize(direction_), radians), out.ghosts,
+                      out.suppressed);
+    return !out.ghosts.empty();
 }
 
 Step Rotate3dCommand::next(CommandContext& ctx, const InputValue& value) {
@@ -3305,32 +3391,23 @@ void eligible_grips(const std::vector<Grip>& grips, const SelectionRegion& regio
 
 }  // namespace
 
-Step StretchCommand::apply(CommandContext& ctx, const Vec3& delta) {
-    const std::vector<Handle> handles = ctx.selection.handles();
-
+void StretchCommand::build(CommandContext& ctx, const Vec3& delta, std::vector<EntityPtr>& ghosts,
+                           std::vector<Handle>& sources) const {
     // No crossing region: every defining point is "inside" the selection, so
     // this degenerates into MOVE. Saying so is the difference between the
     // command looking broken and the user knowing what they asked for.
     if (!ctx.selection.has_region()) {
-        const Mat4 m = Mat4::translation(delta);
-        std::size_t n = 0;
-        for (const Handle h : handles) {
-            const Entity* e = ctx.db.get(h);
-            if (!e) continue;
-            EntityPtr moved = e->clone();
-            moved->transform(m);
-            ctx.db.replace(h, std::move(moved));
-            ++n;
-        }
-        return Step::done(std::to_string(n) + " moved (no crossing window: stretched as a move)");
+        build_transformed(ctx, Mat4::translation(delta), ghosts, sources);
+        return;
     }
 
+    // The part that cannot be written as a matrix, and the reason InFlight asks
+    // the command what the result looks like rather than for a transform.
     const SelectionRegion& region = ctx.selection.region();
     std::vector<Grip> grips;
     std::vector<GripIndex> indices;
 
-    std::size_t n = 0;
-    for (const Handle h : handles) {
+    for (const Handle h : ctx.selection.handles()) {
         const Entity* e = ctx.db.get(h);
         if (!e) continue;
 
@@ -3344,10 +3421,32 @@ Step StretchCommand::apply(CommandContext& ctx, const Vec3& delta) {
         if (indices.empty()) continue;
 
         copy->stretch(delta, indices.data(), indices.size());
-        ctx.db.replace(h, std::move(copy));
-        ++n;
+        ghosts.push_back(std::move(copy));
+        sources.push_back(h);
     }
-    return Step::done(std::to_string(n) + " stretched");
+}
+
+Step StretchCommand::apply(CommandContext& ctx, const Vec3& delta) {
+    const bool as_move = !ctx.selection.has_region();
+
+    std::vector<EntityPtr> ghosts;
+    std::vector<Handle> sources;
+    build(ctx, delta, ghosts, sources);
+
+    for (std::size_t i = 0; i < ghosts.size(); ++i) {
+        ctx.db.replace(sources[i], std::move(ghosts[i]));
+    }
+
+    const std::string n = std::to_string(ghosts.size());
+    return Step::done(as_move ? n + " moved (no crossing window: stretched as a move)"
+                              : n + " stretched");
+}
+
+bool StretchCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+    if (state_ != State::Displacement || tentative.kind != InputKind::Point) return false;
+
+    build(ctx, tentative.point - base_, out.ghosts, out.suppressed);
+    return !out.ghosts.empty();
 }
 
 Step StretchCommand::next(CommandContext& ctx, const InputValue& value) {
