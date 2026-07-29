@@ -27,6 +27,7 @@ public:
     const char* name() const override { return "LINE"; }
     Step start(CommandContext& ctx) override;
     Step next(CommandContext& ctx, const InputValue& value) override;
+    bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) override;
 
 private:
     Prompt next_prompt() const;
@@ -152,6 +153,7 @@ public:
     const char* name() const override { return "PLINE"; }
     Step start(CommandContext& ctx) override;
     Step next(CommandContext& ctx, const InputValue& value) override;
+    bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) override;
 
 private:
     enum class State : std::uint8_t {
@@ -185,6 +187,11 @@ private:
 
     // Adds or replaces the entity so that what has been drawn so far is real.
     void flush(CommandContext& ctx);
+
+    // The included angle an arc-mode point implies, given the direction the
+    // last segment left in. Shared by the point path and the preview so a
+    // ghosted arc bulges the way the committed one will.
+    double arc_included(CommandContext& ctx, const Vec3& p) const;
 
     Step add_vertex(CommandContext& ctx, const Vec3& p, double included, bool is_arc);
     Step close_it(CommandContext& ctx, bool with_arc);

@@ -327,3 +327,83 @@ TEST_CASE("measuregeom: Radius reports an arc or circle and refuses anything els
 
     CHECK(db.size() == 2);
 }
+
+TEST_CASE("inflight: LINE previews the segment, not a band to the cursor") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("LINE"));
+    InFlight f;
+    // Before the first point there is no segment, only a cursor -- the rubber
+    // band already covers that and covers it correctly.
+    CHECK(!engine.preview(InputValue::of_point({1, 1, 0}), f));
+
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    REQUIRE(engine.preview(InputValue::of_point({3, 4, 0}), f));
+    REQUIRE(f.ghosts.size() == 1);
+    CHECK(f.ghosts[0]->type() == EntityType::Line);
+    CHECK(f.suppressed.empty());
+    CHECK(db.empty());
+
+    const Vec3 a = as_line(f.ghosts[0])->start();
+    const Vec3 b = as_line(f.ghosts[0])->end();
+    engine.supply(InputValue::of_point({3, 4, 0}));
+    REQUIRE(db.size() == 1);
+    CHECK_VEC(line_at(db, 0)->start(), a.x, a.y, a.z, 1e-12);
+    CHECK_VEC(line_at(db, 0)->end(), b.x, b.y, b.z, 1e-12);
+
+    // And it follows the run: the next ghost starts where the last one ended.
+    InFlight g;
+    REQUIRE(engine.preview(InputValue::of_point({6, 4, 0}), g));
+    CHECK_VEC(as_line(g.ghosts[0])->start(), 3.0, 4.0, 0.0, 1e-12);
+}
+
+TEST_CASE("inflight: PLINE previews only the pending segment") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("PLINE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({10, 0, 0}));
+
+    // What has been drawn already is a real entity -- PLINE grows one as it
+    // goes, which is what makes Escape keep it -- so the ghost must not repeat
+    // it or the run would appear twice.
+    REQUIRE(db.size() == 1);
+
+    InFlight f;
+    REQUIRE(engine.preview(InputValue::of_point({10, 5, 0}), f));
+    REQUIRE(f.ghosts.size() == 1);
+    REQUIRE(f.ghosts[0]->type() == EntityType::Polyline);
+
+    const Polyline* seg = static_cast<const Polyline*>(f.ghosts[0].get());
+    REQUIRE(seg->size() == 2);
+    CHECK_VEC(seg->vertices()[0].pos, 10.0, 0.0, 0.0, 1e-12);
+    CHECK_VEC(seg->vertices()[1].pos, 10.0, 5.0, 0.0, 1e-12);
+    CHECK_NEAR(seg->vertices()[0].bulge, 0.0, 1e-12);
+    CHECK(db.size() == 1);
+}
+
+TEST_CASE("inflight: PLINE's arc mode previews a bulge, and the committed one matches") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("PLINE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({10, 0, 0}));
+    engine.supply(InputValue::of_keyword("ARC"));
+
+    InFlight f;
+    REQUIRE(engine.preview(InputValue::of_point({20, 0, 0}), f));
+    const Polyline* seg = static_cast<const Polyline*>(f.ghosts[0].get());
+    const double ghost_bulge = seg->vertices()[0].bulge;
+
+    engine.supply(InputValue::of_point({20, 0, 0}));
+
+    // The drift check: the bulge shown is the bulge stored. Continuing
+    // tangentially from a straight segment gives a straight one, so this also
+    // pins that the arc does not invent curvature it was not given.
+    const Polyline* made = static_cast<const Polyline*>(db.get(db.order()[0]));
+    REQUIRE(made->size() == 3);
+    CHECK_NEAR(made->vertices()[1].bulge, ghost_bulge, 1e-12);
+}

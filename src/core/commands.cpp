@@ -228,6 +228,18 @@ Prompt LineCommand::next_prompt() const {
     return p;
 }
 
+bool LineCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+    // Nothing to show until there is a point to draw from. The rubber band
+    // already covers that case, and it covers it correctly: before the first
+    // point there is no segment, only a cursor.
+    if (!have_first_ || tentative.kind != InputKind::Point) return false;
+    if (is_zero(tentative.point - previous_)) return false;
+
+    out.ghosts.push_back(
+        with_current_props(ctx.db, std::make_unique<Line>(previous_, tentative.point)));
+    return true;
+}
+
 Step LineCommand::next(CommandContext& ctx, const InputValue& value) {
     if (!have_first_) {
         if (value.kind != InputKind::Point) return Step::failed("a point is required");
@@ -852,6 +864,39 @@ void PlineCommand::flush(CommandContext& ctx) {
     ctx.db.replace(handle_, with_current_props(ctx.db, std::move(poly)));
 }
 
+double PlineCommand::arc_included(CommandContext& ctx, const Vec3& p) const {
+    // A plain arc endpoint: the arc leaves along the current tangent and ends
+    // where you pointed, which fixes the included angle at twice the angle
+    // between the tangent and the chord.
+    if (!have_tangent_) return 0.0;
+    const Vec3 chord = p - vertices_.back().pos;
+    if (is_zero(chord)) return 0.0;
+    return 2.0 * signed_angle(tangent_, normalize(chord), construction_normal(ctx));
+}
+
+bool PlineCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+    // Only the PENDING segment. What has been drawn so far is already in the
+    // database -- PLINE grows a real entity as it goes, which is what makes
+    // Escape keep it -- so ghosting the whole run would draw it twice.
+    if (state_ != State::Line && state_ != State::Arc) return false;
+    if (tentative.kind != InputKind::Point || vertices_.empty()) return false;
+
+    const Vec3 from = vertices_.back().pos;
+    if (is_zero(tentative.point - from)) return false;
+
+    const bool as_arc = arc_mode_ && have_tangent_;
+    const double bulge = as_arc ? bulge_from_included(arc_included(ctx, tentative.point)) : 0.0;
+
+    // A two-vertex polyline rather than a Line or an Arc, so the ghost carries
+    // the current widths and bulges exactly as the committed segment will.
+    auto seg = std::make_unique<Polyline>();
+    seg->props().normal = construction_normal(ctx);
+    seg->add(from, bulge, start_width_, end_width_);
+    seg->add(tentative.point, 0.0, start_width_, end_width_);
+    out.ghosts.push_back(std::move(seg));
+    return true;
+}
+
 Step PlineCommand::add_vertex(CommandContext& ctx, const Vec3& p, double included, bool is_arc) {
     // The widths and the bulge belong to the segment LEAVING the current
     // vertex, so they are written onto the vertex already in the list.
@@ -1028,18 +1073,10 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
 
             if (!arc_mode_) return add_vertex(ctx, value.point, 0.0, false);
 
-            // A plain arc endpoint: the arc leaves along the current tangent
-            // and ends where you pointed, which fixes the included angle at
-            // twice the angle between the tangent and the chord.
-            const Vec3 chord = value.point - current();
-            if (is_zero(chord)) return Step::failed("zero-length arc");
-            double included = 0.0;
-            if (have_tangent_) {
-                included = 2.0 * signed_angle(tangent_, normalize(chord), construction_normal(ctx));
-            }
+            if (is_zero(value.point - current())) return Step::failed("zero-length arc");
             // With no previous segment there is no tangent to continue, so the
             // arc degenerates to a straight segment rather than guessing.
-            return add_vertex(ctx, value.point, included, have_tangent_);
+            return add_vertex(ctx, value.point, arc_included(ctx, value.point), have_tangent_);
         }
 
         case State::WidthStart:
