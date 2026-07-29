@@ -238,6 +238,117 @@ point prompts and `mouseMoveEvent` already repaints while one stands.
 unverified, and it is keyword-driven here for now, which is R12's documented
 behaviour. Decide before adding implicit dragging.
 
+Items 2, 3 and 4 above are all the same missing construct. See the next section.
+
+---
+
+## `InFlight` — geometry a command has changed but not committed
+
+Sadie's, and the name is hers: not "preview", which sounds like a display effect,
+but **state that exists between a command starting and committing**. The display
+is only its most visible consumer.
+
+### Why one construct and not a preview per command
+
+Every editing command has the same shape — collect input, derive a modification,
+apply it to the selection — and every one of them currently makes the modified
+geometry visible only by committing it. MOVE, COPY, ROTATE, SCALE, MIRROR,
+ROTATE3D, STRETCH and ARRAY are eight instances of one missing idea, and
+interactive grips will be the ninth.
+
+**The abstraction is not a transform.** The tempting version is "a pending `Mat4`
+against the selection", and it fails at the first hurdle: STRETCH cannot be
+written as one, and neither can a dragged grip — `CLAUDE.md` says as much where
+it introduces the vtable. The abstraction is one level up: *if this command
+committed right now, what would the affected entities look like?* MOVE answers
+with a matrix, STRETCH with `stretch(delta, indices)`, ARRAY with N matrices, and
+nothing outside the command needs to know which.
+
+Consequently the complicated commands are not the hard ones. A ROTATE3D about an
+arbitrary axis is exactly as easy to show as a translation — `clone()` then
+`transform(m)` either way — because the difficulty lives in *deriving* the
+matrix, and that code already exists and is reused rather than rewritten.
+
+### The constraint that decides whether this works
+
+**In-flight and commit must be the same code, differing only in whether the
+result is written back.** The standard way this feature rots is a second path
+that recomputes the modification, drifts from the real one, and shows a ghost
+that does not match what you get — silently, because nothing compares them.
+
+So each command factors into *derive the change* and *apply the change*, with
+commit calling both and in-flight calling the first onto clones. A test worth
+writing once the mechanism exists: drive a command to its last prompt, capture
+the in-flight geometry, commit, and assert the committed entities equal what was
+shown. That is the check that stops the two drifting, and it is cheap.
+
+### Shape
+
+```cpp
+struct InFlight {
+    std::vector<EntityPtr> ghosts;      // modified clones, drawn highlighted
+    std::vector<Handle>    suppressed;  // committed entities hidden meanwhile
+};
+```
+
+`suppressed` is the whole of what "mark the selection" was reaching for, and it
+is why the alternative — carrying the database with a flagged subset — buys
+nothing: the viewport already walks the database, and the only thing it cannot
+work out for itself is which committed entities the ghosts stand in for. MOVE
+suppresses its originals, COPY suppresses nothing, and the viewport stays
+ignorant of the difference.
+
+### Two invariants
+
+**It never touches the database or the undo journal.** That is what makes it
+safe, and it is not a nicety — a mouse-move that reached the journal would make
+every pixel of cursor travel an undo step. The construct is as much defined by
+what it must not touch as by what it holds.
+
+**It is derived, not stored.** Rebuilt whenever the tentative value changes,
+never cached and invalidated. Cloning and transforming a selection is cheap;
+tracking when a stored copy went stale is exactly the kind of bookkeeping that
+produces a ghost of the wrong thing after an undo. ARRAY is the one case where
+the rebuild cost is real, which is the argument for deferring it — not that it
+would not help, since row and column spacing is pure trial and error and is
+arguably where it helps most.
+
+### What is actually missing
+
+Two genuinely new pieces, and one that is only volume:
+
+1. **A restyling channel on `Renderer`.** It is two virtuals —
+   `begin_entity(EntityProps)` and `polyline()` — with no colour, style or
+   width, and `EntityProps` has no highlight bit. Nothing can currently draw a
+   subset of entities differently. `DashRenderer` is the precedent for the
+   wrapper shape. This one is shared with selection highlighting, which is why
+   both land together.
+
+2. **A tentative value in the engine.** `CommandEngine::supply()` is built on
+   "a value arrived and was consumed"; in-flight needs "here is a value that has
+   *not* arrived" — the cursor is somewhere, the command has not been told. Small,
+   but it is a new concept in the engine's model rather than an extension of one.
+
+3. **Extraction across the editing commands.** Mechanical, and bounded at about
+   seven. **Check first** whether their commit paths interleave deriving the
+   change with writing to the database and the journal; if they do, the
+   extraction is fiddlier than it looks and that changes the estimate.
+
+Optional, and worth considering alongside rather than after: **cache the static
+scene in a `QPixmap` and blit it**, drawing only the ghosts on top. This is the
+modern form of what R12 got from XOR — rasterise the unchanging geometry once —
+without the raster-op dependency, and it survives phase 14's move to
+`QOpenGLWidget`. It matters most over X11 forwarding, where the repaint cost is
+already felt.
+
+### Do it before phase 10's remainder and before grips
+
+OFFSET, FILLET, CHAMFER and interactive grips are all still to be written. Each
+one landing before this mechanism is another command to retrofit, and grips are
+the same machinery wearing a different hat. The argument is not the sunk cost of
+the eight that already exist — it is that the window to write the next four only
+once is still open.
+
 ---
 
 ## CIRCLE is missing its construction options
