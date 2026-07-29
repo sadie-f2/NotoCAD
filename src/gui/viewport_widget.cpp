@@ -285,6 +285,21 @@ void ViewportWidget::draw_rubber_band(QPainter& painter) const {
     band.setWidth(0);
     band.setStyle(Qt::DashLine);
     painter.setPen(band);
+
+    if (engine_->prompt().rubber_band == RubberBand::Box) {
+        // A selection window, drawn where it actually is: screen-aligned, with
+        // the anchor at the opposite corner. Normalised because the corners
+        // arrive in whichever order they were clicked, and QRectF with a
+        // negative extent draws nothing at all.
+        //
+        // Which of window and crossing this is comes from the typed W or C
+        // keyword, so the box does not have to say -- the prompt already does,
+        // wording itself "First corner of crossing" either way.
+        painter.drawRect(
+            QRectF(QPointF(base.x, base.y), QPointF(cursor.x, cursor.y)).normalized());
+        return;
+    }
+
     painter.drawLine(QPointF(base.x, base.y), QPointF(cursor.x, cursor.y));
 }
 

@@ -7,6 +7,7 @@
 #include "noto/database.hpp"
 #include "noto/entities.hpp"
 #include "noto/selection.hpp"
+#include "noto/view_control.hpp"
 
 #include <memory>
 
@@ -23,6 +24,24 @@ void select_all_and_erase(CommandEngine& engine) {
     engine.supply(InputValue::of_keyword("ALL"));
     engine.supply(InputValue::none());
 }
+
+// A view looking down world X, so the screen's right is world Y and its up is
+// world Z. Chosen because it shares no axis with world XY: a selection box
+// built on the wrong frame then comes out with zero width rather than merely
+// the wrong size, which is a difference no tolerance can hide.
+class SideView final : public ViewControl {
+public:
+    void set_plan_view(const Vec3&) override {}
+    void zoom_extents() override {}
+    void zoom_window(const Vec3&, const Vec3&) override {}
+    void zoom_scale(double) override {}
+    bool zoom_previous() override { return false; }
+    void pan(const Vec3&, const Vec3&) override {}
+    void set_view_direction(const Vec3&) override {}
+    Vec3 view_direction() const override { return Vec3{1, 0, 0}; }
+    Basis view_basis() const override { return Basis{{0, 1, 0}, {0, 0, 1}, {1, 0, 0}}; }
+    DrawContext draw_context() const override { return DrawContext{}; }
+};
 
 }  // namespace
 
@@ -360,9 +379,12 @@ TEST_CASE("selection: the corner sub-prompts are point prompts") {
 
     g.engine.supply(InputValue::of_point({0, 0, 0}));
     CHECK(g.engine.prompt().kind == PromptKind::Point);
-    // The second corner rubber-bands from the first.
+    // The second corner rubber-bands from the first...
     CHECK(g.engine.prompt().has_base);
     CHECK_VEC(g.engine.prompt().base, 0.0, 0.0, 0.0, 1e-12);
+    // ...as a box, not a line. The kind alone cannot say so, which is the
+    // whole reason the field exists.
+    CHECK(g.engine.prompt().rubber_band == RubberBand::Box);
 
     g.engine.supply(InputValue::of_point({11, 11, 0}));
     // ...and then it is back to selecting.
@@ -421,6 +443,71 @@ TEST_CASE("selection: a circle is crossed by a box over its rim only") {
     engine.selection().clear();
     engine.supply(InputValue::of_keyword("WINDOW"));
     engine.supply(InputValue::of_point({-11, -11, 0}));
+    engine.supply(InputValue::of_point({11, 11, 0}));
+    CHECK(engine.selection().size() == 1);
+}
+
+TEST_CASE("selection: a LINE's next point rubber-bands as a line, not a box") {
+    // The other half of the distinction: same PromptKind, same has_base, and
+    // it must still draw what it always drew.
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("LINE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    CHECK(engine.prompt().kind == PromptKind::Point);
+    CHECK(engine.prompt().has_base);
+    CHECK(engine.prompt().rubber_band == RubberBand::Line);
+}
+
+TEST_CASE("selection: a window is built in the view's frame, not the world's") {
+    // The regression this pins: SelectionPrompter had setters for the view
+    // axes that nothing ever called, so every region selection ran against
+    // world XY. Invisible in plan view -- and wrong in every other.
+    //
+    // Seen down world X, the two corners below span 10 by 10 of screen. Read
+    // against world XY they span nothing at all, because the whole box lies in
+    // a plane of constant X.
+    Database db;
+    CommandEngine engine(db);
+    SideView view;
+
+    // Wholly inside the box as seen from the side. Its X is 5 rather than 0
+    // because a region ignores depth: at X = 0 it would sit exactly in the
+    // degenerate world-XY box too, and the test would pass either way.
+    db.add(std::make_unique<Line>(Vec3{5, 2, 2}, Vec3{5, 8, 8}));
+
+    engine.set_view_control(&view);
+    engine.begin(make_command("ERASE"));
+    engine.supply(InputValue::of_keyword("WINDOW"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({0, 10, 10}));
+    CHECK(engine.selection().size() == 1);
+}
+
+TEST_CASE("selection: with no view at all, a window is world XY") {
+    // `ncad` has no screen, and a typed window has no frame but the world's.
+    // Same construction as above, and it finds nothing -- correctly, since the
+    // box has no extent in world XY.
+    Database db;
+    CommandEngine engine(db);
+
+    db.add(std::make_unique<Line>(Vec3{5, 2, 2}, Vec3{5, 8, 8}));
+
+    CHECK(engine.view_control() == nullptr);
+    engine.begin(make_command("ERASE"));
+    engine.supply(InputValue::of_keyword("WINDOW"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({0, 10, 10}));
+    // Those two corners span nothing in world XY, so the box has zero width
+    // and takes nothing -- the safe way for a degenerate drag to fail.
+    CHECK(engine.selection().empty());
+
+    // And an ordinary world-XY window still works, which is what every other
+    // test in this file relies on. Depth is dropped, so the line's Z does not
+    // keep it out.
+    engine.supply(InputValue::of_keyword("WINDOW"));
+    engine.supply(InputValue::of_point({-1, -1, 0}));
     engine.supply(InputValue::of_point({11, 11, 0}));
     CHECK(engine.selection().size() == 1);
 }

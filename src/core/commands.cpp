@@ -2383,9 +2383,13 @@ Prompt SelectionPrompter::prompt(const CommandContext& ctx) const {
             p.message = std::string("First corner of ") + what;
         } else {
             p.message = "Other corner";
-            // Gives the viewport something to rubber-band the box from.
+            // Gives the viewport something to rubber-band the box from -- and
+            // says it is a box, since a Point prompt with a base is otherwise
+            // indistinguishable from LINE's next point and would trail a
+            // diagonal line across the region being chosen.
             p.base = first_;
             p.has_base = true;
+            p.rubber_band = RubberBand::Box;
         }
         return p;
     }
@@ -2411,12 +2415,31 @@ void SelectionPrompter::apply_region(CommandContext& ctx, const Vec3& a, const V
     SelectionRegion r;
     r.origin = a;
 
-    // The box is screen-aligned, so its axes are the view's. Flipped below so
-    // the extents come out positive whichever way the drag went; a degenerate
-    // drag then yields a zero-size region that selects nothing, which is the
-    // safe way for it to fail.
-    Vec3 ax = view_ax_;
-    Vec3 ay = view_ay_;
+    // The box is screen-aligned, so its axes are the view's -- asked for here,
+    // rather than pushed in from outside.
+    //
+    // There were setters for this once, documented as "set by the viewport",
+    // and nothing ever called them: a prompter is a private member of whatever
+    // command owns it, so the viewport has no way to reach one. Every region
+    // selection therefore ran against world XY, which is invisibly correct in
+    // plan view and wrong in every other. Reading ctx.view is the arrangement
+    // that cannot fall out of use, because there is nothing to remember to do.
+    //
+    // A null view is `ncad`, which has no screen; world XY is then the right
+    // answer rather than a fallback, since a typed window has no other frame.
+    Vec3 ax{1, 0, 0};
+    Vec3 ay{0, 1, 0};
+    DrawContext draw;
+    if (ctx.view != nullptr) {
+        const Basis b3 = ctx.view->view_basis();
+        ax = b3.ax;
+        ay = b3.ay;
+        draw = ctx.view->draw_context();
+    }
+
+    // Flipped below so the extents come out positive whichever way the drag
+    // went; a degenerate drag then yields a zero-size region that selects
+    // nothing, which is the safe way for it to fail.
     if (is_zero(cross(ax, ay))) {
         ax = Vec3{1, 0, 0};
         ay = Vec3{0, 1, 0};
@@ -2437,8 +2460,8 @@ void SelectionPrompter::apply_region(CommandContext& ctx, const Vec3& a, const V
     r.width = u;
     r.height = v;
 
-    const std::size_t n = removing_ ? deselect_by_region(ctx.db, draw_, r, crossing_, ctx.selection)
-                                    : select_by_region(ctx.db, draw_, r, crossing_, ctx.selection);
+    const std::size_t n = removing_ ? deselect_by_region(ctx.db, draw, r, crossing_, ctx.selection)
+                                    : select_by_region(ctx.db, draw, r, crossing_, ctx.selection);
 
     // STRETCH asks which defining points fell inside the crossing box, so the
     // box is kept -- and only a crossing one, since a window box is not a

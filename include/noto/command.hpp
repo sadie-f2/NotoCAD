@@ -50,16 +50,36 @@ enum class PromptKind : std::uint8_t {
     Entity,
 };
 
+// What should trail the cursor from `base` while a point prompt stands.
+//
+// Advice for whatever is drawing, in the same way `base` itself is: the engine
+// never reads it, and text-driven input ignores it entirely. It exists because
+// `PromptKind` cannot answer the question -- the second corner of a selection
+// window and the next point of a LINE are both a Point prompt with a base, and
+// they want completely different glyphs. Putting it here rather than adding a
+// PromptKind keeps `prompt_takes_point()` and the input parser, which both
+// switch on the kind, out of a decision that is purely about display.
+enum class RubberBand : std::uint8_t {
+    None,  // nothing follows the cursor
+    Line,  // a band from `base` to the cursor -- LINE, MOVE, the ordinary case
+    Box,   // a screen-aligned rectangle with `base` at the opposite corner
+};
+
 struct Prompt {
     PromptKind kind{PromptKind::Point};
     std::string message;                 // "Specify first point"
     std::vector<std::string> keywords;   // e.g. {"Close", "Undo"}
     bool allow_empty{false};             // Enter is a valid answer
 
-    // Where a rubber-band line starts from. Set by the command; the engine does
+    // Where the rubber band starts from. Set by the command; the engine does
     // not use it, a viewport does.
     Vec3 base{};
     bool has_base{false};
+
+    // And what shape it is. Only meaningful when `has_base`; Line is the
+    // default so that every prompt written before this existed keeps drawing
+    // what it always did.
+    RubberBand rubber_band{RubberBand::Line};
 
     // R12's LASTPOINT: the last point entered, which outlives the command that
     // took it, so `LINE / @5,0` works right after a CIRCLE. Stamped on by the

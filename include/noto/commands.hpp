@@ -237,9 +237,11 @@ private:
 // which is what stops MOVE and ERASE quietly disagreeing about what All means
 // or which corner order a crossing box wants.
 //
-// It needs a DrawContext to flatten entities against for the region tests. The
-// tolerance only affects how finely curves are diced before being tested, so a
-// default is fine for text-driven use; the viewport passes its own.
+// Window and Crossing are screen-space questions, so both the box axes and the
+// flattening tolerance come from `CommandContext::view` when there is one, and
+// fall back to world XY when there is not -- which is `ncad`, where a typed
+// window has no other frame to be in. See apply_region for why they are pulled
+// rather than pushed.
 class SelectionPrompter {
 public:
     // What to ask right now, given what has been collected so far.
@@ -253,16 +255,6 @@ public:
 
     Result feed(CommandContext& ctx, const InputValue& value);
 
-    // Set by the viewport, which knows its own zoom and orientation. A window
-    // is a screen-aligned box, so the axes it is built on are the view's, not
-    // the world's -- these default to world XY, which is right for text-driven
-    // selection and for plan view.
-    void set_draw_context(const DrawContext& ctx) { draw_ = ctx; }
-    void set_view_axes(const Vec3& ax, const Vec3& ay) {
-        view_ax_ = ax;
-        view_ay_ = ay;
-    }
-
     // Non-empty when the last answer deserves an echo, R12-style "4 found".
     const std::string& note() const { return note_; }
 
@@ -275,9 +267,6 @@ private:
     bool removing_{false};
     bool crossing_{false};
     Vec3 first_{};
-    Vec3 view_ax_{1, 0, 0};
-    Vec3 view_ay_{0, 1, 0};
-    DrawContext draw_{};
     std::string note_;
 };
 

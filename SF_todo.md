@@ -181,6 +181,65 @@ rather than guessing — the interface hides which one it is.
 
 ---
 
+## Viewport feedback — what the display does not tell the designer
+
+Sadie's list, in her words "visual sugar that gives the designer landmarks". Less
+sugary than it sounds: three of the four are the viewport reporting engine state
+that is currently invisible, and the first one found a real bug.
+
+**Done:** the selection window now draws as a box. `Prompt::rubber_band`
+(`RubberBand::None/Line/Box`) carries the shape, because `PromptKind` cannot —
+a window's second corner and a LINE's next point are both a Point prompt with a
+base, and they want different glyphs. It is advice for whoever is drawing, like
+`Prompt::base` beside it, and the engine never reads it.
+
+The interaction is modal click-click, not press-drag-release: a click sets the
+first corner, the box follows the cursor, a second click closes it. That needs
+no drag state at all, because `SelectionPrompter` already asks for two ordinary
+point prompts and `mouseMoveEvent` already repaints while one stands.
+
+**Still to build, cheapest first:**
+
+1. **The UCS/WCS axis icon.** Pure screen-space painting beside
+   `draw_rubber_band` and `draw_osnap_marker`. `Sysvar::UcsIcon` already exists
+   with R12's 0/1/2 (off / corner / at origin) and round-trips through DXF;
+   nothing reads it. AutoCAD's colours: X red, Y green, Z blue. No core changes
+   and no decisions outstanding.
+
+2. **Highlighting the selection.** The enabling piece for this and (3): nothing
+   can currently draw a *subset* of entities with *overridden* styling.
+   `Renderer` is two virtuals — `begin_entity(EntityProps)` and `polyline()` —
+   with no colour or style channel, and `EntityProps` has no highlight bit.
+   `DashRenderer` is the precedent for the wrapper shape; `Entity::draw()` is
+   directly callable for a subset, as `RegionProbe` already does. The viewport
+   also has no access to `engine_->selection()` at all — `src/gui/` contains
+   zero references to selection. R12 highlighted by redrawing dashed, which is
+   machinery that already exists.
+
+3. **The ghost during MOVE/COPY/STRETCH.** Falls out of (2) nearly free: clone
+   the selection, `transform(Mat4)` by the pending delta, draw it through the
+   same path.
+
+   Sadie asked whether XOR is the simple way, as R12 did it. It was, and it no
+   longer is. XOR's payoff was never contrast but *erasure* — draw twice and the
+   screen is restored without redrawing the scene — which needs persistent
+   access to the front buffer between frames. Qt is double-buffered and every
+   `paintEvent` starts from a fresh backing store, so there is nothing to
+   un-XOR, and at R12-era wireframe complexity the full repaint is free anyway.
+   `RasterOp_SourceXorDestination` also does not survive antialiasing (which
+   `paintEvent` enables) or the OpenGL paint engine that phase 14 plans to move
+   to. So: repaint, in a highlight colour.
+
+4. **Live selection candidates** while the box is being sized — highlight what
+   *would* be taken as the cursor moves. Wants (2) first.
+
+**Open:** modern AutoCAD picks window-vs-crossing implicitly from drag direction
+(right = window, left = crossing) with different box styling. Whether R12 did is
+unverified, and it is keyword-driven here for now, which is R12's documented
+behaviour. Decide before adding implicit dragging.
+
+---
+
 ## CIRCLE is missing its construction options
 
 `CIRCLE` takes centre-then-radius only. R12 also has **2P**, **3P** and **TTR**
