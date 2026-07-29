@@ -56,6 +56,11 @@ enum class Sysvar : std::uint16_t {
     // shorten it -- and 100 reproduces exactly that, which is why the range
     // runs all the way there rather than stopping somewhere tidy.
     CursorSize,
+
+    // ORTHO. Constrains a POINTED-at point to the current UCS's X or Y axis
+    // from the rubber-band base -- typing a coordinate is unaffected, and an
+    // object snap beats it, both as R12 has it.
+    OrthoMode,
     // Current entity properties. New geometry takes these, which is how R12
     // decides what layer and colour something is drawn on without asking.
     CLayer,

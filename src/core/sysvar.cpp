@@ -34,6 +34,9 @@ constexpr SysvarDef kTable[] = {
     // Not journalled, like PICKBOX and APERTURE beside it: a display preference
     // is not drawing state, and undoing back through one would be surprising.
     {"CURSORSIZE", Sysvar::CursorSize, SysvarType::Int, false, false, 5, 1, 100, 0.0, "", {}},
+    // Journalled, unlike the three above: R12 saves ORTHOMODE in the drawing,
+    // so it is drawing state rather than a display preference.
+    {"ORTHOMODE", Sysvar::OrthoMode, SysvarType::Int, false, true, 0, 0, 1, 0.0, "", {}},
 
     // Current layer, by name rather than by id: that is what R12 stores, what
     // getvar returns, and what survives a table whose indices have shifted.

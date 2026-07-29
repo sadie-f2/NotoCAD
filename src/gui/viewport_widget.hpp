@@ -111,6 +111,16 @@ private:
     // than dropping to z=0.
     Vec3 pick_point(const QPoint& pos) const;
 
+    // The world point a click would supply RIGHT NOW. One implementation
+    // because the click, the in-flight ghost and the rubber band must agree
+    // about where the cursor is; three copies of "snap, or ortho, or neither"
+    // would drift the moment any one of them changed.
+    Vec3 cursor_point() const;
+
+    // ORTHO. Constrains `p` to the current UCS's X or Y axis from the standing
+    // prompt's base, keeping whichever component is larger.
+    Vec3 apply_ortho(const Vec3& p) const;
+
     void draw_rubber_band(QPainter& painter) const;
 
     // Markers are painted here rather than through Renderer on purpose: they

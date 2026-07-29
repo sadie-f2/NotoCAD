@@ -310,6 +310,12 @@ void ViewportWidget::draw_rubber_band(QPainter& painter) const {
     band.setStyle(Qt::DashLine);
     painter.setPen(band);
 
+    // The band ends where the click would land, not where the pointer is: with
+    // ORTHO on they differ, and a band that ignored it would promise a segment
+    // the command is not going to draw.
+    const ScreenPoint tip = viewport_.project(cursor_point());
+    const ScreenPoint at = (std::isfinite(tip.x) && std::isfinite(tip.y)) ? tip : cursor;
+
     if (engine_->prompt().rubber_band == RubberBand::Box) {
         // A selection window, drawn where it actually is: screen-aligned, with
         // the anchor at the opposite corner. Normalised because the corners
@@ -319,12 +325,11 @@ void ViewportWidget::draw_rubber_band(QPainter& painter) const {
         // Which of window and crossing this is comes from the typed W or C
         // keyword, so the box does not have to say -- the prompt already does,
         // wording itself "First corner of crossing" either way.
-        painter.drawRect(
-            QRectF(QPointF(base.x, base.y), QPointF(cursor.x, cursor.y)).normalized());
+        painter.drawRect(QRectF(QPointF(base.x, base.y), QPointF(at.x, at.y)).normalized());
         return;
     }
 
-    painter.drawLine(QPointF(base.x, base.y), QPointF(cursor.x, cursor.y));
+    painter.drawLine(QPointF(base.x, base.y), QPointF(at.x, at.y));
 }
 
 ViewportWidget::AxisFrame ViewportWidget::ucs_axis_frame() const {
@@ -366,6 +371,33 @@ ViewportWidget::AxisFrame ViewportWidget::ucs_axis_frame() const {
     }
     f.valid = true;
     return f;
+}
+
+Vec3 ViewportWidget::apply_ortho(const Vec3& p) const {
+    if (engine_ == nullptr || !engine_->active()) return p;
+    if (db_.sysvars().get_int(Sysvar::OrthoMode) == 0) return p;
+
+    const Prompt& pr = engine_->prompt();
+    // Nothing to be orthogonal to. R12 constrains a point relative to the last
+    // one, so the first point of anything is unconstrained.
+    if (!pr.has_base) return p;
+    // A selection window is not a direction. Constraining its far corner would
+    // force every window square, which is not what ORTHO means.
+    if (pr.rubber_band == RubberBand::Box) return p;
+
+    const Ucs u = db_.current_ucs().normalized();
+    const Vec3 d = p - pr.base;
+    const double x = dot(d, u.xdir);
+    const double y = dot(d, u.ydir);
+
+    // Whichever axis the movement is mostly along; the other component goes.
+    return std::abs(x) >= std::abs(y) ? pr.base + u.xdir * x : pr.base + u.ydir * y;
+}
+
+Vec3 ViewportWidget::cursor_point() const {
+    // A snap beats ortho, as in R12: you asked for that exact point.
+    if (snap_.valid) return snap_.pos;
+    return apply_ortho(pick_point(cursor_pos_));
 }
 
 void ViewportWidget::draw_cursor(QPainter& painter) const {
@@ -544,11 +576,10 @@ void ViewportWidget::paintEvent(QPaintEvent*) {
     // engine answers false without asking the command.
     InFlight flight;
     if (engine_ != nullptr && cursor_inside_ && wants_point()) {
-        // The same point a click would supply, snap included. A ghost that
-        // ignored the snap would sit somewhere the click will not land, which
-        // is worse than no ghost.
-        const Vec3 p = snap_.valid ? snap_.pos : pick_point(cursor_pos_);
-        engine_->preview(InputValue::of_point(p), flight);
+        // Exactly the point a click would supply. A ghost that ignored the
+        // snap, or ortho, would sit where the click will not land -- which is
+        // worse than no ghost.
+        engine_->preview(InputValue::of_point(cursor_point()), flight);
     }
 
     draw_database(db_, ctx, dashed, flight.suppressed);
@@ -627,8 +658,9 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event) {
         update_osnap();
 
         // The payoff for all of it: when a snap is showing, the click takes
-        // that exact point rather than wherever the cursor happened to be.
-        const Vec3 p = snap_.valid ? snap_.pos : pick_point(event->pos());
+        // that exact point rather than wherever the cursor happened to be --
+        // and when ORTHO is on and no snap is, it takes the constrained one.
+        const Vec3 p = cursor_point();
 
         // The whole point of the phase: a click is just another way to answer a
         // prompt, indistinguishable to the command from a typed coordinate.

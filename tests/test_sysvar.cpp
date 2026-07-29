@@ -5,6 +5,7 @@
 
 #include "noto/database.hpp"
 #include "noto/osnap.hpp"
+#include "noto/commands.hpp"
 #include "noto/sysvar.hpp"
 
 using namespace noto;
@@ -225,4 +226,105 @@ TEST_CASE("sysvar: CURSORSIZE is a percentage, clamped to a usable range") {
 
     CHECK(v.set_int(Sysvar::CursorSize, 1) == Sysvars::SetStatus::Ok);
     CHECK(v.get_int(Sysvar::CursorSize) == 1);
+}
+
+TEST_CASE("setvar: reads and writes any variable by name") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("SETVAR"));
+    engine.supply(InputValue::of_string("LTSCALE"));
+    // The prompt shows the current value as the default, so Enter is a read.
+    CHECK(engine.prompt().text().find("LTSCALE") != std::string::npos);
+    engine.supply(InputValue::of_real(2.5));
+    CHECK(engine.status() == EngineStatus::Finished);
+    CHECK_NEAR(db.sysvars().get_real(Sysvar::LtScale), 2.5, 1e-12);
+
+    // Enter leaves it alone, which is how SETVAR is used to look at something.
+    engine.begin(make_command("SETVAR"));
+    engine.supply(InputValue::of_string("LTSCALE"));
+    engine.supply(InputValue::none());
+    CHECK_NEAR(db.sysvars().get_real(Sysvar::LtScale), 2.5, 1e-12);
+}
+
+TEST_CASE("setvar: refuses an unknown name and an out-of-range value") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("SETVAR"));
+    engine.supply(InputValue::of_string("NOSUCHVAR"));
+    CHECK(engine.status() == EngineStatus::Failed);
+
+    engine.begin(make_command("SETVAR"));
+    engine.supply(InputValue::of_string("CURSORSIZE"));
+    engine.supply(InputValue::of_integer(5000));
+    CHECK(engine.status() == EngineStatus::Failed);
+    // Refused, not clamped, and the old value stands.
+    CHECK(db.sysvars().get_int(Sysvar::CursorSize) == 5);
+}
+
+TEST_CASE("setvar: a read-only variable reports rather than refusing outright") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("SETVAR"));
+    engine.supply(InputValue::of_string("UCSORG"));
+    // Showing it is useful even though changing it is not allowed, so this
+    // finishes with a report instead of failing.
+    CHECK(engine.status() == EngineStatus::Finished);
+    CHECK(engine.message().find("read only") != std::string::npos);
+}
+
+TEST_CASE("osnap: takes a mode list and round-trips through the prompt default") {
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("OSNAP"));
+    engine.supply(InputValue::of_string("END,MID"));
+    CHECK(db.sysvars().get_int(Sysvar::OsMode) ==
+          static_cast<std::int32_t>(osnap_bit(OsnapType::Endpoint) |
+                                    osnap_bit(OsnapType::Midpoint)));
+
+    // The default shown is the list the command would take back, which is the
+    // point of formatting it as names rather than as the number.
+    engine.begin(make_command("OSNAP"));
+    CHECK(engine.prompt().text().find("END") != std::string::npos);
+    CHECK(engine.prompt().text().find("MID") != std::string::npos);
+
+    // Enter leaves them alone: NONE is how you say none, and losing a running
+    // set to a stray Return would be a nuisance.
+    engine.supply(InputValue::none());
+    CHECK(db.sysvars().get_int(Sysvar::OsMode) != 0);
+
+    engine.begin(make_command("OSNAP"));
+    engine.supply(InputValue::of_string("NONE"));
+    CHECK(db.sysvars().get_int(Sysvar::OsMode) == 0);
+
+    engine.begin(make_command("OSNAP"));
+    engine.supply(InputValue::of_string("WHAT"));
+    CHECK(engine.status() == EngineStatus::Failed);
+}
+
+TEST_CASE("ortho: toggles ORTHOMODE and is undoable, being drawing state") {
+    Database db;
+    CommandEngine engine(db);
+
+    CHECK(db.sysvars().get_int(Sysvar::OrthoMode) == 0);
+
+    engine.begin(make_command("ORTHO"));
+    engine.supply(InputValue::of_keyword("ON"));
+    CHECK(db.sysvars().get_int(Sysvar::OrthoMode) == 1);
+
+    engine.begin(make_command("ORTHO"));
+    engine.supply(InputValue::of_keyword("OFF"));
+    CHECK(db.sysvars().get_int(Sysvar::OrthoMode) == 0);
+
+    // R12 saves ORTHOMODE in the drawing, so unlike PICKBOX and CURSORSIZE it
+    // is journalled and undo walks back through it.
+    engine.begin(make_command("UNDO"));
+    CHECK(db.sysvars().get_int(Sysvar::OrthoMode) == 1);
+
+    engine.begin(make_command("ORTHO"));
+    engine.supply(InputValue::of_keyword("SIDEWAYS"));
+    CHECK(engine.status() == EngineStatus::Failed);
 }

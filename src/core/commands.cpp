@@ -121,6 +121,35 @@ double bulge_from_included(double included) {
     return std::tan(included * 0.25);
 }
 
+
+// A system variable's value as R12 would show it. Local to the command layer on
+// purpose: it is a prompt-formatting decision, and Sysvars has no business
+// knowing how many decimal places a prompt wants.
+std::string sysvar_value_text(const SysvarValue& v) {
+    switch (v.type) {
+        case SysvarType::Int: return std::to_string(v.integer);
+        case SysvarType::Real: return fmt(v.real);
+        case SysvarType::String: return v.text;
+        case SysvarType::Point:
+            return fmt(v.point.x) + "," + fmt(v.point.y) + "," + fmt(v.point.z);
+    }
+    return {};
+}
+
+// A running-snap mask as the comma list OSNAP takes back, so the default shown
+// in the prompt is something you can retype. "NONE" when there are none, which
+// is also the word that clears them.
+std::string osnap_mask_text(OsnapMask mask) {
+    std::string out;
+    for (int i = 0; i <= static_cast<int>(OsnapType::Nearest); ++i) {
+        const OsnapType t = static_cast<OsnapType>(i);
+        if (!osnap_enabled(mask, t)) continue;
+        if (!out.empty()) out += ",";
+        out += osnap_name(t);
+    }
+    return out.empty() ? "NONE" : out;
+}
+
 // Turns `v` by `radians` about `n`, for carrying an arc's tangent direction
 // from one segment to the next.
 Vec3 rotate_about(const Vec3& v, const Vec3& n, double radians) {
@@ -1082,6 +1111,149 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
         }
     }
     return Step::failed("internal state error");
+}
+
+// --- SETVAR -----------------------------------------------------------------
+
+Step SetVarCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Variable name or ?";
+    return Step::ask(p);
+}
+
+Step SetVarCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Name: {
+            if (value.kind != InputKind::String || value.text.empty()) {
+                return Step::failed("a variable name is required");
+            }
+
+            if (value.text == "?") {
+                std::size_t count = 0;
+                const SysvarDef* table = sysvar_table(count);
+                std::string report;
+                for (std::size_t i = 0; i < count; ++i) {
+                    report += table[i].name;
+                    if (table[i].read_only) report += " (read only)";
+                    report += "\n";
+                }
+                return Step::done(report);
+            }
+
+            const SysvarDef* def = find_sysvar(value.text);
+            if (def == nullptr) return Step::failed("no such variable: " + value.text);
+            if (def->read_only) {
+                // Reading one is still useful, and refusing to show it would be
+                // worse than refusing to change it.
+                SysvarValue v;
+                ctx.db.sysvars().get(value.text, v);
+                return Step::done(std::string(def->name) + " = " + sysvar_value_text(v) +
+                                  " (read only)");
+            }
+
+            var_ = def->name;
+            state_ = State::Value;
+
+            SysvarValue current;
+            ctx.db.sysvars().get(var_, current);
+
+            // The prompt kind follows the variable's type, so a real gets a
+            // distance prompt a click can answer and an integer does not.
+            Prompt p;
+            switch (def->type) {
+                case SysvarType::Int: p.kind = PromptKind::Integer; break;
+                case SysvarType::Real: p.kind = PromptKind::Real; break;
+                case SysvarType::Point: p.kind = PromptKind::Point; break;
+                case SysvarType::String: p.kind = PromptKind::String; break;
+            }
+            p.message = "New value for " + var_ + " <" + sysvar_value_text(current) + ">";
+            p.allow_empty = true;
+            return Step::ask(p);
+        }
+
+        case State::Value: {
+            // Enter keeps what is there, which is how R12 lets you use SETVAR
+            // to look at a variable without changing it.
+            if (value.kind == InputKind::None) return Step::done();
+
+            SysvarValue v;
+            switch (value.kind) {
+                case InputKind::Integer: v = SysvarValue::of_int(value.integer); break;
+                case InputKind::Real: v = SysvarValue::of_real(value.real); break;
+                case InputKind::Point: v = SysvarValue::of_point(value.point); break;
+                case InputKind::String: v = SysvarValue::of_string(value.text); break;
+                default: return Step::failed("a value is required");
+            }
+
+            switch (ctx.db.sysvars().set(var_, v)) {
+                case Sysvars::SetStatus::Ok: return Step::done();
+                case Sysvars::SetStatus::OutOfRange:
+                    return Step::failed("value out of range for " + var_);
+                case Sysvars::SetStatus::WrongType:
+                    return Step::failed("wrong type for " + var_);
+                case Sysvars::SetStatus::ReadOnly: return Step::failed(var_ + " is read only");
+                case Sysvars::SetStatus::Unknown: return Step::failed("no such variable: " + var_);
+            }
+            return Step::failed("could not set " + var_);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- OSNAP ------------------------------------------------------------------
+
+Step OsnapCommand::start(CommandContext& ctx) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Object snap modes <" + osnap_mask_text(static_cast<OsnapMask>(
+                                            ctx.db.sysvars().get_int(Sysvar::OsMode))) +
+                ">";
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step OsnapCommand::next(CommandContext& ctx, const InputValue& value) {
+    // Enter leaves the modes alone, rather than clearing them: NONE is how you
+    // say none, and losing a running set to a stray Return would be a nuisance.
+    if (value.kind == InputKind::None) return Step::done();
+    if (value.kind != InputKind::String) return Step::failed("a mode list is required");
+
+    OsnapMask mask = kOsnapNone;
+    if (!parse_osnap_mask(value.text, &mask)) {
+        return Step::failed("unknown object snap mode: " + value.text);
+    }
+
+    ctx.db.sysvars().set_int(Sysvar::OsMode, static_cast<std::int32_t>(mask));
+    return Step::done();
+}
+
+// --- ORTHO ------------------------------------------------------------------
+
+Step OrthoCommand::start(CommandContext& ctx) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = std::string("ON/OFF <") +
+                (ctx.db.sysvars().get_int(Sysvar::OrthoMode) != 0 ? "ON" : "OFF") + ">";
+    p.keywords = {"ON", "OFF"};
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step OrthoCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind == InputKind::None) return Step::done();
+
+    std::int32_t next = 0;
+    if (keyword_is(value, "ON")) {
+        next = 1;
+    } else if (keyword_is(value, "OFF")) {
+        next = 0;
+    } else {
+        return Step::failed("answer ON or OFF");
+    }
+
+    ctx.db.sysvars().set_int(Sysvar::OrthoMode, next);
+    return Step::done();
 }
 
 // --- POINT ------------------------------------------------------------------
@@ -4763,6 +4935,9 @@ CommandPtr make_command(std::string_view name) {
     const std::string upper = upcase(name);
     if (upper == "LINE") return std::make_unique<LineCommand>();
     if (upper == "ARC") return std::make_unique<ArcCommand>();
+    if (upper == "SETVAR") return std::make_unique<SetVarCommand>();
+    if (upper == "OSNAP") return std::make_unique<OsnapCommand>();
+    if (upper == "ORTHO") return std::make_unique<OrthoCommand>();
     if (upper == "CIRCLE") return std::make_unique<CircleCommand>();
     if (upper == "COLOR") return std::make_unique<ColorCommand>();
     if (upper == "LIMITS") return std::make_unique<LimitsCommand>();
@@ -4812,7 +4987,8 @@ CommandPtr make_command(std::string_view name) {
 
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
-        "ARC", "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
+        "ARC", "AREA", "ARRAY", "CIRCLE",
+        "ORTHO", "OSNAP", "SETVAR", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
         "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",

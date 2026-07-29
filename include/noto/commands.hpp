@@ -198,6 +198,44 @@ private:
     Vec3 pending_second_{};
 };
 
+// SETVAR: read or write any system variable by name, from the command line.
+//
+// The variables and their types have existed since phase 4a and were reachable
+// only from AutoLISP's getvar/setvar. This is R12's command-line door to the
+// same table -- and the reason the type-driven prompt below is worth having is
+// that it refuses a string for an integer before Sysvars has to.
+class SetVarCommand final : public Command {
+public:
+    const char* name() const override { return "SETVAR"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Name, Value };
+
+    State state_{State::Name};
+    std::string var_;
+};
+
+// OSNAP: the running object snap modes, as a mode list rather than a number.
+//
+// OSMODE has existed since phase 4a and the mask parser with it, so this is the
+// R12 spelling of a thing already fully built: "END,MID" instead of 3.
+class OsnapCommand final : public Command {
+public:
+    const char* name() const override { return "OSNAP"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
+// ORTHO: constrain pointing to the current UCS's axes.
+class OrthoCommand final : public Command {
+public:
+    const char* name() const override { return "ORTHO"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
 // POINT: one location, and nothing else.
 //
 // R12 draws it per PDMODE and PDSIZE, neither of which exists here, so it
