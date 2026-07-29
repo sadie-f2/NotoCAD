@@ -96,6 +96,47 @@ void Circle::stretch(const Vec3& delta, const GripIndex* indices, std::size_t co
     }
 }
 
+void Ellipse::grips(std::vector<Grip>& out) const {
+    out.push_back(Grip{center_, GripKind::Move, 0});
+
+    // Radius rather than Stretch, exactly as Circle does it, and for the reason
+    // recorded in SF_todo: naming every STRETCH grip has to equal translating
+    // the entity, and a grip that resizes cannot honour that.
+    Vec3 q[4];
+    axis_points(q);
+    for (GripIndex i = 0; i < 4; ++i) out.push_back(Grip{q[i], GripKind::Radius, i + 1});
+}
+
+void Ellipse::stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) {
+    if (names(indices, count, 0)) {
+        center_ = center_ + delta;
+        return;  // the axes move with it
+    }
+
+    Vec3 q[4];
+    axis_points(q);
+    for (GripIndex i = 0; i < 4; ++i) {
+        if (!names(indices, count, i + 1)) continue;
+
+        const Vec3 moved = in_plane(q[i] + delta - center_, props().normal);
+        if (is_zero(moved)) return;
+
+        if (i == 0 || i == 2) {
+            // A major-axis grip re-aims the axis as well as resizing it, which
+            // is what makes dragging one rotate the ellipse rather than only
+            // stretch it. The ratio is held so the shape is preserved.
+            major_ = (i == 0) ? moved : moved * -1.0;
+        } else {
+            // A minor-axis grip only changes the ratio: the major axis is what
+            // defines the orientation, and letting the minor one re-aim it too
+            // would let the two fight.
+            const double a = length(major_);
+            if (a > 0.0) ratio_ = length(moved) / a;
+        }
+        return;  // one grip decides it
+    }
+}
+
 // --- Arc --------------------------------------------------------------------
 
 // 0 = start point, 1 = end point, 2 = midpoint of the sweep, 3 = centre.

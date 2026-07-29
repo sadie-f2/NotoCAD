@@ -72,6 +72,7 @@ const char* entity_type_name(EntityType t) {
         case EntityType::Line: return "LINE";
         case EntityType::Circle: return "CIRCLE";
         case EntityType::Arc: return "ARC";
+        case EntityType::Ellipse: return "ELLIPSE";
         case EntityType::Polyline: return "POLYLINE";
         case EntityType::Text: return "TEXT";
         case EntityType::Point: return "POINT";
@@ -293,6 +294,113 @@ void Circle::osnap_points(std::vector<OsnapPoint>& out) const {
     Vec3 q[4];
     quadrants(q);
     for (const Vec3& p : q) out.push_back({p, OsnapType::Quadrant});
+}
+
+// --- Ellipse ----------------------------------------------------------------
+
+Vec3 Ellipse::minor_axis() const {
+    // Perpendicular to the major axis IN THE ENTITY'S PLANE, which is what the
+    // normal is for: cross with it rather than picking an arbitrary
+    // perpendicular, or a tilted ellipse would get a minor axis out of plane.
+    const Vec3 perp = cross(props().normal, major_);
+    if (is_zero(perp)) return Vec3{};
+    return normalize(perp) * (length(major_) * ratio_);
+}
+
+double Ellipse::sweep() const {
+    const double d = normalize_angle(end_param_ - start_param_);
+    // Start and end coinciding means a whole ellipse, the same reading Arc
+    // gives a zero sweep.
+    return (d < kEps) ? kTwoPi : d;
+}
+
+bool Ellipse::is_full() const { return sweep() >= kTwoPi - kEps; }
+
+Vec3 Ellipse::point_at(double param) const {
+    return center_ + major_ * std::cos(param) + minor_axis() * std::sin(param);
+}
+
+void Ellipse::axis_points(Vec3 out[4]) const {
+    const Vec3 minor = minor_axis();
+    out[0] = center_ + major_;
+    out[1] = center_ + minor;
+    out[2] = center_ - major_;
+    out[3] = center_ - minor;
+}
+
+EntityPtr Ellipse::clone() const {
+    auto copy = std::make_unique<Ellipse>(center_, major_, ratio_, start_param_, end_param_,
+                                          props().normal);
+    copy_common_to(*copy);
+    return copy;
+}
+
+void Ellipse::transform(const Mat4& m) {
+    // Both axis vectors go through, and the frame is rebuilt from what comes
+    // out. Transforming the centre and the normal separately would be wrong
+    // under a mirror, where the normal has to follow the handedness of the axes
+    // rather than be carried along.
+    const Vec3 c = m.transform_point(center_);
+    const Vec3 a = m.transform_point(center_ + major_) - c;
+    const Vec3 b = m.transform_point(center_ + minor_axis()) - c;
+
+    center_ = c;
+    if (is_zero(a) || is_zero(b)) return;
+
+    major_ = a;
+    ratio_ = length(b) / length(a);
+
+    const Vec3 n = cross(a, b);
+    if (!is_zero(n)) props().normal = normalize(n);
+
+    // The parameters are untouched, and that is only correct because every
+    // transform this program can produce is a similarity: MOVE, ROTATE, MIRROR
+    // and a UNIFORM SCALE. A non-uniform scale would turn the major axis into
+    // something that is no longer the major axis and shift the parameters with
+    // it, and R12 has no command that produces one.
+}
+
+BBox Ellipse::bbox() const {
+    BBox box;
+    const Vec3 minor = minor_axis();
+
+    if (is_full()) {
+        // Exact, and cheaper than sampling: for p(t) = c + u*cos t + v*sin t
+        // the extent along any axis is sqrt(u_i^2 + v_i^2).
+        const Vec3 half{std::sqrt(major_.x * major_.x + minor.x * minor.x),
+                        std::sqrt(major_.y * major_.y + minor.y * minor.y),
+                        std::sqrt(major_.z * major_.z + minor.z * minor.z)};
+        box.expand(center_ - half);
+        box.expand(center_ + half);
+        return box;
+    }
+
+    // A partial ellipse could be solved the same way per axis, but the stationary
+    // points have to be clipped to the span and there are six of them. Sampling
+    // is a few lines instead of forty and a bounding box has no need to be tight
+    // to the last ULP -- only to contain the curve, which this does.
+    constexpr int kSamples = 64;
+    const double s = sweep();
+    for (int i = 0; i <= kSamples; ++i) {
+        box.expand(point_at(start_param_ + s * (static_cast<double>(i) / kSamples)));
+    }
+    return box;
+}
+
+void Ellipse::osnap_points(std::vector<OsnapPoint>& out) const {
+    out.push_back({center_, OsnapType::Center});
+
+    Vec3 q[4];
+    axis_points(q);
+    for (const Vec3& p : q) out.push_back({p, OsnapType::Quadrant});
+
+    // An elliptical arc has ends; a whole one does not, and offering its start
+    // as an endpoint would put an ENDPOINT snap somewhere the curve does not
+    // stop.
+    if (!is_full()) {
+        out.push_back({start_point(), OsnapType::Endpoint});
+        out.push_back({end_point(), OsnapType::Endpoint});
+    }
 }
 
 // --- Arc --------------------------------------------------------------------

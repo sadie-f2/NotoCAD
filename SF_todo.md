@@ -397,6 +397,31 @@ once is still open.
 
 ---
 
+## Writing DXF versions later than R12
+
+**Wanted eventually, not now.** Sadie's: modern AutoCAD offers a range of write
+formats and still lists R12 in 2026, so being able to emit AC1015 or later is
+warranted — but nothing needs it yet, and AC1009 remains the interchange
+guarantee.
+
+What makes it worth recording rather than assuming: the entity set has begun to
+outgrow AC1009. `Ellipse` is held exactly in the database and degrades to a
+polyline on write, and a spline will do the same. That degradation is honest but
+**lossy** — an ellipse written and read back is a polyline, and nothing can
+recover what it was. A later DXF version is the only thing that fixes it, since
+AC1009 has no group codes to say it in.
+
+The shape it should take, when it happens: a target *version* on the writer
+rather than a second writer. Each entity already knows how to write itself at
+R12; the version picks between that and a native form. `write_common_as()`
+exists for exactly this reason — it is how ELLIPSE writes itself under
+POLYLINE's name today, and the seam a version switch would use.
+
+Two things to settle at that point and not before: whether the version is a
+system variable, a DXFOUT option, or both; and whether reading a later version
+is in scope at all, since a reader is a much larger job than a writer and the
+Proxy entity already keeps unknown entities safe on the way through.
+
 ## REDRAW and REGEN are not wanted, and the reason is structural
 
 Raised by Sadie: do we even need them? No — and it is worth writing down why,

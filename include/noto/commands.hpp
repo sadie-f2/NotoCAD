@@ -59,6 +59,50 @@ private:
     bool diameter_{false};
 };
 
+// ELLIPSE. Not an R12 command -- R12 had no ellipse entity and no command to
+// make one -- so this is R14's prompt sequence, which is the one that stuck and
+// is still what AutoCAD asks in 2026.
+//
+//   <Axis endpoint 1>/Center:      one end of an axis, or the centre
+//   Axis endpoint 2:               the other end of that axis
+//   <Other axis distance>/Rotation: half the second axis, or a tilt angle
+//
+// Rotation is the option worth keeping: it asks for the angle a circle of that
+// diameter would be tilted through to project to this ellipse, which is how
+// isometric circles are drawn and is far easier to think in than a ratio.
+class EllipseCommand final : public Command {
+public:
+    const char* name() const override { return "ELLIPSE"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+    bool preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) override;
+
+private:
+    enum class State : std::uint8_t {
+        First,        // an axis endpoint, or Center
+        CentreFirst,  // Center given, asking for an axis endpoint
+        Second,       // the other end of the first axis
+        Other,        // half the other axis, or Rotation
+        RotationAngle,
+    };
+
+    // The ellipse a value would make, or null. One derivation, shared by the
+    // commit and the ghost.
+    EntityPtr resolve(CommandContext& ctx, const InputValue& v) const;
+
+    State state_{State::First};
+
+    // Which route reached State::Second. Given two axis ENDPOINTS the centre is
+    // their midpoint and the axis is half the span; given a centre outright the
+    // point already IS the axis endpoint. Same shape of trap as ARC's Center
+    // keyword, and a flag for the same reason -- there is no value of centre_
+    // that could tell the two apart.
+    bool have_centre_{false};
+
+    Vec3 centre_{};
+    Vec3 major_{};
+};
+
 // ARC: R12's eleven ways to say the same three numbers.
 //
 // The entity has existed since the first commit; this is the command that makes

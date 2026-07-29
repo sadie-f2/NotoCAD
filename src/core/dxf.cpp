@@ -62,10 +62,12 @@ void DxfWriter::point(int base, const Vec3& p) {
     code(base + 20, p.z);
 }
 
-void DxfWriter::write_common(const Entity& e) {
+void DxfWriter::write_common(const Entity& e) { write_common_as(e, e.type_name()); }
+
+void DxfWriter::write_common_as(const Entity& e, const char* type_name) {
     const EntityProps& props = e.props();
 
-    code(0, e.type_name());
+    code(0, type_name);
     code(5, to_hex(e.handle()));
 
     const LayerId lid = props.layer;

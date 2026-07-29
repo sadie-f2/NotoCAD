@@ -21,6 +21,11 @@
 
 namespace noto {
 
+// A whole turn in radians. Named rather than spelled out because it appears as
+// a default argument, where a literal would be unreadable.
+inline constexpr double kFullTurn = 6.283185307179586476925286766559;
+
+
 class Line final : public Entity {
 public:
     Line() : Entity(EntityType::Line) {}
@@ -160,6 +165,88 @@ struct PolyVertex {
 // is 20,000 entities, 20,000 undo clones, and an O(n^2) entnext walk. The DXF
 // layer synthesises VERTEX and SEQEND records at the boundary, and R14's
 // LWPOLYLINE went the same way.
+// ELLIPSE -- and the first deliberate divergence from R12's entity set.
+//
+// AC1009 has no ELLIPSE: R12 drew one as a polyline approximation and stored it
+// as such, so a drawing could not later be asked what the ellipse actually was.
+// This holds it exactly -- centre, axes, ratio -- and degrades to a polyline on
+// DXF write, which keeps interchange honest while osnaps, intersections and
+// transforms work on the real curve. CLAUDE.md sets that rule out.
+//
+// The parameterisation is DXF R13's, and it is the ellipse's OWN parameter
+// rather than a true angle:
+//
+//     p(t) = centre + major*cos(t) + minor*sin(t)
+//
+// which keeps the arithmetic linear and matches groups 41 and 42 for the day a
+// later DXF version is written. A true angle would need an arctangent at every
+// evaluation and would not match anything.
+class Ellipse final : public Entity {
+public:
+    Ellipse() : Entity(EntityType::Ellipse) {}
+
+    // `major` runs from the centre to the end of the major axis -- half the
+    // long diameter, DXF group 11. `ratio` is minor over major, in (0, 1].
+    Ellipse(const Vec3& centre, const Vec3& major, double ratio, double start_param = 0.0,
+            double end_param = kFullTurn, const Vec3& normal = kWorldZ)
+        : Entity(EntityType::Ellipse),
+          center_(centre),
+          major_(major),
+          ratio_(ratio),
+          start_param_(start_param),
+          end_param_(end_param) {
+        props().normal = normalize(normal);
+    }
+
+    const Vec3& center() const { return center_; }
+    const Vec3& major_axis() const { return major_; }
+    double ratio() const { return ratio_; }
+    double start_param() const { return start_param_; }
+    double end_param() const { return end_param_; }
+
+    void set_center(const Vec3& c) { center_ = c; }
+    void set_major_axis(const Vec3& v) { major_ = v; }
+    void set_ratio(double r) { ratio_ = r; }
+    void set_params(double s, double e) {
+        start_param_ = s;
+        end_param_ = e;
+    }
+
+    // Perpendicular to the major axis, in the entity's plane, already scaled.
+    Vec3 minor_axis() const;
+
+    double major_length() const { return length(major_); }
+    double minor_length() const { return length(major_) * ratio_; }
+
+    // Parameter span, in (0, 2*pi]. A zero span means a full ellipse, the same
+    // convention Arc::sweep() uses for a zero sweep.
+    double sweep() const;
+    bool is_full() const;
+
+    Vec3 point_at(double param) const;
+    Vec3 start_point() const { return point_at(start_param_); }
+    Vec3 end_point() const { return point_at(end_param_); }
+
+    // The four axis endpoints, in the order +major, +minor, -major, -minor.
+    void axis_points(Vec3 out[4]) const;
+
+    EntityPtr clone() const override;
+    void transform(const Mat4& m) override;
+    BBox bbox() const override;
+    void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
+    void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
+
+private:
+    Vec3 center_{};
+    Vec3 major_{1.0, 0.0, 0.0};
+    double ratio_{1.0};
+    double start_param_{0.0};
+    double end_param_{kFullTurn};
+};
+
 class Polyline final : public Entity {
 public:
     Polyline() : Entity(EntityType::Polyline) {}

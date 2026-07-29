@@ -41,6 +41,11 @@ enum class EntityType : std::uint8_t {
     Line,
     Circle,
     Arc,
+    // Not an R12 entity: AC1009 has no ELLIPSE and R12 drew them as polylines.
+    // Held exactly here and degraded to a polyline on DXF write, so the
+    // database keeps geometry the interchange format cannot name. See
+    // CLAUDE.md on divergences.
+    Ellipse,
     Polyline,
     Text,
     Point,

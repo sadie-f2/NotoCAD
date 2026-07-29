@@ -354,6 +354,148 @@ Step CircleCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- ELLIPSE ----------------------------------------------------------------
+
+Step EllipseCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Center/<Axis endpoint 1>";
+    p.keywords = {"Center"};
+    return Step::ask(p);
+}
+
+EntityPtr EllipseCommand::resolve(CommandContext& ctx, const InputValue& v) const {
+    const Vec3 n = construction_normal(ctx);
+    const double a = length(major_);
+    if (a <= kIntersectTol) return nullptr;
+
+    double half = 0.0;
+    if (state_ == State::RotationAngle) {
+        double tilt = 0.0;
+        if (!angle_from(v, centre_, tilt)) return nullptr;
+        // A circle of diameter 2a seen tilted through `tilt` projects to an
+        // ellipse whose minor axis is a*cos(tilt). At ninety degrees it is
+        // edge-on and has no area, which is refused rather than drawn as a
+        // line: a zero-ratio ellipse is not an ellipse.
+        half = a * std::cos(tilt);
+        if (std::abs(half) <= kIntersectTol) return nullptr;
+        half = std::abs(half);
+    } else {
+        if (!distance_from(v, centre_, half)) return nullptr;
+        if (half <= kIntersectTol) return nullptr;
+    }
+
+    // The longer of the two is the major axis, whichever way round they were
+    // given -- DXF's ratio is defined as minor over major and a ratio above one
+    // would be a different shape read back.
+    Vec3 major = major_;
+    double ratio = half / a;
+    if (half > a) {
+        const Vec3 perp = cross(n, major_);
+        if (is_zero(perp)) return nullptr;
+        major = normalize(perp) * half;
+        ratio = a / half;
+    }
+
+    return std::make_unique<Ellipse>(centre_, major, ratio, 0.0, kFullTurn, n);
+}
+
+bool EllipseCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
+    // The first two answers only place an axis; there is no ellipse to show
+    // until the second one is known, and a band already shows the axis itself.
+    if (state_ != State::Other && state_ != State::RotationAngle) return false;
+
+    EntityPtr e = resolve(ctx, tentative);
+    if (!e) return false;
+    out.ghosts.push_back(std::move(e));
+    return true;
+}
+
+Step EllipseCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::First: {
+            if (keyword_is(value, "CENTER")) {
+                state_ = State::CentreFirst;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Center of ellipse";
+                return Step::ask(p);
+            }
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            // Held in centre_ for now: the second endpoint turns it into the
+            // real centre, which is the midpoint of the two.
+            centre_ = value.point;
+            state_ = State::Second;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Axis endpoint 2";
+            p.base = centre_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::CentreFirst: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            centre_ = value.point;
+            have_centre_ = true;
+            state_ = State::Second;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Axis endpoint";
+            p.base = centre_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::Second: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+            if (near_equal(centre_, value.point, kIntersectTol)) {
+                return Step::failed("the axis has no length");
+            }
+
+            major_ = value.point - centre_;
+            if (!have_centre_) {
+                // Two endpoints: the centre is their midpoint and the axis is
+                // half the span between them.
+                centre_ = centre_ + major_ * 0.5;
+                major_ = major_ * 0.5;
+                have_centre_ = true;
+            }
+
+            state_ = State::Other;
+            Prompt p;
+            p.kind = PromptKind::Distance;
+            p.message = "Rotation/<Other axis distance>";
+            p.keywords = {"Rotation"};
+            p.base = centre_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::Other: {
+            if (keyword_is(value, "ROTATION")) {
+                state_ = State::RotationAngle;
+                Prompt p;
+                p.kind = PromptKind::Angle;
+                p.message = "Rotation around major axis";
+                p.base = centre_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+            [[fallthrough]];
+        }
+
+        case State::RotationAngle: {
+            EntityPtr e = resolve(ctx, value);
+            if (!e) return Step::failed("that does not describe an ellipse");
+            ctx.db.add(with_current_props(ctx.db, std::move(e)));
+            return Step::done();
+        }
+    }
+    return Step::failed("internal state error");
+}
+
 // --- ARC --------------------------------------------------------------------
 
 Step ArcCommand::start(CommandContext&) {
@@ -5200,6 +5342,7 @@ CommandPtr make_command(std::string_view name) {
     const std::string upper = upcase(name);
     if (upper == "LINE") return std::make_unique<LineCommand>();
     if (upper == "ARC") return std::make_unique<ArcCommand>();
+    if (upper == "ELLIPSE") return std::make_unique<EllipseCommand>();
     if (upper == "MEASUREGEOM") return std::make_unique<MeasureGeomCommand>();
     if (upper == "SETVAR") return std::make_unique<SetVarCommand>();
     if (upper == "OSNAP") return std::make_unique<OsnapCommand>();
@@ -5253,7 +5396,7 @@ CommandPtr make_command(std::string_view name) {
 
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
-        "ARC", "AREA", "ARRAY", "CIRCLE",
+        "ARC", "AREA", "ARRAY", "CIRCLE", "ELLIPSE",
         "MEASUREGEOM", "ORTHO", "OSNAP", "SETVAR", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
@@ -5267,6 +5410,7 @@ const std::vector<CommandAlias>& command_aliases() {
     // The R12 acad.pgp short forms for the commands that exist so far.
     static const std::vector<CommandAlias> aliases = {
         {"A", "ARC"},
+        {"EL", "ELLIPSE"},
         {"MEA", "MEASUREGEOM"},
         {"C", "CIRCLE"},
         {"E", "ERASE"},

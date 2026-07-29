@@ -75,8 +75,8 @@ TEST_CASE("registry: the command count is what we think it is") {
     // exactly what this file exists to catch, and a count that adjusts itself
     // would catch nothing -- so raise it ON PURPOSE when adding a command, and
     // treat it dropping as a bug until proven otherwise.
-    CHECK(command_names().size() == 51);
-    if (command_names().size() != 51) {
+    CHECK(command_names().size() == 52);
+    if (command_names().size() != 52) {
         std::printf("       registry holds %zu commands\n", command_names().size());
     }
 }

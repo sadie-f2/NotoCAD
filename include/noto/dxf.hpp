@@ -43,6 +43,13 @@ public:
     // Entity type marker, handle, layer, colour, linetype and thickness.
     void write_common(const Entity& e);
 
+    // The same, under a different type name. For an entity the target DXF
+    // version cannot name and that degrades to one it can -- ELLIPSE written as
+    // a POLYLINE. Everything else about the entity, its layer, linetype, colour
+    // and handle, is written unchanged, because those DO survive the
+    // substitution and losing them would compound the loss.
+    void write_common_as(const Entity& e, const char* type_name);
+
     // For entities that write more than one record -- POLYLINE emits VERTEX and
     // SEQEND after itself, and each needs the same handle and layer.
     std::string handle_text(Handle h) const;

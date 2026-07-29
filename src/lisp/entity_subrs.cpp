@@ -169,6 +169,38 @@ bool build_entity(Interp& in, Database& db, const Value& alist, EntityPtr& out,
         // Both endpoints are already world coordinates; LINE is the exception.
         out = std::make_unique<Line>(point10, point11);
 
+    } else if (type == "ELLIPSE") {
+        if (!has_p10) return in.fail(EvalStatus::BadArgumentType, "ELLIPSE: missing group 10");
+
+        const Value v11 = alist_get(alist, 11, found);
+        if (!found) return in.fail(EvalStatus::BadArgumentType, "ELLIPSE: missing group 11");
+        Vec3 major{};
+        if (!parse_point(in, 11, v11, major)) return false;
+
+        const Value v40 = alist_get(alist, 40, found);
+        if (!found) return in.fail(EvalStatus::BadArgumentType, "ELLIPSE: missing group 40");
+        double ratio = 0.0;
+        if (!parse_real(in, 40, v40, ratio)) return false;
+        if (ratio <= 0.0 || ratio > 1.0) {
+            return group_error(in, 40, "axis ratio must be in (0, 1]");
+        }
+
+        // Parameters are optional: leaving them out asks for a whole ellipse,
+        // which is what most callers want and what R12 could only draw.
+        double start = 0.0;
+        double end = kFullTurn;
+        const Value v41 = alist_get(alist, 41, found);
+        if (found && !parse_real(in, 41, v41, start)) return false;
+        const Value v42 = alist_get(alist, 42, found);
+        if (found && !parse_real(in, 42, v42, end)) return false;
+
+        const Mat4 to_world = ecs_to_world(normal);
+        const Vec3 centre = to_world.transform_point(point10);
+        const Vec3 axis = to_world.transform_vector(major);
+        if (is_zero(axis)) return group_error(in, 11, "the major axis has no length");
+
+        out = std::make_unique<Ellipse>(centre, axis, ratio, start, end, normal);
+
     } else if (type == "CIRCLE" || type == "ARC") {
         if (!has_p10) return in.fail(EvalStatus::BadArgumentType, type + ": missing group 10");
         const Value r = alist_get(alist, 40, found);
@@ -259,6 +291,23 @@ Value entity_to_alist(Context& ctx, const Database& db, const Entity& ent) {
             const Mat4 to_ecs = world_to_ecs(props.normal);
             items.push_back(pair_point(ctx, 10, to_ecs.transform_point(circle.center())));
             items.push_back(pair_real(ctx, 40, circle.radius()));
+            break;
+        }
+        case EntityType::Ellipse: {
+            // R13's group codes, even though this writes to DXF as a polyline.
+            // AutoLISP is not DXF: an ellipse in the database is an ellipse, and
+            // handing LISP the approximation instead would make it impossible to
+            // read back what was made -- which for a tool whose purpose is
+            // LISP-driven geometry would be the wrong loss to take.
+            const Ellipse& el = static_cast<const Ellipse&>(ent);
+            const Mat4 to_ecs = world_to_ecs(props.normal);
+            items.push_back(pair_point(ctx, 10, to_ecs.transform_point(el.center())));
+            // Group 11 is a VECTOR from the centre, so it rotates without
+            // translating -- transform_vector, not transform_point.
+            items.push_back(pair_point(ctx, 11, to_ecs.transform_vector(el.major_axis())));
+            items.push_back(pair_real(ctx, 40, el.ratio()));
+            items.push_back(pair_real(ctx, 41, el.start_param()));
+            items.push_back(pair_real(ctx, 42, el.end_param()));
             break;
         }
         case EntityType::Arc: {

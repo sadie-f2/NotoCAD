@@ -56,6 +56,32 @@ void Circle::draw(const DrawContext& ctx, Renderer& r) const {
     r.polyline(pts.data(), pts.size(), true);
 }
 
+void Ellipse::draw(const DrawContext& ctx, Renderer& r) const {
+    const double a = major_length();
+    if (a <= kEps) return;
+
+    // Segmented against the MAJOR axis, so the flattest part of the curve is
+    // not the one that decides. Using the minor would under-segment the ends,
+    // which is exactly where an ellipse turns most sharply.
+    const double span = sweep();
+    const int segments = arc_segment_count(a, span, ctx.chord_tolerance);
+
+    std::vector<Vec3> pts;
+    pts.reserve(static_cast<std::size_t>(segments) + 1);
+    for (int i = 0; i <= segments; ++i) {
+        pts.push_back(point_at(start_param_ + span * (static_cast<double>(i) / segments)));
+    }
+
+    if (is_full()) {
+        // The loop closes itself, so drop the repeated point and let the
+        // renderer join the ends -- same as Circle.
+        pts.pop_back();
+        r.polyline(pts.data(), pts.size(), true);
+        return;
+    }
+    r.polyline(pts.data(), pts.size(), false);
+}
+
 void Arc::draw(const DrawContext& ctx, Renderer& r) const {
     if (radius_ <= kEps) return;
 

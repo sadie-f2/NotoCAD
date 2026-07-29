@@ -7,6 +7,10 @@
 // This is also where the world-space internal representation is converted back
 // into the entity coordinate system that R12 actually stores.
 #include "noto/dxf.hpp"
+
+#include "noto/render.hpp"
+
+#include <algorithm>
 #include "noto/ecs.hpp"
 #include "noto/entities.hpp"
 
@@ -56,6 +60,55 @@ void Arc::dxf_write(DxfWriter& w) const {
 // but nothing in this program refers to a vertex by handle, and inventing
 // handles at write time that no entity owns would put identifiers in the file
 // that cannot be resolved on the way back in.
+void Ellipse::dxf_write(DxfWriter& w) const {
+    // THE DIVERGENCE, PAID FOR HERE. AC1009 has no ELLIPSE entity, so this
+    // writes what R12 itself wrote: a polyline approximation. The database
+    // keeps the exact curve; the file gets something every R12 reader
+    // understands. CLAUDE.md's rule is that a divergence must degrade honestly
+    // on the way out, and this is the whole of what that costs.
+    //
+    // Consequence, and it is worth stating rather than discovering: a round
+    // trip through DXF is LOSSY. An ellipse written and read back is a
+    // polyline, and nothing can recover what it was. That is the same bargain
+    // R12 users made, and the alternative -- emitting a later DXF version --
+    // would break the interchange guarantee for the whole file.
+    const double a = major_length();
+    if (a <= kEps) return;
+
+    // Fixed relative tolerance rather than one from a view: a file has no zoom.
+    // A thousandth of the major axis is finer than any plotter or screen will
+    // resolve and keeps the vertex count sane.
+    const double span = sweep();
+    int segments = arc_segment_count(a, span, a * 1.0e-3);
+    segments = std::clamp(segments, 8, 512);
+
+    const Mat4 to_ecs = world_to_ecs(props().normal);
+    const bool closed = is_full();
+
+    w.write_common_as(*this, "POLYLINE");
+    w.code(66, 1);
+    Vec3 elevation{0.0, 0.0, 0.0};
+    elevation.z = to_ecs.transform_point(point_at(start_param_)).z;
+    w.point(10, elevation);
+    if (closed) w.code(70, 1);
+    w.write_extrusion(props().normal);
+
+    // One fewer vertex when closed: the last would land on the first, and the
+    // closed flag already joins them.
+    const int count = closed ? segments : segments + 1;
+    for (int i = 0; i < count; ++i) {
+        const double t = start_param_ + span * (static_cast<double>(i) / segments);
+        w.code(0, "VERTEX");
+        w.code(5, w.handle_text(handle()));
+        w.code(8, w.layer_name(*this));
+        w.point(10, to_ecs.transform_point(point_at(t)));
+    }
+
+    w.code(0, "SEQEND");
+    w.code(5, w.handle_text(handle()));
+    w.code(8, w.layer_name(*this));
+}
+
 void Polyline::dxf_write(DxfWriter& w) const {
     const Mat4 to_ecs = world_to_ecs(props().normal);
 
