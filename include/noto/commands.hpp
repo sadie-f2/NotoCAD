@@ -53,6 +53,68 @@ private:
     bool diameter_{false};
 };
 
+// ARC: R12's eleven ways to say the same three numbers.
+//
+// The entity has existed since the first commit; this is the command that makes
+// one, and the option set is the whole of the work. Every path resolves to a
+// centre, a start point and a SIGNED included angle, and one emit() turns that
+// into the counterclockwise span Arc stores -- a negative sweep is the same arc
+// entered from its other end, which is why nothing downstream needs to know
+// which option was used.
+//
+// Continue is the odd one: Enter at the first prompt picks up the last line or
+// arc's endpoint and its tangent there, which makes it Start/End/Direction with
+// two of the three already answered.
+class ArcCommand final : public Command {
+public:
+    const char* name() const override { return "ARC"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t {
+        Start,        // Center/<Start point>
+        CentreFirst,   // Center:, nothing else known yet
+        CentreStart,   // Start point:, centre already known
+        SecondCentre,  // Center:, reached from the start point rather than before it
+        Second,       // Center/End/<Second point>
+        ThreeEnd,     // End point, three-point arc
+        CentreEnd,    // Angle/Length/<End point>, start and centre known
+        StartEnd,     // Angle/Direction/Radius/<Center point>, start and end known
+        AngleValue,
+        LengthValue,
+        RadiusValue,
+        DirectionValue,
+        ContinueEnd,  // End point, leaving the previous entity tangentially
+    };
+
+    Step ask_second();
+    Step ask_centre_end();
+    Step ask_start_end();
+
+    // The one exit. `included` is signed: positive sweeps counterclockwise from
+    // `from`, negative clockwise, and the entity is built accordingly.
+    Step emit(CommandContext& ctx, const Vec3& centre, const Vec3& from, double included);
+
+    // Start and end known, plus a signed included angle: derive the centre.
+    Step emit_by_angle(CommandContext& ctx, double included);
+
+    State state_{State::Start};
+
+    // Which of the points below are answers rather than defaults. Both states
+    // they disambiguate are reached by two different routes, and a sentinel
+    // value would fail on exactly the degenerate input worth rejecting
+    // cleanly -- a centre that coincides with the start, say.
+    bool have_centre_{false};
+    bool have_middle_{false};
+
+    Vec3 start_{};
+    Vec3 second_{};
+    Vec3 end_{};
+    Vec3 centre_{};
+    Vec3 tangent_{};
+};
+
 // PLINE: one polyline, grown a segment at a time.
 //
 // The longest state machine here, and all of it is R12's two prompts: a line

@@ -127,6 +127,49 @@ Vec3 rotate_about(const Vec3& v, const Vec3& n, double radians) {
     return Mat4::rotation(Vec3{}, n, radians).transform_vector(v);
 }
 
+
+constexpr double kTwoPi = 2.0 * std::numbers::pi;
+
+// The angle of `p` about `centre` in the plane of `n`, measured the way Arc
+// measures: counterclockwise from the ECS X axis that arbitrary_axis() derives.
+// Anything that builds an arc has to agree with the entity about where zero is.
+double plane_angle(const Vec3& centre, const Vec3& p, const Vec3& n) {
+    const Basis b = arbitrary_axis(n);
+    const Vec3 r = p - centre;
+    return std::atan2(dot(r, b.ay), dot(r, b.ax));
+}
+
+// Counterclockwise sweep from `from` to `to`, in (0, 2*pi].
+double ccw_sweep(double from, double to) {
+    double d = to - from;
+    while (d <= 0.0) d += kTwoPi;
+    while (d > kTwoPi) d -= kTwoPi;
+    return d;
+}
+
+// The centre of the circle through three points, in the plane of `n`. False
+// when they are collinear, which is the degenerate arc R12 refuses too.
+//
+// Solved in the plane's own 2D frame with `a` at the origin: the 3D vector
+// forms of this are shorter to write and much worse conditioned, since they
+// divide by a cross product whose magnitude vanishes with the triangle's area
+// rather than by a determinant that says so directly.
+bool circumcentre(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& n, Vec3* out) {
+    const Basis f = arbitrary_axis(n);
+    const double bx = dot(b - a, f.ax);
+    const double by = dot(b - a, f.ay);
+    const double cx = dot(c - a, f.ax);
+    const double cy = dot(c - a, f.ay);
+
+    const double d = 2.0 * (bx * cy - by * cx);
+    if (std::abs(d) <= kIntersectTol) return false;
+
+    const double b2 = bx * bx + by * by;
+    const double c2 = cx * cx + cy * cy;
+    *out = a + f.ax * ((cy * b2 - by * c2) / d) + f.ay * ((bx * c2 - cx * b2) / d);
+    return true;
+}
+
 }  // namespace
 
 // --- LINE -------------------------------------------------------------------
@@ -237,6 +280,368 @@ Step CircleCommand::next(CommandContext& ctx, const InputValue& value) {
             ctx.db.add(with_current_props(
                 ctx.db, std::make_unique<Circle>(centre_, radius, construction_normal(ctx))));
             return Step::done();
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- ARC --------------------------------------------------------------------
+
+Step ArcCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Center/<Start point>";
+    p.keywords = {"Center"};
+    // Enter is Continue: leave the last line or arc tangentially.
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step ArcCommand::ask_second() {
+    state_ = State::Second;
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Center/End/<Second point>";
+    p.keywords = {"Center", "End"};
+    p.base = start_;
+    p.has_base = true;
+    return Step::ask(p);
+}
+
+Step ArcCommand::ask_centre_end() {
+    state_ = State::CentreEnd;
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Angle/Length of chord/<End point>";
+    p.keywords = {"Angle", "Length"};
+    p.base = centre_;
+    p.has_base = true;
+    return Step::ask(p);
+}
+
+Step ArcCommand::ask_start_end() {
+    state_ = State::StartEnd;
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Angle/Direction/Radius/<Center point>";
+    p.keywords = {"Angle", "Direction", "Radius"};
+    p.base = end_;
+    p.has_base = true;
+    return Step::ask(p);
+}
+
+Step ArcCommand::emit(CommandContext& ctx, const Vec3& centre, const Vec3& from, double included) {
+    const Vec3 n = construction_normal(ctx);
+    const double radius = length(from - centre);
+    if (radius <= kIntersectTol) return Step::failed("the arc has no radius");
+    if (std::abs(included) <= kIntersectTol) return Step::failed("the arc has no sweep");
+
+    const double a = plane_angle(centre, from, n);
+
+    // Arc stores a counterclockwise span, so a clockwise sweep is the same arc
+    // entered from its other end. Doing the flip here is what lets every option
+    // above hand back a signed angle and stop thinking about it.
+    const double s = included > 0.0 ? a : a + included;
+    const double e = included > 0.0 ? a + included : a;
+
+    ctx.db.add(with_current_props(ctx.db, std::make_unique<Arc>(centre, radius, s, e, n)));
+    return Step::done();
+}
+
+Step ArcCommand::emit_by_angle(CommandContext& ctx, double included) {
+    const Vec3 n = construction_normal(ctx);
+    const Vec3 chord = end_ - start_;
+    const double len = length(chord);
+    if (len <= kIntersectTol) return Step::failed("start and end are the same point");
+    if (std::abs(included) <= kIntersectTol) return Step::failed("the arc has no sweep");
+    if (std::abs(included) >= kTwoPi) return Step::failed("the angle is a full turn or more");
+
+    const double half = std::abs(included) * 0.5;
+    const double radius = (len * 0.5) / std::sin(half);
+
+    // The centre sits off the chord's midpoint by r*cos(half), on the side the
+    // sweep direction puts it. cos goes negative past a half turn, which swings
+    // it to the other side without a case for it.
+    const Vec3 perp = cross(n, chord);
+    if (is_zero(perp)) return Step::failed("the chord lies along the plane normal");
+
+    const Vec3 mid = (start_ + end_) * 0.5;
+    const double offset = radius * std::cos(half);
+    const Vec3 centre =
+        included > 0.0 ? mid + normalize(perp) * offset : mid - normalize(perp) * offset;
+
+    return emit(ctx, centre, start_, included);
+}
+
+Step ArcCommand::next(CommandContext& ctx, const InputValue& value) {
+    const Vec3 n = construction_normal(ctx);
+
+    switch (state_) {
+        case State::Start: {
+            if (value.kind == InputKind::None) {
+                // Continue. R12 leaves the last line or arc tangentially, so the
+                // previous entity supplies both the start point and the
+                // direction, and only the end is still to ask for.
+                const Entity* last = ctx.db.order().empty()
+                                         ? nullptr
+                                         : ctx.db.get(ctx.db.order().back());
+                if (last == nullptr) return Step::failed("no line or arc to continue");
+
+                if (last->type() == EntityType::Line) {
+                    const Line& l = *static_cast<const Line*>(last);
+                    start_ = l.end();
+                    const Vec3 d = l.end() - l.start();
+                    if (is_zero(d)) return Step::failed("the last line has no direction");
+                    tangent_ = normalize(d);
+                } else if (last->type() == EntityType::Arc) {
+                    const Arc& a = *static_cast<const Arc*>(last);
+                    start_ = a.end_point();
+                    // The tangent at the end of a counterclockwise arc is the
+                    // radius turned a quarter turn the same way.
+                    const Vec3 r = a.end_point() - a.center();
+                    if (is_zero(r)) return Step::failed("the last arc has no radius");
+                    tangent_ = normalize(cross(a.props().normal, r));
+                } else {
+                    return Step::failed("the last entity is not a line or arc");
+                }
+
+                state_ = State::ContinueEnd;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "End point";
+                p.base = start_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+
+            if (keyword_is(value, "CENTER")) {
+                state_ = State::CentreFirst;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Center";
+                return Step::ask(p);
+            }
+
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            start_ = value.point;
+            return ask_second();
+        }
+
+        case State::CentreFirst: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            centre_ = value.point;
+            have_centre_ = true;
+            state_ = State::CentreStart;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Start point";
+            p.base = centre_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::CentreStart: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            start_ = value.point;
+            return ask_centre_end();
+        }
+
+        case State::SecondCentre: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            centre_ = value.point;
+            have_centre_ = true;
+            return ask_centre_end();
+        }
+
+        case State::Second: {
+            if (keyword_is(value, "CENTER")) {
+                // Its own state, not CentreFirst: the start point is already
+                // answered here, and reusing that path would ask for it twice.
+                state_ = State::SecondCentre;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Center";
+                p.base = start_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+            if (keyword_is(value, "END")) {
+                // Start and end, with the third answer still to be chosen.
+                state_ = State::ThreeEnd;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "End point";
+                p.base = start_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            second_ = value.point;
+            have_middle_ = true;
+            state_ = State::ThreeEnd;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "End point";
+            p.base = second_;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::ThreeEnd: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            end_ = value.point;
+
+            // Reached either by giving a middle point or by the End keyword,
+            // which skips it -- and only the flag can say which, since a middle
+            // point is free to sit anywhere including on top of the start.
+            if (!have_middle_) return ask_start_end();
+
+            Vec3 centre{};
+            if (!circumcentre(start_, second_, end_, n, &centre)) {
+                return Step::failed("the three points are collinear");
+            }
+
+            // Which way round: the arc must pass through the middle point, so
+            // take the counterclockwise sweep to it and to the end, and keep
+            // the direction that reaches the middle first.
+            const double a0 = plane_angle(centre, start_, n);
+            const double to_mid = ccw_sweep(a0, plane_angle(centre, second_, n));
+            const double to_end = ccw_sweep(a0, plane_angle(centre, end_, n));
+            const double included = to_mid < to_end ? to_end : to_end - kTwoPi;
+            return emit(ctx, centre, start_, included);
+        }
+
+        case State::CentreEnd: {
+            if (keyword_is(value, "ANGLE")) {
+                state_ = State::AngleValue;
+                Prompt p;
+                p.kind = PromptKind::Angle;
+                p.message = "Included angle";
+                p.base = centre_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+            if (keyword_is(value, "LENGTH")) {
+                state_ = State::LengthValue;
+                Prompt p;
+                p.kind = PromptKind::Distance;
+                p.message = "Length of chord";
+                p.base = start_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+            // The end point gives a direction, not a distance: the radius is
+            // already fixed by the centre and the start, so R12 projects.
+            const double a0 = plane_angle(centre_, start_, n);
+            const double a1 = plane_angle(centre_, value.point, n);
+            return emit(ctx, centre_, start_, ccw_sweep(a0, a1));
+        }
+
+        case State::AngleValue: {
+            // Two routes arrive here. With a centre already given the angle is
+            // the sweep about it; without one, the angle plus the chord decides
+            // where the centre goes.
+            double included = 0.0;
+            const Vec3 base = have_centre_ ? centre_ : start_;
+            if (!angle_from(value, base, included)) return Step::failed("an angle is required");
+            return have_centre_ ? emit(ctx, centre_, start_, included)
+                                : emit_by_angle(ctx, included);
+        }
+
+        case State::LengthValue: {
+            double chord = 0.0;
+            if (!signed_distance_from(value, start_, chord)) {
+                return Step::failed("a length is required");
+            }
+            const double radius = length(start_ - centre_);
+            if (radius <= kIntersectTol) return Step::failed("the arc has no radius");
+
+            const double ratio = std::abs(chord) / (2.0 * radius);
+            if (ratio > 1.0) return Step::failed("the chord is longer than the diameter");
+
+            // R12: a negative chord asks for the major arc, the same convention
+            // the bulge sign carries in a polyline.
+            const double minor = 2.0 * std::asin(ratio);
+            return emit(ctx, centre_, start_, chord >= 0.0 ? minor : minor - kTwoPi);
+        }
+
+        case State::StartEnd: {
+            if (keyword_is(value, "ANGLE")) {
+                state_ = State::AngleValue;
+                Prompt p;
+                p.kind = PromptKind::Angle;
+                p.message = "Included angle";
+                p.base = start_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+            if (keyword_is(value, "DIRECTION")) {
+                state_ = State::DirectionValue;
+                Prompt p;
+                p.kind = PromptKind::Angle;
+                p.message = "Direction from start point";
+                p.base = start_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+            if (keyword_is(value, "RADIUS")) {
+                state_ = State::RadiusValue;
+                Prompt p;
+                p.kind = PromptKind::Distance;
+                p.message = "Radius";
+                p.base = start_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+            centre_ = value.point;
+            have_centre_ = true;
+            const double a0 = plane_angle(centre_, start_, n);
+            const double a1 = plane_angle(centre_, end_, n);
+            return emit(ctx, centre_, start_, ccw_sweep(a0, a1));
+        }
+
+        case State::DirectionValue: {
+            double bearing = 0.0;
+            if (!angle_from(value, start_, bearing)) return Step::failed("a direction is required");
+
+            const Basis b = arbitrary_axis(n);
+            const Vec3 dir = b.ax * std::cos(bearing) + b.ay * std::sin(bearing);
+
+            // Leaving along `dir` and reaching `end_` fixes the sweep: the
+            // included angle is twice the turn from the tangent to the chord.
+            // Same identity PLINE's arc Direction option uses.
+            const Vec3 chord = end_ - start_;
+            if (is_zero(chord)) return Step::failed("start and end are the same point");
+            return emit_by_angle(ctx, 2.0 * signed_angle(dir, normalize(chord), n));
+        }
+
+        case State::RadiusValue: {
+            double radius = 0.0;
+            if (!signed_distance_from(value, start_, radius)) {
+                return Step::failed("a radius is required");
+            }
+            const double chord = length(end_ - start_);
+            if (chord <= kIntersectTol) return Step::failed("start and end are the same point");
+
+            const double ratio = chord / (2.0 * std::abs(radius));
+            if (ratio > 1.0) return Step::failed("the radius is too small to reach the end point");
+
+            // Negative radius is R12's way of asking for the major arc, matching
+            // the negative chord length above.
+            const double minor = 2.0 * std::asin(ratio);
+            return emit_by_angle(ctx, radius >= 0.0 ? minor : kTwoPi - minor);
+        }
+
+        case State::ContinueEnd: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            end_ = value.point;
+            const Vec3 chord = end_ - start_;
+            if (is_zero(chord)) return Step::failed("start and end are the same point");
+            return emit_by_angle(ctx, 2.0 * signed_angle(tangent_, normalize(chord), n));
         }
     }
     return Step::failed("internal state error");
@@ -4357,6 +4762,7 @@ Step DxfOutCommand::next(CommandContext& ctx, const InputValue& value) {
 CommandPtr make_command(std::string_view name) {
     const std::string upper = upcase(name);
     if (upper == "LINE") return std::make_unique<LineCommand>();
+    if (upper == "ARC") return std::make_unique<ArcCommand>();
     if (upper == "CIRCLE") return std::make_unique<CircleCommand>();
     if (upper == "COLOR") return std::make_unique<ColorCommand>();
     if (upper == "LIMITS") return std::make_unique<LimitsCommand>();
@@ -4406,7 +4812,7 @@ CommandPtr make_command(std::string_view name) {
 
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
-        "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
+        "ARC", "AREA", "ARRAY", "CIRCLE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
         "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
@@ -4418,6 +4824,7 @@ const std::vector<std::string>& command_names() {
 const std::vector<CommandAlias>& command_aliases() {
     // The R12 acad.pgp short forms for the commands that exist so far.
     static const std::vector<CommandAlias> aliases = {
+        {"A", "ARC"},
         {"C", "CIRCLE"},
         {"E", "ERASE"},
         {"AA", "AREA"},
