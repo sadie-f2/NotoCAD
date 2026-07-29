@@ -72,10 +72,8 @@ signals:
     // history shows a prompt with no visible answer.
     void pointPicked(const QString& prompt, const QString& answer);
 
-    // Typing in the viewport belongs to the command line. R12 has no separate
-    // step for focusing it -- you just start typing.
-    void textTyped(const QString& text);
-
+    // Escape. Handled by the engine rather than by each command, so that
+    // committed work survives it as in R12.
     void cancelRequested();
 
 protected:

@@ -37,13 +37,16 @@ private slots:
     void on_line_entered(const QString& line);
     void on_cancel_requested();
     void on_point_picked(const QString& prompt, const QString& answer);
-    void on_text_typed(const QString& text);
 
 protected:
     // Printable keystrokes reach the command line from wherever focus happens
     // to be. R12 has no focus step -- you just type -- and this is what makes
     // that true regardless of what was clicked last.
     bool eventFilter(QObject* watched, QEvent* event) override;
+
+    // Set while a key is being handed to the command line, so the re-delivered
+    // event cannot come back round and recur.
+    bool routing_key_{false};
 
 private:
     void refresh_prompt();

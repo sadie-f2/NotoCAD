@@ -660,14 +660,12 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event) {
         return;
     }
 
-    // Anything that produces text goes to the command line, which is how R12
-    // behaves: there is no focus step, you just type.
-    const QString text = event->text();
-    if (!text.isEmpty() && text.at(0).isPrint()) {
-        emit textTyped(text);
-        return;
-    }
-
+    // Everything else already went to the command line: MainWindow filters key
+    // presses application-wide and forwards all but the two above, so nothing
+    // printable -- nor Return, Backspace or the history arrows -- ever reaches
+    // here. This used to forward printable text itself, which was a second
+    // implementation of the same rule that handled a smaller set of keys than
+    // the filter did.
     QWidget::keyPressEvent(event);
 }
 

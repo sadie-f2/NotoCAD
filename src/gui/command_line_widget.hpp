@@ -17,6 +17,8 @@ class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 
+class QKeyEvent;
+
 namespace noto {
 
 class CommandLineWidget : public QWidget {
@@ -38,6 +40,12 @@ public:
     // the viewport reaches the command line, which is what R12 does: there is
     // no separate "focus the command line" step, you just start typing.
     void insert_typed_text(const QString& text);
+
+    // Hands a key press to the input as though it had been focused all along:
+    // takes focus, then re-delivers the event. The one mechanism by which a
+    // keystroke landing anywhere else in the window reaches the command line,
+    // whatever key it is.
+    void deliver_key(QKeyEvent* event);
 
     void focus_input();
     bool input_has_focus() const;

@@ -8,6 +8,7 @@
 #include <QFontDatabase>
 #include <QSizePolicy>
 #include <QHBoxLayout>
+#include <QCoreApplication>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QPalette>
@@ -120,6 +121,11 @@ void CommandLineWidget::echo_input(const QString& prompt, const QString& text) {
 void CommandLineWidget::insert_typed_text(const QString& text) {
     input_->setFocus(Qt::OtherFocusReason);
     input_->insert(text);
+}
+
+void CommandLineWidget::deliver_key(QKeyEvent* event) {
+    input_->setFocus(Qt::OtherFocusReason);
+    QCoreApplication::sendEvent(input_, event);
 }
 
 void CommandLineWidget::focus_input() { input_->setFocus(Qt::OtherFocusReason); }

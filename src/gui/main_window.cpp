@@ -64,7 +64,6 @@ MainWindow::MainWindow(QWidget* parent)
             &MainWindow::on_cancel_requested);
     connect(view_, &ViewportWidget::pointPicked, this, &MainWindow::on_point_picked);
     connect(view_, &ViewportWidget::cancelRequested, this, &MainWindow::on_cancel_requested);
-    connect(view_, &ViewportWidget::textTyped, this, &MainWindow::on_text_typed);
 
     command_line_->append_output(
         "NotoCAD -- type ? for commands, ( for AutoLISP, QUIT to exit.\n"
@@ -85,19 +84,49 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     // would be inserted twice and Home would stop moving the cursor.
     if (command_line_->input_has_focus()) return QMainWindow::eventFilter(watched, event);
 
-    auto* key = static_cast<QKeyEvent*>(event);
-    const QString text = key->text();
+    // Re-entrancy: delivering the key below sends it to the input, which comes
+    // back through here. That normally exits at the test above, but not if
+    // focus refused to move -- a disabled input, or a window that is not
+    // active -- and then it would recur until the stack ran out.
+    if (routing_key_) return QMainWindow::eventFilter(watched, event);
 
-    // Printable only. Escape, Home and the arrows belong to whatever has focus
-    // -- the viewport uses them for cancelling and for view control.
-    if (text.isEmpty() || !text.at(0).isPrint()) {
-        return QMainWindow::eventFilter(watched, event);
+    auto* key = static_cast<QKeyEvent*>(event);
+
+    // The rule, and it is deliberately stated as a default rather than as a
+    // list: ANY key pressed anywhere in the window belongs to the command line,
+    // unless it is one of the few the viewport genuinely owns. R12 works this
+    // way -- there is no focus step, you just type -- and the previous version
+    // of this got it half right by routing only PRINTABLE keys, which left
+    // Return, Backspace and the history arrows to fall through to a viewport
+    // that drops them.
+    //
+    // Enumerating what to forward is the shape of the bug. Enumerating what to
+    // keep is a list of three things that cannot quietly grow.
+    switch (key->key()) {
+        // View control. These are not text, and the viewport is the only thing
+        // that can act on them.
+        case Qt::Key_Escape:
+        case Qt::Key_Home:
+        // A bare modifier is not a keystroke and must not pull focus: holding
+        // shift before a middle-drag orbit would otherwise move the caret.
+        case Qt::Key_Shift:
+        case Qt::Key_Control:
+        case Qt::Key_Alt:
+        case Qt::Key_Meta:
+            return QMainWindow::eventFilter(watched, event);
+        default:
+            break;
     }
+
+    // Accelerators and window management keep working: a Ctrl or Alt chord is
+    // addressed to the application, not typed into a prompt.
     if (key->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) {
         return QMainWindow::eventFilter(watched, event);
     }
 
-    command_line_->insert_typed_text(text);
+    routing_key_ = true;
+    command_line_->deliver_key(key);
+    routing_key_ = false;
     return true;
 }
 
@@ -132,10 +161,6 @@ void MainWindow::on_point_picked(const QString& prompt, const QString& answer) {
     // catch up with a question it never saw the answer to.
     command_line_->echo_input(prompt, answer);
     refresh_prompt();
-}
-
-void MainWindow::on_text_typed(const QString& text) {
-    command_line_->insert_typed_text(text);
 }
 
 void MainWindow::on_cancel_requested() {
