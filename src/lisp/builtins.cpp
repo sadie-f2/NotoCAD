@@ -12,6 +12,7 @@
 #include "command_subr.hpp"
 #include "file_subrs.hpp"
 #include "geom_subrs.hpp"
+#include "io_subrs.hpp"
 #include "sset_subrs.hpp"
 #include "sysvar_subrs.hpp"
 
@@ -827,6 +828,16 @@ constexpr SubrDef kSubrs[] = {
     {"ANGLE", subr_angle, 2, 2},
     {"INTERS", subr_inters, 4, 5},
     {"OSNAP", subr_osnap, 2, 2},
+
+    // file I/O -- named in CLAUDE.md's own scope, and the path by which
+    // external analysis data reaches a drawing
+    {"OPEN", subr_open, 2, 2},
+    {"CLOSE", subr_close, 1, 1},
+    {"READ-LINE", subr_read_line, 1, 1},
+    {"WRITE-LINE", subr_write_line, 1, 2},
+    {"READ-CHAR", subr_read_char, 1, 1},
+    {"WRITE-CHAR", subr_write_char, 1, 2},
+    {"FINDFILE", subr_findfile, 1, 1},
     {"DXFOUT", subr_dxfout, 1, 1},
     {"QUIT", subr_quit, 0, 0},
     {"EXIT", subr_quit, 0, 0},

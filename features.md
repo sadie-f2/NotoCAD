@@ -212,7 +212,7 @@ headline number flatters it.
 |---|---|
 | Geometry helpers | ~~`polar`, `distance`, `angle`, `inters`, `osnap`~~ **built** — `trans`, `textbox` remain |
 | User input | `getpoint`, `getdist`, `getangle`, `getcorner`, `getint`, `getreal`, `getstring`, `getkword`, `initget` |
-| File I/O | `open`, `close`, `read-line`, `write-line`, `read-char`, `write-char` |
+| File I/O | ~~`open`, `close`, `read-line`, `write-line`, `read-char`, `write-char`~~ **built**, plus `findfile` |
 | Tables | `tblnext`, `tblsearch` |
 | Selection | `entsel`, `nentsel`, `handent` |
 | Other | `wcmatch`, `*error*`, `load`, `read`, `eval`, `logand`, `logior`, `lsh`, `angtos`, `prompt`, `alert`, `findfile`, `ver` |
@@ -239,7 +239,16 @@ project exists for, and `CLAUDE.md` names solid file I/O in its own scope.
    `(command "LINE" (polar p a d))` silently mixing two frames — see
    `geom_subrs.hpp`. `osnap` searches the whole drawing rather than an aperture,
    since a script has neither a screen nor a zoom. `trans` and `textbox` remain.
-2. **File I/O.** Named in the project's own scope statement.
+2. ~~**File I/O.**~~ **Built.** `open`, `close`, `read-line`, `write-line`,
+   `read-char`, `write-char` and `findfile`. Descriptors are `Type::File`, whose
+   slot in the value union had been waiting since the reader was written. Paths
+   get the same `~` expansion the file commands give, so a script and the SAVE
+   prompt agree about what `~/drawings/x.dxf` means.
+
+   **Still missing for text handling:** there is no way to split a string, so a
+   line of `"30.0 40.0"` cannot become two numbers without `read`. That makes
+   `read` — parsing a string into a value — the next thing worth adding, and it
+   is small.
 3. **The `get*` family with `initget`.** See "Interactive AutoLISP input is not
    implemented" below, which explains why bare `(ssget)` refuses rather than
    returning an empty set.

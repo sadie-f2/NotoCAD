@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <iosfwd>
 #include <string>
 #include <string_view>
@@ -94,6 +95,11 @@ public:
     // Installs the builtin and special-form names into ctx's symbol table.
     explicit Interp(Context& ctx);
 
+    // Closes anything a script left open. A script that ends without closing
+    // its output has still written it, and losing the tail to an unflushed
+    // buffer would be the worst kind of quiet.
+    ~Interp();
+
     Interp(const Interp&) = delete;
     Interp& operator=(const Interp&) = delete;
 
@@ -131,6 +137,27 @@ public:
     SelectionSet* selection_set(std::int32_t index);
     const SelectionSet* selection_set(std::int32_t index) const;
     void clear_selection_sets() { ssets_.clear(); }
+
+    // Open files, on the same terms and for the same reason: a FILE value is an
+    // index into this table, so passing a descriptor between variables shares
+    // one open file rather than duplicating it.
+    //
+    // INDICES ARE NEVER REUSED. A closed slot keeps its place with a null
+    // handle, so a descriptor held past its (close ...) reports "not open"
+    // rather than silently reading whatever was opened next.
+    struct OpenFile {
+        std::FILE* fp{nullptr};
+        bool writable{false};
+    };
+
+    std::int32_t new_file(std::FILE* fp, bool writable);
+    OpenFile* open_file(std::int32_t index);
+    bool close_file(std::int32_t index);
+
+    // Every file still open. Called when the interpreter is torn down, because
+    // a script that ends without closing its output has still written it, and
+    // losing the tail to an unflushed buffer would be the worst kind of quiet.
+    void close_all_files();
 
     const EvalError& error() const { return error_; }
     void clear_error() { error_ = EvalError{}; }
@@ -178,6 +205,7 @@ private:
     Database* db_{nullptr};
     CommandEngine* engine_{nullptr};
     std::vector<SelectionSet> ssets_;
+    std::vector<OpenFile> files_;
     EvalError error_{};
     std::ostream* out_{nullptr};
 

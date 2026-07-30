@@ -442,6 +442,38 @@ bool Interp::eval_string(std::string_view source, Value& out) {
     return true;
 }
 
+Interp::~Interp() { close_all_files(); }
+
+std::int32_t Interp::new_file(std::FILE* fp, bool writable) {
+    files_.push_back(OpenFile{fp, writable});
+    return static_cast<std::int32_t>(files_.size() - 1);
+}
+
+Interp::OpenFile* Interp::open_file(std::int32_t index) {
+    if (index < 0 || static_cast<std::size_t>(index) >= files_.size()) return nullptr;
+    OpenFile* f = &files_[static_cast<std::size_t>(index)];
+    return f->fp == nullptr ? nullptr : f;
+}
+
+bool Interp::close_file(std::int32_t index) {
+    OpenFile* f = open_file(index);
+    if (f == nullptr) return false;
+    std::fclose(f->fp);
+    // The slot stays, emptied. Reusing it would let a descriptor held past its
+    // close silently address whatever was opened next.
+    f->fp = nullptr;
+    return true;
+}
+
+void Interp::close_all_files() {
+    for (OpenFile& f : files_) {
+        if (f.fp != nullptr) {
+            std::fclose(f.fp);
+            f.fp = nullptr;
+        }
+    }
+}
+
 std::int32_t Interp::new_selection_set(SelectionSet set) {
     ssets_.push_back(std::move(set));
     return static_cast<std::int32_t>(ssets_.size() - 1);

@@ -12,6 +12,7 @@ add_library(noto_lisp STATIC
   sysvar_subrs.cpp
   file_subrs.cpp
   geom_subrs.cpp
+  io_subrs.cpp
   command_subr.cpp
   command_input.cpp
 )
