@@ -7,6 +7,8 @@
 #include <QKeyEvent>
 
 #include "command_line_widget.hpp"
+
+#include <QShortcut>
 #include "sample_drawing.hpp"
 #include "viewport_widget.hpp"
 
@@ -59,6 +61,19 @@ MainWindow::MainWindow(QWidget* parent)
     splitter->setSizes({600, 150});
     setCentralWidget(splitter);
 
+    // Text size, on the platform's own zoom shortcuts. QKeySequence resolves
+    // these per platform -- Ctrl+= and Ctrl+- on Linux and Windows, Cmd on
+    // macOS -- so the binding is right on the Mac without a second code path.
+    //
+    // ApplicationShortcut, not WindowShortcut: the viewport takes every
+    // keystroke it can so that typing anywhere reaches the command line, and a
+    // window-scoped shortcut would be swallowed by that same rule.
+    add_zoom_shortcut(QKeySequence::ZoomIn, 1);
+    add_zoom_shortcut(QKeySequence::ZoomOut, -1);
+    // QKeySequence::ZoomIn is Ctrl+Plus, which needs Shift on most layouts.
+    // Ctrl+= is what people actually press, and every browser accepts both.
+    add_zoom_shortcut(QKeySequence(Qt::CTRL | Qt::Key_Equal), 1);
+
     connect(command_line_, &CommandLineWidget::lineEntered, this, &MainWindow::on_line_entered);
     connect(command_line_, &CommandLineWidget::cancelRequested, this,
             &MainWindow::on_cancel_requested);
@@ -67,7 +82,8 @@ MainWindow::MainWindow(QWidget* parent)
 
     command_line_->append_output(
         "NotoCAD -- type ? for commands, ( for AutoLISP, QUIT to exit.\n"
-        "Middle-drag pans, shift+middle orbits, wheel zooms, Home is extents.\n");
+        "Middle-drag pans, shift+middle orbits, wheel zooms, Home is extents.\n"
+        "Ctrl +/- resizes this text (Cmd on macOS).\n");
     refresh_prompt();
     command_line_->focus_input();
 
@@ -173,6 +189,16 @@ void MainWindow::on_cancel_requested() {
     refresh_prompt();
     view_->update();
     command_line_->focus_input();
+}
+
+void MainWindow::add_zoom_shortcut(const QKeySequence& keys, int delta) {
+    auto* sc = new QShortcut(keys, this);
+    sc->setContext(Qt::ApplicationShortcut);
+    connect(sc, &QShortcut::activated, this, [this, delta]() {
+        command_line_->step_font_size(delta);
+        command_line_->append_output(
+            QStringLiteral("Command line text size %1\n").arg(command_line_->font_points()));
+    });
 }
 
 }  // namespace noto

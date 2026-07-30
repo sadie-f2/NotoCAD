@@ -6,6 +6,8 @@
 #include <QColor>
 #include <QEvent>
 #include <QFontDatabase>
+
+#include <algorithm>
 #include <QSizePolicy>
 #include <QHBoxLayout>
 #include <QCoreApplication>
@@ -34,10 +36,21 @@ const QColor kEchoText(150, 150, 160);
 // tight loop cannot grow the widget without limit.
 constexpr int kMaxScrollbackLines = 2000;
 
+// A font may report a pixel size rather than a point size, in which case
+// pointSize() is -1 and there is nothing to step from.
+constexpr int kFallbackFontPoints = 10;
+
+// Wide enough to cover an unscaled 4K panel at one end and a projector at the
+// other. Clamped rather than unbounded: a zero or negative size is not a small
+// font, it is an invisible one.
+constexpr int kMinFontPoints = 5;
+constexpr int kMaxFontPoints = 48;
+
 }  // namespace
 
 CommandLineWidget::CommandLineWidget(QWidget* parent) : QWidget(parent) {
     const QFont mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    font_points_ = mono.pointSize() > 0 ? mono.pointSize() : kFallbackFontPoints;
 
     QPalette dark;
     dark.setColor(QPalette::Base, kPanelBackground);
@@ -189,6 +202,22 @@ bool CommandLineWidget::eventFilter(QObject* watched, QEvent* event) {
             break;
     }
     return QWidget::eventFilter(watched, event);
+}
+
+void CommandLineWidget::set_font_points(int points) {
+    const int clamped = std::clamp(points, kMinFontPoints, kMaxFontPoints);
+    if (clamped == font_points_ && history_ != nullptr && history_->font().pointSize() == clamped) {
+        return;
+    }
+    font_points_ = clamped;
+
+    // All three together. They are read as one panel, so a transcript in one
+    // size above an input line in another is worse than either size alone.
+    QFont f = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    f.setPointSize(font_points_);
+    history_->setFont(f);
+    prompt_->setFont(f);
+    input_->setFont(f);
 }
 
 }  // namespace noto

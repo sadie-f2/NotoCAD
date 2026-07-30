@@ -14,6 +14,7 @@
 #include "noto/lisp/eval.hpp"
 #include "prompt.hpp"
 
+#include <QKeySequence>
 #include <QMainWindow>
 
 #include <memory>
@@ -49,6 +50,10 @@ protected:
     bool routing_key_{false};
 
 private:
+    // Binds one key sequence to a text-size step. Separate so the three
+    // bindings cannot drift apart.
+    void add_zoom_shortcut(const QKeySequence& keys, int delta);
+
     void refresh_prompt();
 
     // Routes PromptSession output into the command line widget.

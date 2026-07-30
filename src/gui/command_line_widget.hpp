@@ -50,6 +50,16 @@ public:
     void focus_input();
     bool input_has_focus() const;
 
+    // Text size, in points, for the transcript, the prompt and the input --
+    // they share one size because they are read as one thing.
+    //
+    // Adjustable at run time because a high-resolution display driven WITHOUT
+    // desktop scaling makes the system's default fixed font unreadably small,
+    // and that is a per-machine fact the application cannot guess.
+    void set_font_points(int points);
+    int font_points() const { return font_points_; }
+    void step_font_size(int delta) { set_font_points(font_points_ + delta); }
+
 signals:
     void lineEntered(const QString& line);
 
@@ -62,12 +72,15 @@ private slots:
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
+
 private:
     void append(const QString& text, const QColor& color);
 
     QPlainTextEdit* history_{nullptr};
     QLabel* prompt_{nullptr};
     QLineEdit* input_{nullptr};
+
+    int font_points_{0};  // 0 until the system default is read in the ctor
 
     QStringList recall_;
     qsizetype recall_pos_{0};  // qsizetype, not int: it indexes recall_
