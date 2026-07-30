@@ -11,6 +11,7 @@
 #include "entity_subrs.hpp"
 #include "command_subr.hpp"
 #include "file_subrs.hpp"
+#include "geom_subrs.hpp"
 #include "sset_subrs.hpp"
 #include "sysvar_subrs.hpp"
 
@@ -819,6 +820,13 @@ constexpr SubrDef kSubrs[] = {
 
     // drawing file I/O -- implemented in file_subrs.cpp
     {"COMMAND", subr_command, 0, kNoMax},
+
+    // geometry helpers -- see geom_subrs.hpp on why these are world and not UCS
+    {"POLAR", subr_polar, 3, 3},
+    {"DISTANCE", subr_distance, 2, 2},
+    {"ANGLE", subr_angle, 2, 2},
+    {"INTERS", subr_inters, 4, 5},
+    {"OSNAP", subr_osnap, 2, 2},
     {"DXFOUT", subr_dxfout, 1, 1},
     {"QUIT", subr_quit, 0, 0},
     {"EXIT", subr_quit, 0, 0},

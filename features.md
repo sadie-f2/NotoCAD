@@ -179,6 +179,78 @@ file is not misleading by omission:
 
 ---
 
+## AutoLISP — what is implemented, and what classic scripts still need
+
+Measured, not estimated: **97 built-in functions and 13 special forms.**
+
+**The language is essentially complete. The library is about a third.** And the
+missing third contains the functions real scripts use most, which is why the
+headline number flatters it.
+
+### Present
+
+- **Control and binding** — `defun`, `setq`, `set`, `if`, `cond`, `while`,
+  `repeat`, `progn`, `lambda`, `foreach`, `and`, `or`, `not`, `quote`. Dynamic
+  scoping, as R12 has it.
+- **Lists** — `car`/`cdr` with ten `cxr` combinations, `cons`, `list`, `append`,
+  `length`, `nth`, `last`, `reverse`, `member`, `assoc`, `subst`, `apply`,
+  `mapcar`.
+- **Maths** — the full classic set, including `gcd`, `expt`, `rem`, `fix`,
+  `float`, the trig functions and `pi`.
+- **Strings** — `strcat`, `strlen`, `substr`, `strcase`, `chr`, `ascii`, `itoa`,
+  `atoi`, `atof`, `rtos`.
+- **Predicates and output** — `atom`, `listp`, `null`, `numberp`, `boundp`,
+  `type`, `eq`, `equal`, `zerop`, `minusp`, the comparisons, `princ`, `prin1`,
+  `print`, `terpri`.
+- **CAD** — `entmake`, `entget`, `entmod`, `entdel`, `entnext`, `entlast`; the
+  six selection-set functions; `getvar` and `setvar`; and `command`, which is the
+  one that matters and works properly across suspension.
+
+### Absent
+
+| Group | Missing |
+|---|---|
+| Geometry helpers | ~~`polar`, `distance`, `angle`, `inters`, `osnap`~~ **built** — `trans`, `textbox` remain |
+| User input | `getpoint`, `getdist`, `getangle`, `getcorner`, `getint`, `getreal`, `getstring`, `getkword`, `initget` |
+| File I/O | `open`, `close`, `read-line`, `write-line`, `read-char`, `write-char` |
+| Tables | `tblnext`, `tblsearch` |
+| Selection | `entsel`, `nentsel`, `handent` |
+| Other | `wcmatch`, `*error*`, `load`, `read`, `eval`, `logand`, `logior`, `lsh`, `angtos`, `prompt`, `alert`, `findfile`, `ver` |
+
+### Can a classic script run?
+
+Some. Anything that computes with lists and numbers and then builds geometry
+through `entmake` or `command` runs today, unmodified.
+
+Most cannot, and the reason is narrower than the table suggests. **`polar`,
+`distance` and `angle` appear in very nearly every drafting script ever
+written** — they are how a script says "a point 40 units at 30 degrees from
+there". Without them a script fails on its third line no matter what else is
+present. The second wall is `getpoint` and its family, which is any script that
+asks the user anything. The third is `open` and `read-line`, which matters here
+more than elsewhere because reading external analysis data is the workflow this
+project exists for, and `CLAUDE.md` names solid file I/O in its own scope.
+
+### Order worth doing them in
+
+1. ~~**The geometry helpers.**~~ **Built.** `polar`, `distance`, `angle`,
+   `inters` and `osnap`. They are world-coordinate rather than UCS, because this
+   layer has no UCS anywhere in it and doing them in UCS would have meant
+   `(command "LINE" (polar p a d))` silently mixing two frames — see
+   `geom_subrs.hpp`. `osnap` searches the whole drawing rather than an aperture,
+   since a script has neither a screen nor a zoom. `trans` and `textbox` remain.
+2. **File I/O.** Named in the project's own scope statement.
+3. **The `get*` family with `initget`.** See "Interactive AutoLISP input is not
+   implemented" below, which explains why bare `(ssget)` refuses rather than
+   returning an empty set.
+4. **`tblsearch`/`tblnext`, `entsel`, `handent`, `wcmatch`, `*error*`** — the
+   long tail that real scripts assume is there.
+
+Out of scope and staying there: `vl-*`, `vla-*` and `vlax-*` (Visual LISP), DCL
+dialogs, `menucmd`, `getfiled`.
+
+---
+
 # Moved from the roadmap
 
 These were recorded in `SF_todo.md` while it was the only planning document.

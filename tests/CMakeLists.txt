@@ -7,6 +7,7 @@ add_executable(noto_tests
   test_entities.cpp
   test_dxf.cpp
   test_lisp.cpp
+  test_lisp_geom.cpp
   test_eval.cpp
   test_entmake.cpp
   test_getvar.cpp
