@@ -13,6 +13,7 @@ add_library(noto_lisp STATIC
   file_subrs.cpp
   geom_subrs.cpp
   io_subrs.cpp
+  wildcard.cpp
   command_subr.cpp
   command_input.cpp
 )

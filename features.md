@@ -215,7 +215,7 @@ headline number flatters it.
 | File I/O | ~~`open`, `close`, `read-line`, `write-line`, `read-char`, `write-char`~~ **built**, plus `findfile` |
 | Tables | `tblnext`, `tblsearch` |
 | Selection | `entsel`, `nentsel`, `handent` |
-| Other | `wcmatch`, `*error*`, `load`, `eval`, `logand`, `logior`, `lsh`, `angtos`, `prompt`, `alert`, `ver` — ~~`read`~~ and ~~`findfile`~~ built |
+| Other | `*error*`, `load`, `eval`, `logand`, `logior`, `lsh`, `angtos`, `prompt`, `alert`, `ver` — ~~`read`~~, ~~`findfile`~~ and ~~`wcmatch`~~ built |
 
 ### Can a classic script run?
 

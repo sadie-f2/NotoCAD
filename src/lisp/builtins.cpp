@@ -14,6 +14,7 @@
 #include "file_subrs.hpp"
 #include "geom_subrs.hpp"
 #include "io_subrs.hpp"
+#include "wildcard.hpp"
 #include "sset_subrs.hpp"
 #include "sysvar_subrs.hpp"
 
@@ -729,6 +730,25 @@ bool subr_read(Interp& in, const Value* a, std::size_t, Value& out) {
     return true;
 }
 
+
+// (wcmatch "string" "pattern") -> T or nil. AutoCAD's wildcards, which are
+// neither shell globbing nor a regular expression -- see wildcard.hpp for the
+// dialect and for the two metacharacters people get wrong.
+//
+// Case-SENSITIVE here, unlike the same matcher inside an ssget filter. Both are
+// AutoCAD's behaviour: a filter matching a layer name folds case, a standalone
+// wcmatch does not.
+bool subr_wcmatch(Interp& in, const Value* a, std::size_t, Value& out) {
+    if (a[0].type != Type::Str) {
+        return in.fail(EvalStatus::BadArgumentType, "wcmatch: not a string: " + prin1(a[0]));
+    }
+    if (a[1].type != Type::Str) {
+        return in.fail(EvalStatus::BadArgumentType, "wcmatch: not a pattern: " + prin1(a[1]));
+    }
+    out = wildcard_match(a[0].str->view(), a[1].str->view(), false) ? make_true() : make_nil();
+    return true;
+}
+
 bool subr_princ(Interp& in, const Value* a, std::size_t n, Value& out) {
     out = n == 0 ? make_nil() : a[0];
     if (n > 0) in.output() << princ(a[0]);
@@ -832,6 +852,7 @@ constexpr SubrDef kSubrs[] = {
     {"SUBSTR", subr_substr, 2, 3},
     {"STRCASE", subr_strcase, 1, 2},
     {"READ", subr_read, 1, 1},
+    {"WCMATCH", subr_wcmatch, 2, 2},
     {"ITOA", subr_itoa, 1, 1},
     {"ATOI", subr_atoi, 1, 1},
     {"ATOF", subr_atof, 1, 1},

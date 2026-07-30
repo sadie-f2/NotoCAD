@@ -9,9 +9,12 @@
 // subr_ssget -- and it is the half this project's own workflow needs, since
 // generating geometry from analysis data never involves a cursor.
 //
-// Modes: "X" everything, "P" previous, "L" last, "W" window, "C" crossing.
-// R12 also has "F" fence and filter lists on "X"; neither is here yet.
+// Modes: "X" everything, "P" previous, "L" last, "W" window, "C" crossing,
+// each optionally filtered. R12 also has "F" fence, which is not here yet.
 #include "sset_subrs.hpp"
+
+#include "entity_subrs.hpp"
+#include "wildcard.hpp"
 
 #include "noto/command.hpp"
 #include "noto/database.hpp"
@@ -137,6 +140,74 @@ SelectionRegion region_from(const Vec3& a, const Vec3& b) {
 
 // (ssget) with no arguments would prompt the user, which needs the interpreter
 // to ask a question mid-evaluation -- see SF_todo.md. Every mode here builds a
+
+// --- filter lists -----------------------------------------------------------
+//
+// ((0 . "LINE") (8 . "WALLS")) -- every pair must match, which is R12's rule
+// and the reason there is no explicit AND. String values carry wildcards and
+// comma alternatives, so (0 . "LINE,ARC") and (8 . "WALL*") both work.
+//
+// Matching is done against the alist ENTGET WOULD RETURN, not against the
+// entity directly. It costs a little per candidate and it buys the one property
+// that matters: a filter cannot select something entget then describes
+// differently, which would have a script acting on an entity it never saw.
+//
+// R13's -4 operators -- "<OR", ">=", "<AND" and the rest -- are not here. They
+// are a small language of their own and R12 has none of them.
+namespace {
+
+bool filter_value_matches(const Value& want, const Value& got) {
+    if (want.type == Type::Str) {
+        if (got.type != Type::Str) return false;
+        // Case-folded, because an ssget filter is: (8 . "walls") finds layer
+        // WALLS. Standalone wcmatch is not, and both behaviours are AutoCAD's.
+        return wildcard_match(got.str->view(), want.str->view(), true);
+    }
+    if (is_number(want)) {
+        if (!is_number(got)) return false;
+        return as_double(want) == as_double(got);
+    }
+    return equal(want, got);
+}
+
+// True when the entity satisfies every pair. A code appearing more than once in
+// the alist -- a polyline's vertices, a spline's knots -- matches if ANY of them
+// does, which is what "has a 10 group equal to this" has to mean.
+bool entity_matches_filter(Context& ctx, const Database& db, const Entity& e,
+                           const Value& filter) {
+    const Value alist = entity_to_alist(ctx, db, e);
+
+    for (Value f = filter; is_cons(f); f = cdr(f)) {
+        const Value pair = car(f);
+        if (!is_cons(pair)) return false;
+
+        const Value code = car(pair);
+        const Value want = cdr(pair);
+        if (!is_number(code)) return false;
+        const double wanted_code = as_double(code);
+
+        bool ok = false;
+        for (Value g = alist; is_cons(g); g = cdr(g)) {
+            const Value entry = car(g);
+            if (!is_cons(entry) || !is_number(car(entry))) continue;
+            if (as_double(car(entry)) != wanted_code) continue;
+            if (filter_value_matches(want, cdr(entry))) {
+                ok = true;
+                break;
+            }
+        }
+        if (!ok) return false;
+    }
+    return true;
+}
+
+// A filter is a list whose first element is a dotted pair. That is how it is
+// told apart from a point, which is a list of numbers -- and points are the
+// only other list ssget takes.
+bool looks_like_filter(const Value& v) { return is_cons(v) && is_cons(car(v)); }
+
+}  // namespace
+
 // set from what it was given instead.
 bool subr_ssget(Interp& in, const Value* a, std::size_t argc, Value& out) {
     Database* db = require_db(in, "ssget");
@@ -156,6 +227,10 @@ bool subr_ssget(Interp& in, const Value* a, std::size_t argc, Value& out) {
     const std::string mode = upcase(a[0].str->view());
     SelectionSet set;
     const DrawContext ctx{};
+
+    // The filter is always last, whatever the mode took before it.
+    Value filter = make_nil();
+    if (argc >= 2 && looks_like_filter(a[argc - 1])) filter = a[argc - 1];
 
     if (mode == "X") {
         for (const Handle h : db->order()) {
@@ -191,6 +266,15 @@ bool subr_ssget(Interp& in, const Value* a, std::size_t argc, Value& out) {
     } else {
         in.fail(EvalStatus::BadArgumentType, "ssget: unknown mode \"" + mode + "\"");
         return false;
+    }
+
+    if (!is_nil(filter)) {
+        SelectionSet kept;
+        for (const Handle h : set.handles()) {
+            const Entity* e = db->get(h);
+            if (e != nullptr && entity_matches_filter(in.ctx(), *db, *e, filter)) kept.add(h);
+        }
+        set = std::move(kept);
     }
 
     // R12 returns nil for an empty selection, and LISP tests for it.

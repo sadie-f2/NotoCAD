@@ -362,7 +362,7 @@ Value pair_point(Context& ctx, std::int32_t code, const Vec3& p) {
     return ctx.cons(make_int(code), ctx.list(coords, 3));
 }
 
-Value entity_to_alist(Context& ctx, const Database& db, const Entity& ent) {
+Value build_entity_alist(Context& ctx, const Database& db, const Entity& ent) {
     std::vector<Value> items;
     const EntityProps& props = ent.props();
 
@@ -500,6 +500,14 @@ bool require_ename(Interp& in, const char* who, const Value& v, Handle& out) {
 }
 
 }  // namespace
+
+// Public because ssget's filters test against exactly what entget returns --
+// see entity_subrs.hpp. A thin forward rather than moving the builder out of
+// the anonymous namespace, which would have meant relocating it past every
+// helper it calls.
+Value entity_to_alist(Context& ctx, const Database& db, const Entity& ent) {
+    return build_entity_alist(ctx, db, ent);
+}
 
 // --- the builtins -----------------------------------------------------------
 
