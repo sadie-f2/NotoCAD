@@ -27,7 +27,8 @@ add_library(noto_gui STATIC
   main_window.cpp
 )
 
-target_include_directories(noto_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(noto_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${NOTO_VERSION_DIR})
+add_dependencies(noto_gui noto_version)
 # noto_app carries PromptSession: the GUI command line and the ncad terminal
 # prompt run the same code, which is the only way they stay consistent.
 target_link_libraries(noto_gui PUBLIC noto_core noto_app noto_sample Qt6::Widgets)

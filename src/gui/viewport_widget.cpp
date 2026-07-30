@@ -8,6 +8,7 @@
 #include "noto/highlight.hpp"
 #include "noto/pick.hpp"
 #include "noto/scene.hpp"
+#include "noto/version.hpp"
 #include "noto/sysvar.hpp"
 #include "qpainter_renderer.hpp"
 
@@ -27,6 +28,18 @@ const QColor kRubberBand(180, 180, 190);
 const QColor kCrosshair(90, 90, 100);
 
 const QColor kOsnapMarker(250, 200, 60);
+
+// Deliberately dim. It is a nameplate, not a notification: legible when looked
+// at and invisible when working.
+const QColor kNameplate(105, 105, 118);
+
+// Sadie's: a tenth of the viewport width. Everything else follows from it.
+constexpr double kNameplateWidthFraction = 0.10;
+constexpr double kNameplateMarginPx = 8.0;
+// Measured at one size and scaled, rather than searched for by trial.
+constexpr int kNameplateProbePx = 20;
+constexpr int kNameplateMinPx = 6;
+constexpr int kNameplateMaxPx = 48;
 
 // AutoCAD's axis colours, which are near enough universal now: X red, Y green,
 // Z blue. Dimmed from full saturation because full red on the dark background
@@ -608,6 +621,41 @@ void ViewportWidget::paintEvent(QPaintEvent*) {
     draw_ucs_icon(painter);
     draw_rubber_band(painter);
     draw_osnap_marker(painter);
+    draw_nameplate(painter);
+}
+
+void ViewportWidget::draw_nameplate(QPainter& painter) const {
+    const QString name = QStringLiteral("NotoCAD \u00A9");
+    const QString stamp =
+        QString::fromLatin1(kNotoVersion) + QChar(' ') + QString::fromLatin1(kNotoGitHash);
+
+    // Sized to a share of the viewport rather than to a point size, so it holds
+    // its proportions when the window is resized or the display changes scale.
+    const double target = static_cast<double>(width()) * kNameplateWidthFraction;
+    if (target < 1.0) return;
+
+    QFont font = painter.font();
+    font.setPixelSize(kNameplateProbePx);
+    const QFontMetricsF probe(font);
+    const double widest =
+        std::max(probe.horizontalAdvance(name), probe.horizontalAdvance(stamp));
+    if (widest <= 0.0) return;
+
+    const double scaled = kNameplateProbePx * target / widest;
+    font.setPixelSize(std::clamp(static_cast<int>(scaled), kNameplateMinPx, kNameplateMaxPx));
+    painter.setFont(font);
+
+    const QFontMetricsF fm(font);
+    const double right = static_cast<double>(width()) - kNameplateMarginPx;
+    double y = kNameplateMarginPx + fm.ascent();
+
+    painter.setPen(kNameplate);
+    for (const QString& line : {name, stamp}) {
+        // Right-aligned, so the block stays anchored to the corner rather than
+        // ragged against it.
+        painter.drawText(QPointF(right - fm.horizontalAdvance(line), y), line);
+        y += fm.height();
+    }
 }
 
 void ViewportWidget::mousePressEvent(QMouseEvent* event) {

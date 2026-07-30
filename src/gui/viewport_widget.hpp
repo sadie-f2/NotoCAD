@@ -129,6 +129,12 @@ private:
     // been drawn this way.
     void draw_osnap_marker(QPainter& painter) const;
 
+    // The corner nameplate. Painted rather than made a child widget, which is
+    // what makes it transparent to input: a painted thing cannot receive an
+    // event at all, so there is no flag to get wrong and nothing to sit in the
+    // way of a pick in that corner.
+    void draw_nameplate(QPainter& painter) const;
+
     // The UCS icon, honouring UCSICON's 0/1/2. Screen-space for the same
     // reason as the markers above: it is a fixed pixel size showing an
     // orientation, not geometry that lives in the drawing.

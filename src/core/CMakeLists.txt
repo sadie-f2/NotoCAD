@@ -37,7 +37,11 @@ add_library(noto_core STATIC
   input_text.cpp
 )
 
-target_include_directories(noto_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(noto_core PUBLIC ${PROJECT_SOURCE_DIR}/include ${NOTO_VERSION_DIR})
+# The generated version header. PUBLIC so ncad and the tests can name the build
+# they are, and so the command-count convention can be asserted rather than
+# merely written down.
+add_dependencies(noto_core noto_version)
 target_link_libraries(noto_core PRIVATE noto_flags)
 
 add_library(noto::core ALIAS noto_core)

@@ -17,6 +17,7 @@
 #include "test.hpp"
 
 #include "noto/commands.hpp"
+#include "noto/version.hpp"
 #include "noto/database.hpp"
 
 #include <set>
@@ -84,4 +85,21 @@ TEST_CASE("registry: the command count is what we think it is") {
 TEST_CASE("registry: an unknown name resolves to nothing rather than to something") {
     CHECK(!resolve_command_name("NOSUCHCOMMAND").ok());
     CHECK(make_command("NOSUCHCOMMAND") == nullptr);
+}
+
+TEST_CASE("registry: the version's patch number IS the command count") {
+    // Sadie's convention: 0.0.53 means the registry holds 53 commands, so the
+    // version says something a version usually does not -- how much of R12's
+    // surface is actually there.
+    //
+    // Asserted rather than documented, because a convention that lives only in
+    // a comment is one nobody remembers to honour. Raise BOTH numbers when a
+    // command is added: the literal above, and project(VERSION) in the root
+    // CMakeLists.
+    const std::string v = kNotoVersion;
+    const std::size_t last_dot = v.rfind('.');
+    REQUIRE(last_dot != std::string::npos);
+
+    const std::string patch = v.substr(last_dot + 1);
+    CHECK(patch == std::to_string(command_names().size()));
 }
