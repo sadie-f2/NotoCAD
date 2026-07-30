@@ -8,6 +8,11 @@ they can be revisited on purpose rather than drifted away from.
 Nothing here is scheduled. Several items are years out or may never happen. They
 are written down so that today's choices are made in view of them.
 
+**Sequencing, settled: ncad ships first.** Solids are a separate project — SNcad —
+and are not started until NotoCAD is released. Everything below about solids is
+therefore speculative by design, and no decision recorded here may be used to
+justify distorting the R12 program to accommodate a kernel it does not yet have.
+
 ## The thesis
 
 **A modern geometry kernel behind R12's input discipline.** That combination does
@@ -128,10 +133,14 @@ and hit-testing all continue to work against what is drawn.
    cached — which is `InFlight`'s discipline at a larger scale, and that pattern is
    already proven here.
 
-3. **Where fillets live in a CSG tree.** OCCT can fillet a shape, but a fillet is
-   not naturally a CSG node, and applying one to an evaluated result reintroduces
-   exactly the naming problem CSG was chosen to avoid. This is the sharpest unsolved
-   tension in the design.
+3. **Where fillets live in a CSG tree — resolved by STEP export, not by solving it.**
+   OCCT can fillet a shape, but a fillet is not naturally a CSG node, and applying
+   one to an evaluated result reintroduces exactly the naming problem CSG was chosen
+   to avoid. Sadie's answer: **write STEP and fillet downstream in SolidWorks.**
+   OCCT provides `STEPControl_Writer`, so the escape hatch arrives with the kernel at
+   no extra cost. Fillets therefore drop out of scope rather than being designed
+   around, and STEP export becomes a first-class requirement rather than a nicety —
+   it is what makes the omission acceptable.
 
 4. **What the solids UI is.** R12 had no solids, so there is no fidelity target to
    copy. This is where the project has to design rather than reconstruct.
