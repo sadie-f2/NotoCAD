@@ -139,26 +139,23 @@ void Text::stretch(const Vec3& delta, const GripIndex* indices, std::size_t coun
     }
 }
 
-void Text::draw(const DrawContext&, Renderer& r) const {
-    if (value_.empty() || height_ <= 0.0) return;
-
-    const Basis b = arbitrary_axis(props().normal);
-    const Vec3 along = (b.ax * std::cos(rotation_) + b.ay * std::sin(rotation_));
-    const Vec3 up = (b.ay * std::cos(rotation_) - b.ax * std::sin(rotation_));
+void draw_text_line(const std::string& text, const Vec3& origin, const Vec3& along,
+                    const Vec3& up, double height, double width_factor, double oblique,
+                    Renderer& r) {
+    if (text.empty() || height <= 0.0) return;
 
     const StrokeFont& font = StrokeFont::romans();
-    const Vec3 origin = baseline_origin();
 
     // Oblique leans the glyph by shearing x with y, which is what a slant is --
     // the baseline does not move, so obliqued text still sits on its line.
-    const double shear = std::tan(oblique_);
+    const double shear = std::tan(oblique);
 
     // Glyph coordinates arrive with the baseline at y = 0 and the cap height at
-    // y = 1, so `height_` scales them directly and TEXT's height means cap
-    // height, exactly as R12 says.
+    // y = 1, so `height` scales them directly and text height means cap height,
+    // exactly as R12 says.
     std::vector<Vec3> pts;
     double pen = 0.0;
-    for (const char ch : value_) {
+    for (const char ch : text) {
         const Glyph g = font.glyph(static_cast<unsigned char>(ch));
 
         for (std::uint32_t s = 0; s < g.stroke_count; ++s) {
@@ -169,8 +166,8 @@ void Text::draw(const DrawContext&, Renderer& r) const {
             pts.reserve(last - first);
             for (std::uint32_t k = first; k < last; ++k) {
                 const Vec3& p = g.points[k];
-                const double x = (pen + p.x + p.y * shear) * width_factor_ * height_;
-                pts.push_back(origin + along * x + up * (p.y * height_));
+                const double x = (pen + p.x + p.y * shear) * width_factor * height;
+                pts.push_back(origin + along * x + up * (p.y * height));
             }
 
             // A one-point stroke is a dot in the source data and nothing on
@@ -181,6 +178,16 @@ void Text::draw(const DrawContext&, Renderer& r) const {
 
         pen += g.advance;
     }
+}
+
+void Text::draw(const DrawContext&, Renderer& r) const {
+    if (value_.empty() || height_ <= 0.0) return;
+
+    const Basis b = arbitrary_axis(props().normal);
+    const Vec3 along = (b.ax * std::cos(rotation_) + b.ay * std::sin(rotation_));
+    const Vec3 up = (b.ay * std::cos(rotation_) - b.ax * std::sin(rotation_));
+
+    draw_text_line(value_, baseline_origin(), along, up, height_, width_factor_, oblique_, r);
 }
 
 void Text::dxf_write(DxfWriter& w) const {

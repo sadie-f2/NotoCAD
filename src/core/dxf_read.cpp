@@ -283,6 +283,40 @@ EntityPtr Reader::build(const EntityGroups& g, GroupStream& in, int& pending_cod
         return e;
     }
 
+    if (g.name == "MTEXT") {
+        // Text over 250 characters is SPLIT across repeated group 3 chunks with
+        // the tail in group 1. Reading only group 1 silently truncates every
+        // long paragraph, which is the kind of loss that looks like the file
+        // was wrong rather than the reader.
+        std::string text;
+        for (const DxfGroup& x : g.groups) {
+            if (x.code == 3) text += x.value;
+        }
+        text += g.text(1);
+
+        auto e = std::make_unique<MText>(g.point(10), std::move(text), g.real(40, 1.0),
+                                         g.real(41, 0.0));
+        apply_common(*e, g);
+        e->set_position(ecs_to_world(e->props().normal).transform_point(g.point(10)));
+
+        const int attach = to_int(g.text(71, "1"));
+        if (attach >= 1 && attach <= 9) e->set_attach(static_cast<MTextAttach>(attach));
+        if (g.has(44)) e->set_line_spacing(g.real(44, 1.0));
+
+        // Rotation is group 50, or an X-axis direction vector in group 11 --
+        // the same angle said two ways, and a file may use either.
+        if (g.has(50)) {
+            e->set_rotation(g.real(50) * kDegToRad);
+        } else if (g.has(11)) {
+            const Vec3 dir = g.point(11);
+            if (!is_zero(dir)) {
+                const Basis b = arbitrary_axis(e->props().normal);
+                e->set_rotation(std::atan2(dot(dir, b.ay), dot(dir, b.ax)));
+            }
+        }
+        return e;
+    }
+
     if (g.name == "LWPOLYLINE") {
         auto e = std::make_unique<Polyline>();
         apply_common(*e, g);

@@ -432,6 +432,41 @@ because all three snaps reduce to "find the roots of a scalar function of the
 parameter" and writing that three times is how three tolerances end up
 disagreeing.
 
+## MTEXT — built, and why it is a database entity rather than a conversion
+
+There were three honest answers and they trade differently. Leave it Proxy:
+perfect round trip, invisible on screen. Convert to TEXT lines on import:
+visible, but the paragraph is destroyed and can never be written back as one. Or
+hold it exactly and degrade on write, which is what ELLIPSE and SPLINE already
+do. Sadie took the third, and the deciding argument was that she had just been
+bitten by exactly the second failure on ellipses.
+
+**The raw string is what is held, inline codes and all.** Stripping them at read
+time is the cheap option and it destroys the entity: a file opened and saved
+would lose its formatting for good. Formatting is discarded at LAYOUT time
+instead, where it costs nothing and is recomputed on demand.
+
+**It could not have been built before the Hershey font.** Word wrap needs exact
+advance widths, and `StrokeFont::width()` is what decides where a line breaks.
+Before TEXT had a font there was no way to lay a paragraph out at all.
+
+What the layout does with the codes: `\P` becomes a line, `\S1^2;` becomes the
+flat `1/2` because there is no way to stack strokes at one height and deleting it
+would silently lose a dimension, escapes become their literal characters, and
+everything else is *consumed with its argument*. That last part is the one that
+matters — a half-parsed `\H2.5x;` leaks "2.5x" into the visible text, which is the
+failure that looks broken rather than merely plain.
+
+Also settled here: `draw_text_line()` in `font.hpp` is shared by TEXT and MTEXT.
+Two copies of glyph placement is how the two would come to disagree about what a
+width factor means, and MTEXT's whole degrade rests on its layout matching what a
+run of TEXT entities would draw.
+
+**Known limits, none of them urgent.** One font at one height, so a font switch
+or a height change inside a paragraph is discarded rather than honoured. Line
+spacing is the 3-on-5 default scaled by group 44; the exact-distance mode (group
+73 = 2) is not distinguished. Columns are ignored entirely.
+
 ## TANGENT to a spline is approximate — known, accepted, not yet worth fixing
 
 Sadie's call: it makes mistakes, and at the frequency she will use it that is
@@ -557,11 +592,11 @@ Three details worth not rediscovering:
   returns the first match, which is right for every R12 entity and wrong for
   every vertex list and knot vector.
 
-Still Proxy on purpose: MTEXT, HATCH, DIMENSION, LEADER, TABLE, IMAGE and the
-ACIS entities. Each needs a decision about what it degrades *to*, and guessing is
-worse than an honest passthrough. **MTEXT is the one worth doing next** now that
-TEXT renders -- it is common, and the question is only how much of its inline
-formatting to discard.
+**MTEXT is now a real entity too**, on the same terms. See its own section below.
+
+Still Proxy on purpose: HATCH, DIMENSION, LEADER, TABLE, IMAGE and the ACIS
+entities. Each needs a decision about what it degrades *to*, and guessing is
+worse than an honest passthrough.
 
 Not looked at yet: **binary DXF**, which modern AutoCAD can write and this reader
 would garble rather than refuse -- it should detect the sentinel and say so. And

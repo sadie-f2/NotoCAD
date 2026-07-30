@@ -54,6 +54,12 @@ enum class EntityType : std::uint8_t {
     Spline,
     Polyline,
     Text,
+    // Also not an R12 entity. AC1009 has TEXT only -- one line per entity, no
+    // wrapping, no inline formatting -- so a modern drawing's annotation, which
+    // is nearly all MTEXT, had nowhere to go but Proxy and rendered as nothing.
+    // Held exactly here and degraded to a run of TEXT records on DXF write, the
+    // same bargain Ellipse and Spline take. See entities.hpp.
+    MText,
     Point,
     Solid,
     Face3d,

@@ -13,6 +13,7 @@ add_library(noto_core STATIC
   spline.cpp
   faces.cpp
   text.cpp
+  mtext.cpp
   font_hershey.cpp
   proxy.cpp
   insert.cpp

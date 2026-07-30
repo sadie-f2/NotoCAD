@@ -209,6 +209,14 @@ is embedded in the binary so there is no runtime data path. An SHX parser, which
 would let a drawing use the user's own AutoCAD fonts, sits behind the same interface
 later — the same layering as DXF-first with DWG optional.
 
+**MTEXT is held exactly and degrades to a run of TEXT records.** AC1009 has TEXT
+only — one line per entity, no wrapping, no inline formatting — so a modern
+drawing's annotation, which is nearly all MTEXT, used to arrive as Proxy and draw
+as nothing. The raw string including its inline codes is what the entity holds;
+the formatting is discarded at layout time, not at read time, so opening and
+saving a file cannot quietly destroy it. Wrapping uses the font's real advance
+widths, which is why this could not exist before TEXT had a font.
+
 **Dimensioning is deferred, and separately.** Not built at all; R12's are
 non-associative and are blocks, so they cost nothing to defer. It is on the roadmap
 rather than out of scope, and TEXT no longer blocks it — but see MEASUREGEOM, which

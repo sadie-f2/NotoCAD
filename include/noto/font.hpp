@@ -93,6 +93,19 @@ private:
     double descender_{0.0};
 };
 
+class Renderer;
+
+// Emits one line of text as world-space polylines through `r`.
+//
+// Shared by TEXT and MTEXT rather than written twice, because two copies of the
+// glyph placement is how the two would come to disagree about what oblique or a
+// width factor means -- and MTEXT's whole degrade rests on its layout matching
+// what a run of TEXT entities would draw.
+//
+// `origin` is the baseline start, `along` and `up` the line's own axes.
+void draw_text_line(const std::string& text, const Vec3& origin, const Vec3& along, const Vec3& up,
+                    double height, double width_factor, double oblique, Renderer& r);
+
 // The first character the tables cover. How many follow is the font's business,
 // not a constant here -- rowmans holds 96, and a different face may not.
 inline constexpr unsigned char kFontFirstChar = 32;

@@ -506,6 +506,111 @@ enum class TextVAlign : std::uint8_t {
 // Until a font arrives, draw() emits a box of the right height and approximate
 // width. That is honest about what is known -- position, height, rotation and
 // extent -- and wrong about nothing, where a guess at letterforms would be.
+// Where an MTEXT's insertion point sits relative to the block of text. DXF
+// group 71, and the numbering is the format's own.
+enum class MTextAttach : std::uint8_t {
+    TopLeft = 1,
+    TopCenter = 2,
+    TopRight = 3,
+    MiddleLeft = 4,
+    MiddleCenter = 5,
+    MiddleRight = 6,
+    BottomLeft = 7,
+    BottomCenter = 8,
+    BottomRight = 9,
+};
+
+// MTEXT -- a paragraph, and the third deliberate divergence from R12's entity
+// set after ELLIPSE and SPLINE.
+//
+// AC1009 has TEXT only: one line per entity, no wrapping, no inline formatting.
+// Modern drawings put nearly all of their annotation in MTEXT, so before this
+// existed a 2018 file's notes and callouts arrived as Proxy and drew as
+// nothing. Held exactly here and degraded to a run of TEXT records on the way
+// out, which is the same bargain the other two take.
+//
+// WHAT IS HELD EXACTLY is the raw string, inline codes and all. Stripping them
+// at read time would be the cheap option and it destroys the entity: a file
+// opened and saved would lose its formatting permanently, which is the round
+// trip Sadie was bitten by on ellipses. Formatting is discarded at LAYOUT time
+// instead, where it costs nothing and is recomputed on demand.
+//
+// The wrap needs exact advance widths, so this could not have been built before
+// the Hershey font landed -- StrokeFont::width() is what decides where a line
+// breaks.
+class MText final : public Entity {
+public:
+    MText() : Entity(EntityType::MText) {}
+    MText(const Vec3& at, std::string text, double height, double width = 0.0)
+        : Entity(EntityType::MText),
+          pos_(at),
+          text_(std::move(text)),
+          height_(height),
+          width_(width) {}
+
+    const Vec3& position() const { return pos_; }
+    void set_position(const Vec3& p) { pos_ = p; }
+
+    // The raw contents, inline codes included. See layout() for the readable
+    // form; this is what survives a round trip.
+    const std::string& text() const { return text_; }
+    void set_text(std::string t) { text_ = std::move(t); }
+
+    // Cap height of one line, DXF group 40 -- the same meaning Text::height has.
+    double height() const { return height_; }
+    void set_height(double h) { height_ = h; }
+
+    // Group 41: the width the text wraps inside. Zero means no wrapping, and
+    // then only explicit \P breaks divide the lines.
+    double reference_width() const { return width_; }
+    void set_reference_width(double w) { width_ = w; }
+
+    double rotation() const { return rotation_; }
+    void set_rotation(double r) { rotation_ = r; }
+
+    MTextAttach attach() const { return attach_; }
+    void set_attach(MTextAttach a) { attach_ = a; }
+
+    // Group 44, a multiplier on the default spacing. R12's TEXT has no
+    // equivalent, so the degrade computes positions from it rather than
+    // preserving it.
+    double line_spacing() const { return line_spacing_; }
+    void set_line_spacing(double f) { line_spacing_ = f; }
+
+    // Distance between successive baselines, in world units.
+    double line_height() const;
+
+    // The readable form: formatting removed, \P honoured, and wrapped to the
+    // reference width. draw(), bbox() and the DXF degrade ALL go through this,
+    // so what is shown, what is picked and what is written cannot disagree.
+    void layout(std::vector<std::string>& out) const;
+
+    // Width of the widest laid-out line, in world units.
+    double laid_out_width() const;
+
+    // World position of the first line's baseline start, with the attachment
+    // applied. Successive lines step down by line_height().
+    Vec3 baseline_origin() const;
+
+    EntityPtr clone() const override;
+    void transform(const Mat4& m) override;
+    BBox bbox() const override;
+    void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
+    void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
+
+private:
+    Vec3 pos_{};
+    std::string text_;
+    double height_{1.0};
+    double width_{0.0};
+    double rotation_{0.0};
+    double line_spacing_{1.0};
+    MTextAttach attach_{MTextAttach::TopLeft};
+};
+
 class Text final : public Entity {
 public:
     Text() : Entity(EntityType::Text) {}

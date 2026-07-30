@@ -422,6 +422,26 @@ Value entity_to_alist(Context& ctx, const Database& db, const Entity& ent) {
             }
             break;
         }
+        case EntityType::MText: {
+            // R13's codes, even though this writes to DXF as a run of TEXT
+            // records. AutoLISP is not DXF: an MTEXT in the database is an
+            // MTEXT, and handing LISP the degraded lines instead would make it
+            // impossible to read back what was made -- the same reasoning the
+            // ellipse case gives, and the same trap that was missed there.
+            const MText& mt = static_cast<const MText&>(ent);
+            const Mat4 to_ecs = world_to_ecs(props.normal);
+            items.push_back(pair_point(ctx, 10, to_ecs.transform_point(mt.position())));
+            items.push_back(pair_real(ctx, 40, mt.height()));
+            items.push_back(pair_real(ctx, 41, mt.reference_width()));
+            items.push_back(pair_int(ctx, 71, static_cast<std::int32_t>(mt.attach())));
+            items.push_back(pair_real(ctx, 44, mt.line_spacing()));
+            if (mt.rotation() != 0.0) items.push_back(pair_real(ctx, 50, mt.rotation()));
+            // The RAW string, codes and all -- what the entity holds. Handing
+            // over the laid-out lines would lose the formatting a caller may be
+            // about to hand straight back to entmake.
+            items.push_back(pair_str(ctx, 1, mt.text()));
+            break;
+        }
         case EntityType::Ellipse: {
             // R13's group codes, even though this writes to DXF as a polyline.
             // AutoLISP is not DXF: an ellipse in the database is an ellipse, and
