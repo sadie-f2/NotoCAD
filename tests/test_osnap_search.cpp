@@ -382,23 +382,33 @@ TEST_CASE("osnap search: PER and TAN measure from the base point, not the cursor
     CHECK_VEC(h.pos, 100.0, 0.0, 0.0, 1e-9);
 }
 
-TEST_CASE("osnap search: PER and TAN are not offered without a base point") {
+TEST_CASE("osnap search: without a base, PER is not offered and TAN is deferred") {
     Database db;
     db.add(std::make_unique<Line>(Vec3{100, -200, 0}, Vec3{100, 200, 0}));
     db.add(std::make_unique<Circle>(Vec3{100, 0, 0}, 50.0));
     const Viewport v = plan_800x600();
 
-    // At the first point of a command there is nothing to be perpendicular or
-    // tangent from yet, so neither is offered rather than being computed from
-    // some other point and landing somewhere arbitrary.
+    // At the first point of a command there is nothing to be perpendicular
+    // from, so PER is not offered at all rather than computed from some other
+    // point and landing somewhere arbitrary.
     OsnapQuery q;
-    q.mask = kOsnapPerpendicular | kOsnapTangent;
+    q.mask = kOsnapPerpendicular;
     q.aperture_px = 10.0;
     q.reference = Vec3{100, 150, 0};
     q.has_reference = true;
     q.has_from_point = false;
 
     CHECK(!osnap_search(db, v, at(100, 150), q).valid);
+
+    // TAN is different: it IS offered, but as a constraint rather than an
+    // answer. There is no tangent until the line has another end, so the hit is
+    // marked deferred and the command solves it later. Refusing instead would
+    // make tangent-from-here impossible, which is the common case.
+    q.mask = kOsnapTangent;
+    const OsnapHit tan = osnap_search(db, v, at(100, 150), q);
+    CHECK(tan.valid);
+    CHECK(tan.type == OsnapType::Tangent);
+    CHECK(tan.deferred);
 
     // NEAREST is unaffected: it is the one derived snap that genuinely wants
     // the cursor rather than the base point.
@@ -419,6 +429,9 @@ TEST_CASE("osnap search: TAN is measured from the base point too") {
     q.has_reference = true;
     q.from_point = Vec3{0, 100, 0};
     q.has_from_point = true;
+    // A real rubber-band origin, so the tangent is solved now rather than
+    // deferred -- the distinction the deferred case turns on.
+    q.from_point_is_base = true;
 
     std::vector<OsnapHit> all;
     osnap_candidates(db, v, at(50, 0), q, all);

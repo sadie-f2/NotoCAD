@@ -526,6 +526,8 @@ void ViewportWidget::update_osnap() {
     if (engine_->prompt().has_base) {
         q.from_point = engine_->prompt().base;
         q.has_from_point = true;
+        // A genuine rubber-band origin, so TANGENT can be solved now.
+        q.from_point_is_base = true;
     } else if (engine_->has_last_point()) {
         q.from_point = engine_->last_point();
         q.has_from_point = true;
@@ -663,8 +665,13 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event) {
         const Vec3 p = cursor_point();
 
         // The whole point of the phase: a click is just another way to answer a
-        // prompt, indistinguishable to the command from a typed coordinate.
-        engine_->supply(InputValue::of_point(p));
+        // prompt, indistinguishable to the command from a typed coordinate --
+        // except for a DEFERRED snap, which is a constraint rather than a
+        // location and has to reach the command as one. A command that does not
+        // handle it still gets a usable point.
+        engine_->supply(snap_.valid && snap_.deferred
+                            ? InputValue::of_deferred_snap(p, snap_.type, snap_.entity)
+                            : InputValue::of_point(p));
         update();
         emit pointPicked(asked, QStringLiteral("%1,%2,%3")
                                     .arg(p.x, 0, 'f', 4)

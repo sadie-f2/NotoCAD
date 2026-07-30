@@ -404,7 +404,23 @@ degrade and AutoLISP conversion. Four things were deliberately not done.
 
 **The derived object snaps are now BUILT** — NEAREST, PERPENDICULAR and TANGENT
 on SPLINE, ELLIPSE *and* POLYLINE, which turned out to have the same hole. Only
-INT remains, and it is the structural one described immediately below.
+INT remains, and it is the structural one described immediately below. TANGENT to
+a spline is approximate; its limits are recorded in their own section above.
+
+**The deferred tangent is built too.** TANGENT as the FIRST point of a line was
+not merely unresolved, it was *wrong*: `osnap_search` fell back to LASTPOINT when
+there was no rubber-band base, so the tangent was computed against wherever the
+user last clicked and then froze there. `OsnapQuery::from_point_is_base` now
+separates a genuine base from that fallback; without one the hit is marked
+`deferred` and carries its entity, and `LineCommand` solves the constraint when
+the far end arrives. Preview solves it too, so the start slides along the curve
+as the cursor moves. Where the user pointed is kept, because it is the only
+information distinguishing the two tangents a curve offers.
+
+Not done: **tangent-to-tangent**, where both ends of the line are deferred. That
+is a different solve — a common tangent of two curves — rather than more of the
+same. **Deferred PERPENDICULAR** is the same shape and is not built either; PER
+without a base is still simply not offered.
 
 The three shared one cause: `osnap_derived.cpp` dispatched through `as_line()`
 and `as_circular()`, which answer for none of them, so all three snaps returned
@@ -415,6 +431,42 @@ ELLIPSE and SPLINE go through one bisection root-finder over the curve parameter
 because all three snaps reduce to "find the roots of a scalar function of the
 parameter" and writing that three times is how three tolerances end up
 disagreeing.
+
+## TANGENT to a spline is approximate — known, accepted, not yet worth fixing
+
+Sadie's call: it makes mistakes, and at the frequency she will use it that is
+fine for now. She will say when it is time. Recorded so the fix starts from what
+is actually wrong rather than from a rediscovery.
+
+The solver samples the parameter domain and bisects the sign changes of
+`dot(cross(C(u) - ref, C'(u)), n)`. Four ways that is not exact:
+
+1. **A root of even multiplicity is invisible to a sign change.** Where the
+   curve grazes tangency without crossing it — an inflection lining up with the
+   reference point — the function touches zero and comes back the same side, and
+   the scan steps straight over it. This is the most likely cause of a *missing*
+   answer.
+2. **Two roots inside one sample interval cancel.** The sample count is
+   `control_points * 8`, clamped to [64, 2048], which is a heuristic and not a
+   bound. A tight wiggle relative to the control polygon can hide a pair.
+3. **Only two are returned.** `kMaxTangents` is 2, which is exactly right for a
+   conic and arbitrary for a spline. The two nearest the reference win, so a
+   third that the user wanted is silently unavailable.
+4. **The non-planar case is not really defined.** The test uses the entity's
+   normal, which only means something for a planar spline. For a genuinely 3D
+   curve a tangent line through an arbitrary point usually does not exist at
+   all, and this will report the places where the chord happens to be parallel
+   to the tangent *as projected*, which is not the same thing. If splines start
+   being built out of plane, this is the part that is wrong rather than
+   imprecise.
+
+None of it affects ELLIPSE, whose tangent is closed form, or POLYLINE, whose
+arcs go through the exact circular solver.
+
+The honest fix for 1 and 2 is to bracket on the derivative as well as the value,
+or to subdivide against the control polygon's convex hull so the sample count is
+a bound rather than a guess. For 4 it is to decide what a 3D tangent snap should
+even mean before implementing one.
 
 **The ellipse tangent is closed form, not iterated.** The chord of contact — the
 polar line of the reference point — meets the ellipse exactly where the tangents

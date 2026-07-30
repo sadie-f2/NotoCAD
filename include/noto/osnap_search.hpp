@@ -68,6 +68,11 @@ struct OsnapHit {
 
     double distance_px{0.0};
     bool valid{false};
+
+    // The snap names a CONSTRAINT rather than a location: `pos` is only where
+    // the marker goes. A tangent picked with no other end yet is the case --
+    // see InputValue::of_deferred_snap. The command resolves it later.
+    bool deferred{false};
 };
 
 struct OsnapQuery {
@@ -103,6 +108,16 @@ struct OsnapQuery {
     // then. R12 defers them to a second pick, which is not modelled here.
     Vec3 from_point{};
     bool has_from_point{false};
+
+    // True when `from_point` is the rubber-band origin of the prompt actually
+    // in progress, rather than LASTPOINT standing in for one.
+    //
+    // This is the distinction a deferred tangent turns on. Resolving TANGENT
+    // against LASTPOINT is not an approximation, it is a wrong answer: the
+    // point has nothing to do with where the line being drawn will go, so the
+    // snap lands somewhere arbitrary and then stays there. Without a real base
+    // the tangent cannot be resolved at all and must be deferred.
+    bool from_point_is_base{false};
 };
 
 // A dense drawing can put hundreds of entities under one aperture, and the

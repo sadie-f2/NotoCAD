@@ -32,9 +32,24 @@ public:
 private:
     Prompt next_prompt() const;
 
+    // Where the first segment actually starts, once the far end is known. Same
+    // as `previous_` unless a deferred tangent is pending -- see below.
+    Vec3 resolved_start(CommandContext& ctx, const Vec3& toward) const;
+
     Vec3 first_{};
     Vec3 previous_{};
     bool have_first_{false};
+
+    // A TANGENT taken as the FIRST point cannot be resolved when it is picked:
+    // there is no other end yet, so there is no tangent. The entity and the
+    // place the user pointed are kept instead, and the start point is solved
+    // once the second point arrives. Preview solves it too, so the ghost slides
+    // along the curve as the far end moves -- which is the whole visible
+    // difference from the old behaviour.
+    Handle tangent_from_{kNullHandle};
+    Vec3 tangent_hint_{};
+    bool have_tangent_{false};
+
     std::vector<Vec3> vertices_;     // every point accepted so far
     std::vector<Handle> segments_;   // the entity for each segment, for Undo
 };

@@ -43,6 +43,7 @@ add_executable(noto_tests
   test_entities7.cpp
   test_font.cpp
   test_osnap_curves.cpp
+  test_deferred_tangent.cpp
   test_rotate3d.cpp
   test_render.cpp
   test_viewport.cpp

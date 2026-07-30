@@ -138,6 +138,19 @@ struct InputValue {
     // of_picked_entity.
     bool has_point{false};
 
+    // Provenance for a point that came from an object snap, and which the snap
+    // could NOT resolve on its own.
+    //
+    // TANGENT to the FIRST point of a line is the case: there is no tangent
+    // until the other end exists, so the snap can only record which entity was
+    // pointed at and where. The command holds that constraint and solves it
+    // once it has the far end -- which is what AutoCAD's deferred tangent does.
+    // `point` still carries a usable location, so a command that ignores all of
+    // this still behaves sensibly.
+    OsnapType snap_type{OsnapType::Endpoint};
+    Handle snap_entity{kNullHandle};
+    bool snap_deferred{false};
+
     static InputValue none();
     static InputValue cancel();
     static InputValue of_point(const Vec3& p);
@@ -156,6 +169,11 @@ struct InputValue {
     // neither of which has a location. Commands that do not care ignore both.
     static InputValue of_entity(Handle h);
     static InputValue of_picked_entity(Handle h, const Vec3& at);
+
+    // A point answer that also says which snap produced it and on what, for the
+    // deferred case above. `at` is where the marker was drawn, which is also
+    // how the command chooses between two tangents.
+    static InputValue of_deferred_snap(const Vec3& at, OsnapType type, Handle from);
 
     // The mask rides in `integer`. kOsnapNone is meaningful here -- it is NON,
     // "no snap for this pick" -- so the kind, not the value, says an override

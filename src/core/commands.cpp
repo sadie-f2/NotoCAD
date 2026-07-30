@@ -5,6 +5,7 @@
 
 #include "noto/curve_edit.hpp"
 #include "noto/intersect.hpp"
+#include "noto/osnap_derived.hpp"
 #include "noto/pick.hpp"
 #include "noto/scene.hpp"
 
@@ -228,21 +229,54 @@ Prompt LineCommand::next_prompt() const {
     return p;
 }
 
+Vec3 LineCommand::resolved_start(CommandContext& ctx, const Vec3& toward) const {
+    if (!have_tangent_) return previous_;
+
+    const Entity* e = ctx.db.get(tangent_from_);
+    if (e == nullptr) return previous_;
+
+    Vec3 pts[kMaxTangents];
+    const int n = tangent_points(*e, toward, pts);
+    // No tangent exists from there -- the far end is inside a circle, or past
+    // the end of an arc's sweep. Falling back to the point the user actually
+    // pointed at is better than refusing: the line is then not tangent, but it
+    // is where they asked, and moving the far end fixes it.
+    if (n == 0) return previous_;
+
+    // Two answers, one curve, and only the user knows which side they meant.
+    // Where they pointed is the whole of that information.
+    int best = 0;
+    for (int i = 1; i < n; ++i) {
+        if (length_sq(pts[i] - tangent_hint_) < length_sq(pts[best] - tangent_hint_)) best = i;
+    }
+    return pts[best];
+}
+
 bool LineCommand::preview(CommandContext& ctx, const InputValue& tentative, InFlight& out) {
     // Nothing to show until there is a point to draw from. The rubber band
     // already covers that case, and it covers it correctly: before the first
     // point there is no segment, only a cursor.
     if (!have_first_ || tentative.kind != InputKind::Point) return false;
-    if (is_zero(tentative.point - previous_)) return false;
 
-    out.ghosts.push_back(
-        with_current_props(ctx.db, std::make_unique<Line>(previous_, tentative.point)));
+    // Solved against the tentative far end, so a pending tangent slides along
+    // its curve while the cursor moves instead of sitting where it was picked.
+    const Vec3 from = resolved_start(ctx, tentative.point);
+    if (is_zero(tentative.point - from)) return false;
+
+    out.ghosts.push_back(with_current_props(ctx.db, std::make_unique<Line>(from, tentative.point)));
     return true;
 }
 
 Step LineCommand::next(CommandContext& ctx, const InputValue& value) {
     if (!have_first_) {
         if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+        if (value.snap_deferred && value.snap_type == OsnapType::Tangent) {
+            have_tangent_ = true;
+            tangent_from_ = value.snap_entity;
+            tangent_hint_ = value.point;
+        }
+
         first_ = previous_ = value.point;
         vertices_.push_back(value.point);
         have_first_ = true;
@@ -271,8 +305,19 @@ Step LineCommand::next(CommandContext& ctx, const InputValue& value) {
 
     if (value.kind != InputKind::Point) return Step::failed("a point is required");
 
+    // The far end is now known, so a pending tangent can finally be solved. It
+    // applies to the first segment only, and the resolved point replaces the
+    // provisional one everywhere -- including `first_`, or Close would come back
+    // to where the user pointed rather than to where the line actually starts.
+    const Vec3 from = resolved_start(ctx, value.point);
+    if (have_tangent_) {
+        first_ = from;
+        vertices_.front() = from;
+        have_tangent_ = false;
+    }
+
     segments_.push_back(
-        ctx.db.add(with_current_props(ctx.db, std::make_unique<Line>(previous_, value.point))));
+        ctx.db.add(with_current_props(ctx.db, std::make_unique<Line>(from, value.point))));
     vertices_.push_back(value.point);
     previous_ = value.point;
     return Step::ask(next_prompt());

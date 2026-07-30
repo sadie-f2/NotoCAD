@@ -93,6 +93,14 @@ InputValue InputValue::of_picked_entity(Handle h, const Vec3& at) {
     return v;
 }
 
+InputValue InputValue::of_deferred_snap(const Vec3& at, OsnapType type, Handle from) {
+    InputValue v = of_point(at);
+    v.snap_type = type;
+    v.snap_entity = from;
+    v.snap_deferred = true;
+    return v;
+}
+
 InputValue InputValue::of_osnap_override(OsnapMask mask) {
     InputValue v;
     v.kind = InputKind::OsnapOverride;

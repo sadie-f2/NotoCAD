@@ -92,6 +92,21 @@ void collect_derived(std::vector<OsnapHit>& out, const Candidate& c, const Viewp
         add_hit(out, vp, cursor, p, OsnapType::Nearest, c.handle, kNullHandle);
     }
 
+    // TANGENT with no rubber-band base is DEFERRED rather than answered.
+    //
+    // There is no tangent until the line has another end, so nothing here can
+    // compute one. Answering from LASTPOINT instead -- which is what the
+    // has_from_point fallback used to do -- is not an approximation but a wrong
+    // answer: LASTPOINT has nothing to do with where this line will go, so the
+    // snap lands somewhere arbitrary and then stays there when the far end
+    // moves. The marker goes on the curve nearest the cursor, and the command
+    // solves the constraint once it has the far end.
+    if (!q.from_point_is_base && q.has_reference && osnap_enabled(q.mask, OsnapType::Tangent) &&
+        nearest_point(*c.entity, q.reference, &p)) {
+        add_hit(out, vp, cursor, p, OsnapType::Tangent, c.handle, kNullHandle);
+        if (!out.empty()) out.back().deferred = true;
+    }
+
     // PER and TAN are measured from the rubber-band base, not the cursor.
     // Using the cursor makes the foot of the perpendicular the closest point on
     // the target, which is NEAREST wearing a different marker.
@@ -101,7 +116,7 @@ void collect_derived(std::vector<OsnapHit>& out, const Candidate& c, const Viewp
         perpendicular_point(*c.entity, q.from_point, &p)) {
         add_hit(out, vp, cursor, p, OsnapType::Perpendicular, c.handle, kNullHandle);
     }
-    if (osnap_enabled(q.mask, OsnapType::Tangent)) {
+    if (q.from_point_is_base && osnap_enabled(q.mask, OsnapType::Tangent)) {
         Vec3 tan[kMaxTangents];
         const int n = tangent_points(*c.entity, q.from_point, tan);
         for (int i = 0; i < n; ++i) {
