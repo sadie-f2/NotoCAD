@@ -7,6 +7,14 @@ into.
 Near-term work is tickable. Beyond that the phases carry rationale instead of task
 lists, because the detail belongs in a per-phase plan written when the phase starts.
 
+**Capabilities that do not exist yet live in `features.md`**, along with their design
+notes. The line between the two files: a mechanism that exists, a decision already
+taken, or a defect found in use belongs here; something the program cannot yet do
+belongs there. Seven sections moved out when that file was created — viewport
+feedback, CIRCLE's construction options, UI polish, the view commands, interactive
+AutoLISP input, pick cycling, and PEDIT's curve options — and the analysis went with
+them, because the reason a thing is wanted is the most perishable part of wanting it.
+
 ## Direction
 
 **Editing and command breadth come before 3D meshes and surfaces.**
@@ -178,67 +186,6 @@ rather than guessing — the interface hides which one it is.
 | 13 | Meshes and surfaces | PFACE, 3DMESH, RULESURF, TABSURF, REVSURF, EDGESURF; AutoLISP file I/O (`open`, `read-line` — `file_subrs.cpp` currently holds only `dxfout`); suppressed-regen batch mode for LISP loops. **The project's stated purpose.** |
 | 14 | Performance | A spatial index — none exists, and 4a's mouse-move path is the first thing to feel the linear scan. `QOpenGLWidget` migration behind the same `draw()`. |
 | 15 | macOS port | Stated goal in `CLAUDE.md`. |
-
----
-
-## Viewport feedback — what the display does not tell the designer
-
-Sadie's list, in her words "visual sugar that gives the designer landmarks". Less
-sugary than it sounds: three of the four are the viewport reporting engine state
-that is currently invisible, and the first one found a real bug.
-
-**Done:** the selection window now draws as a box. `Prompt::rubber_band`
-(`RubberBand::None/Line/Box`) carries the shape, because `PromptKind` cannot —
-a window's second corner and a LINE's next point are both a Point prompt with a
-base, and they want different glyphs. It is advice for whoever is drawing, like
-`Prompt::base` beside it, and the engine never reads it.
-
-The interaction is modal click-click, not press-drag-release: a click sets the
-first corner, the box follows the cursor, a second click closes it. That needs
-no drag state at all, because `SelectionPrompter` already asks for two ordinary
-point prompts and `mouseMoveEvent` already repaints while one stands.
-
-**Still to build, cheapest first:**
-
-1. **The UCS/WCS axis icon.** Pure screen-space painting beside
-   `draw_rubber_band` and `draw_osnap_marker`. `Sysvar::UcsIcon` already exists
-   with R12's 0/1/2 (off / corner / at origin) and round-trips through DXF;
-   nothing reads it. AutoCAD's colours: X red, Y green, Z blue. No core changes
-   and no decisions outstanding.
-
-2. **Highlighting the selection.** The enabling piece for this and (3): nothing
-   can currently draw a *subset* of entities with *overridden* styling.
-   `Renderer` is two virtuals — `begin_entity(EntityProps)` and `polyline()` —
-   with no colour or style channel, and `EntityProps` has no highlight bit.
-   `DashRenderer` is the precedent for the wrapper shape; `Entity::draw()` is
-   directly callable for a subset, as `RegionProbe` already does. The viewport
-   also has no access to `engine_->selection()` at all — `src/gui/` contains
-   zero references to selection. R12 highlighted by redrawing dashed, which is
-   machinery that already exists.
-
-3. **The ghost during MOVE/COPY/STRETCH.** Falls out of (2) nearly free: clone
-   the selection, `transform(Mat4)` by the pending delta, draw it through the
-   same path.
-
-   Sadie asked whether XOR is the simple way, as R12 did it. It was, and it no
-   longer is. XOR's payoff was never contrast but *erasure* — draw twice and the
-   screen is restored without redrawing the scene — which needs persistent
-   access to the front buffer between frames. Qt is double-buffered and every
-   `paintEvent` starts from a fresh backing store, so there is nothing to
-   un-XOR, and at R12-era wireframe complexity the full repaint is free anyway.
-   `RasterOp_SourceXorDestination` also does not survive antialiasing (which
-   `paintEvent` enables) or the OpenGL paint engine that phase 14 plans to move
-   to. So: repaint, in a highlight colour.
-
-4. **Live selection candidates** while the box is being sized — highlight what
-   *would* be taken as the cursor moves. Wants (2) first.
-
-**Open:** modern AutoCAD picks window-vs-crossing implicitly from drag direction
-(right = window, left = crossing) with different box styling. Whether R12 did is
-unverified, and it is keyword-driven here for now, which is R12's documented
-behaviour. Decide before adding implicit dragging.
-
-Items 2, 3 and 4 above are all the same missing construct. See the next section.
 
 ---
 
@@ -812,25 +759,6 @@ would make the current behaviour faithful rather than merely restrictive -- but
 it is a guess, and the difference decides whether raising the cap is a fix or a
 divergence.
 
-## CIRCLE is missing its construction options
-
-`CIRCLE` takes centre-then-radius only. R12 also has **2P**, **3P** and **TTR**
-(tangent-tangent-radius), and they are the reason CIRCLE is worth more than a radius
-box.
-
-Worth separating two things that look alike and are not:
-
-- *Snapping the radius pick to a TAN point* — now works, since the radius prompt takes
-  a picked point and osnap runs there. It gives a circle passing **through** a tangent
-  point of another entity.
-- *A circle tangent **to** another entity* — a different construction. With the centre
-  fixed, the radius is the perpendicular distance to that entity, and there are
-  generally two answers (inside and outside). TTR with two tangent entities has up to
-  eight. Solving those is real geometry work, not prompt plumbing.
-
-The second is what "always two solutions" means and what TTR is for. Neither exists.
-Phase 5 or 6, alongside the other construction commands.
-
 ## Window and crossing boxes assume plan view
 
 `SelectionPrompter` builds its region on world XY unless told otherwise. That is
@@ -849,24 +777,6 @@ can only draw in the current plane, so a rotation collapses to a base point plus
 angle and a mirror to a point pair, with the axis and the plane implied. World XY is
 therefore *correct* for them until UCS exists, not a stand-in. Only selection windows
 are genuinely screen-space, because a window is a thing you drag on the screen.
-
-## UI polish — reported from use, not yet built
-
-*(The focus loss is fixed — see the commit "Typing always reaches the command line".
-It needs confirming in a real session, since it could not be reproduced headlessly.)*
-
-**Show the selection box while it is being dragged.** The window or crossing rectangle
-should be drawn as it is dragged, and distinguishably: AutoCAD uses a solid outline for
-window and a dashed one for crossing, which is how you know which you are getting
-before you release.
-
-**Ghost the selection during placement.** MOVE and COPY should show the selected
-geometry following the cursor between the base point and the second point.
-
-Both are wanted, with a caveat worth designing around: this is used over SSH with X11
-forwarding, where the current no-feedback behaviour is *faster*. Whatever is drawn
-should be cheap — outline only, no fill — and probably switchable, since the remote
-case is a real working mode rather than an edge case.
 
 ## ARRAY details taken from reasoning, not from the R12 manual
 
@@ -898,32 +808,6 @@ and does not matter — this is the behaviour we want.*
   inside, and it also means the crossing box has to cross the rim *and* contain the
   centre — crossing the rim alone selects the circle but moves nothing.
 
-## View commands — what is known before they are written
-
-Recorded from Sadie's daily AutoCAD use, so the design does not have to be guessed at
-when phase 6 starts.
-
-**VPOINT is interpreted in the current coordinate system** — UCS when one is active,
-WCS otherwise. So VPOINT is not a world-space direction that happens to be typed in;
-it is a direction in the current CS, and the same numbers mean different views under
-different UCSs. This ties phase 6 to phase 12 more tightly than the table suggests:
-VPOINT written against WCS only would need revisiting rather than extending. Same
-`construction_normal()` seam the transform commands already isolated.
-
-**ZOOM's options are All, Center, Dynamic, Extents, Left, Previous, Window, and a
-scale factor.** Previous is the interesting one.
-
-*Open:* whether ZOOM Previous also restores a view direction changed by VPOINT.
-AutoCAD 2026 does; R12 is unverified.
-
-**The design consequence, which removes the risk either way:** the previous-view stack
-should hold a complete `Viewport` state — target, view height, azimuth, elevation — and
-not a zoom rectangle. Then "does VPOINT push onto the stack" is a one-line policy
-decision that can be changed after testing against real drawings, rather than a change
-to what the stack is made of. Storing only a zoom extent would bake the answer in.
-
-Worth deciding the stack depth at the same time: R12 remembered ten previous views.
-
 ## How a command reaches the view — settled
 
 `ViewControl`, an abstract interface in the core, reached through a nullable
@@ -949,32 +833,6 @@ same shape: an abstract `UserInput` with `bool ask(const Prompt&, InputValue&)`,
 implemented by `ncad` over stdin and by the GUI over a nested `QEventLoop`. The
 re-entrancy of a nested loop is the part that wants care, not the interface.
 
-## Interactive AutoLISP input is not implemented
-
-`ssget` has its non-interactive modes — `"X"`, `"P"`, `"L"`, `"W"`, `"C"` — plus the
-whole accessor family, which is the half a procedural workflow uses: generating
-geometry from analysis data never involves a cursor. Bare `(ssget)` refuses with a
-message rather than returning an empty set, because "found nothing" and "cannot ask"
-must not look alike.
-
-Still missing, and blocked on one decision: `entsel`, `getpoint`, `getdist`,
-`getangle`, `getstring`, `getreal`, `getint`, `getcorner`, `getkword`.
-
-**The decision.** These need the interpreter to ask a question part-way through
-evaluating an expression. In `ncad` that is a blocking read from stdin and easy. In the
-Qt shell it cannot block the event loop, so it needs a nested `QEventLoop` — which is
-the standard Qt answer and does work, but re-entrancy is the hazard: a second command
-started from inside the nested loop, or the window closing while an expression is
-suspended, both need thinking about. The alternative is suspending the interpreter
-itself, which is what `CommandEngine` does for commands and would mean continuations or
-a separate thread for LISP.
-
-The shape that fits: an abstract `UserInput` with `bool ask(const Prompt&, InputValue&)`
-in the core, implemented by `ncad` over stdin and by the GUI over a nested loop. The
-core stays headless either way.
-
-Also not implemented: `ssget` fence mode `"F"`, and filter lists on `"X"`.
-
 ## CONTINUOUS currently doubles as BYLAYER
 
 `EntityProps::linetype` defaults to `kLinetypeContinuous`, and `DashRenderer` treats
@@ -987,29 +845,6 @@ It matters as soon as DXF read lands: an R12 file records the string `BYLAYER` i
 `kLinetypeByLayer` sentinel that resolves at render time — and it is small, but it
 changes what a default-constructed `EntityProps` means, so it wants doing deliberately
 rather than in passing.
-
-## Pick cycling is missing
-
-Reported from use: three identical lines at the same place, and a single click only
-ever selects one of them.
-
-That much is correct — AutoCAD picks the topmost and so does `pick_entity`, which walks
-the drawing order backwards and returns the first hit. What is missing is the way to
-reach the others: **Ctrl+click cycling** through coincident candidates. The comment in
-`pick.hpp` anticipated it ("nearest-wins would make pick cycling incoherent once it
-exists") and it was never built.
-
-The confusing part is not the single selection but what a second click does: it
-re-picks the same entity, `SelectionSet::add` dedupes it, and the count stays at 1 — so
-it reads as the click having been ignored.
-
-*Workaround today:* a crossing window catches all three, since `select_by_region` walks
-every entity rather than stopping at the first hit.
-
-*What it needs:* `pick_entity` returns one result; cycling wants all candidates within
-the pick box, ordered topmost-first, plus somewhere to remember which one was offered
-last so the next Ctrl+click moves on. The search itself is a small change —
-`pick_entity` already visits them all and simply returns early.
 
 ## Blocks — built, and what open question 7 turned out to be
 
@@ -1292,27 +1127,6 @@ The lesson for TRIM: a parameter that is never evaluated is never checked. The
 test that caught this samples the extracted piece and asserts every sample lies
 on the original curve, which is the strongest check available without a second
 implementation. Worth repeating for TRIM and OFFSET.
-
-## PEDIT's curve options need a curve representation first
-
-`Fit curve`, `Spline curve` and `Decurve` are the three PEDIT options not built,
-and they are not command plumbing. R12 spells them as a flag on the polyline plus
-`SPLINETYPE` and `SPLINESEGS`, and `Decurve` has to put the original vertices
-back — so the polyline has to keep its control vertices alongside the fitted ones
-rather than replacing them.
-
-That is a storage decision of the same weight as the width one below, and it is
-the same question the splines note further down already raises. Worth settling
-both at once: the answer to "how does a polyline remember it is a spline" is the
-answer to both.
-
-`Edit vertex` is absent for a different reason — it is a nested prompt loop with
-ten options of its own, and its useful half is dragging vertices, which wants the
-interactive grip work that is still outstanding.
-
-Also absent, and smaller: PEDIT on a LINE or ARC offers to convert it into a
-one-segment polyline first. That is a creation path rather than an edit, and it
-wants deciding alongside the curve options.
 
 ## Polyline width and text justification now have somewhere to live
 
