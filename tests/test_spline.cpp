@@ -357,3 +357,52 @@ TEST_CASE("spline: the command refuses fewer than two points and a repeated one"
     engine.supply(InputValue::of_point({0, 0, 0}));
     CHECK(engine.status() == EngineStatus::Failed);
 }
+
+// --- flattening cost --------------------------------------------------------
+//
+// Found with gdb on a wedged viewport holding a million splines: every sample
+// landed in Spline::draw. These pin the two decisions that came out of it.
+
+TEST_CASE("spline: segments are bounded by the size on screen") {
+    const EntityPtr s = Spline::interpolating({{0, 0, 0}, {3, 8, 0}, {8, -3, 0}, {11, 5, 0}});
+    REQUIRE(s != nullptr);
+    const Spline& sp = static_cast<const Spline&>(*s);
+
+    // Zoomed in: the control-point floor governs, so the curve keeps its shape.
+    const int close = sp.segment_count(0.001);
+    CHECK(close >= static_cast<int>(sp.control_points().size()) * 4);
+
+    // Zoomed out until the whole curve is a few pixels: detail below a pixel
+    // cannot be seen, and emitting sixteen segments for it was the whole cost
+    // of a frame in a drawing zoomed out to a million curves.
+    const int far_out = sp.segment_count(100.0);
+    CHECK(far_out < close);
+    CHECK(far_out >= 1);  // never zero, or it draws nothing at all
+
+    // Monotonic: a coarser tolerance never costs more.
+    CHECK(sp.segment_count(10.0) <= sp.segment_count(1.0));
+    CHECK(sp.segment_count(1.0) <= sp.segment_count(0.1));
+}
+
+TEST_CASE("spline: a sub-pixel curve is one segment, not sixteen") {
+    const EntityPtr s = Spline::interpolating({{0, 0, 0}, {3, 8, 0}, {8, -3, 0}, {11, 5, 0}});
+    const Spline& sp = static_cast<const Spline&>(*s);
+    // A tolerance far larger than the curve itself.
+    CHECK(sp.segment_count(10000.0) == 1);
+}
+
+TEST_CASE("spline: the degree is bounded, and a wilder one is not valid") {
+    // The bound is what lets the evaluator keep its basis scratch on the stack,
+    // which is why it exists at all -- see kMaxSplineDegree.
+    std::vector<Vec3> control(kMaxSplineDegree + 3, Vec3{0, 0, 0});
+    for (std::size_t i = 0; i < control.size(); ++i) control[i] = Vec3{double(i), 0, 0};
+
+    std::vector<double> knots(control.size() + kMaxSplineDegree + 1 + 1, 0.0);
+    for (std::size_t i = 0; i < knots.size(); ++i) knots[i] = double(i);
+
+    const Spline too_wild(kMaxSplineDegree + 1, control, knots);
+    CHECK(!too_wild.valid());
+    // And an unusable spline evaluates to nothing rather than reading off the
+    // end of a stack buffer.
+    CHECK_VEC(too_wild.point_at(0.5), 0.0, 0.0, 0.0, 1e-12);
+}

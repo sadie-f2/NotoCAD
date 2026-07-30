@@ -539,6 +539,74 @@ cannot be stopped, and the cost is a bool test per form.
 sets it. The GUI's Escape currently reaches `CommandEngine`, and routing it to
 the interpreter as well is the remaining piece.
 
+## Rendering cost — measured, and the three things gdb found
+
+Sadie made a polar array of a spline, 100 copies, then a 10,000-element
+rectangular array of that. A million splines, and the viewport wedged. Three
+gdb samples of the live process all landed in the same place:
+
+    #8  basis_functions (...) at src/core/spline.cpp:73
+    #9  Spline::point_at (...)
+    #10 Spline::draw (...)
+    #11 draw_database (...)
+    #12 ViewportWidget::paintEvent (...)
+
+Not thrashing and not stuck -- spinning in the repaint. Three separable causes,
+all now fixed, measured on a headless benchmark that flattens and projects
+without Qt:
+
+| | before | after |
+|---|---|---|
+| 20,000 splines | 48.1 ms/frame | 27.7 ms |
+| 200,000 splines | 498.2 ms/frame | 198.7 ms |
+
+**1. `basis_functions` allocated three vectors per call**, and `point_at` a
+fourth for the result. That is four heap operations for every evaluated point of
+every spline in every frame -- a million a frame at twenty thousand splines, and
+the reason every gdb sample was inside the allocator. Now stack arrays, bounded
+by `kMaxSplineDegree`, which is what the bound exists for.
+
+**2. `Viewport::project` recomputed `basis()` per point** -- two sines, two
+cosines and a cross product, 340,000 times a frame. Now cached against the two
+angles it derives from. The cache VALIDATES ITSELF rather than being invalidated
+by the mutators: a dirty flag needs every setter to remember, and the one that
+forgot would render everything through a stale basis, which looks like corrupt
+geometry rather than a missing invalidation.
+
+**3. `segment_count` had a floor and no ceiling.** The floor of
+`control_points * 4` exists so a wiggly curve is not drawn as a straight line,
+and it was binding at every zoom -- sixteen segments for a curve three pixels
+long. Now bounded by the on-screen size as well.
+
+That bound had to be sized by the BOUNDING BOX, not the control polygon. The
+polygon is a deliberate over-estimate of curve length -- an interpolating spline
+overshoots, so its control polygon can be three times the curve -- and the first
+version of this used it and never bit. Worth remembering: the two are not
+interchangeable, however close they look.
+
+### Still to do, and it is the bigger one for a large drawing
+
+**There is no view culling at all.** `draw_database` walks every entity and calls
+`draw()` on it, whatever the viewport is showing. At extents that is honest work;
+zoomed in to a corner of a large drawing it is almost entirely wasted, which is
+the normal working case rather than the stress case.
+
+The design: an optional view-space clip rectangle on `DrawContext`, and a test of
+each entity's `bbox()` against it before `draw()` is called. It must be
+view-space rather than a world AABB, because an orthographic view rotated off
+axis has no useful world-space bounding box -- the visible volume is an infinite
+slab. Eight corner projections per entity, which is far cheaper than flattening
+a curve that is not on screen.
+
+NOT built here deliberately: it changes what is drawn, and the failure mode is
+entities silently missing. That wants a pair of eyes on a real viewport, and
+this was done while Sadie was away from the machine.
+
+Also still open, and now with a number against it: at a million entities even a
+perfectly flattened frame is roughly 2 million points, which is about a second.
+Culling and a spatial index are the answers; `SF_todo`'s open question 5 already
+names the index.
+
 ## TANGENT to a spline is approximate — known, accepted, not yet worth fixing
 
 Sadie's call: it makes mistakes, and at the frequency she will use it that is

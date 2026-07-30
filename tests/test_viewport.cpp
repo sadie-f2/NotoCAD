@@ -286,3 +286,24 @@ TEST_CASE("view height is clamped away from denormals") {
     CHECK(std::isfinite(v.world_per_pixel()));
     CHECK(v.world_per_pixel() > 0.0);
 }
+
+TEST_CASE("viewport: the cached basis follows the camera") {
+    // project() runs once per POINT, so basis() is cached against the two
+    // angles it derives from. The cache validates itself by comparing them
+    // rather than being invalidated by every mutator -- the one mutator that
+    // forgot would render the whole drawing through a stale basis.
+    Viewport vp;
+    vp.set_size(800, 600);
+
+    const Basis plan = vp.basis();
+    CHECK(vp.basis().ax.x == plan.ax.x);  // repeated calls agree
+
+    vp.set_azimuth(vp.azimuth() + 1.0);
+    const Basis turned = vp.basis();
+    CHECK(std::abs(turned.ax.x - plan.ax.x) > 1e-9);
+
+    // And back again gives the original, so the cache is not merely sticky.
+    vp.set_azimuth(vp.azimuth() - 1.0);
+    CHECK_NEAR(vp.basis().ax.x, plan.ax.x, 1e-12);
+    CHECK_NEAR(vp.basis().ay.y, plan.ay.y, 1e-12);
+}

@@ -65,13 +65,23 @@ std::size_t find_span(int degree, const std::vector<double>& knots, std::size_t 
 // The degree+1 non-zero basis functions at u, by the Cox-de Boor recurrence in
 // its triangular form -- no divisions by zero even at repeated knots, which is
 // the whole reason it is written this way rather than from the definition.
+//
+// STACK ONLY, and that is a performance decision with evidence behind it. This
+// is called once per evaluated point of every spline in every frame, and it
+// used to allocate three vectors per call -- four counting the one point_at
+// made for the result. A drawing of twenty thousand splines is a million heap
+// operations a frame, and gdb caught it doing exactly that: every sample of a
+// wedged viewport landed in the allocator underneath this function.
+//
+// `out` must hold degree + 1 doubles. Spline::valid() bounds the degree, so a
+// caller that has checked validity cannot overflow the buffer.
 void basis_functions(std::size_t span, double u, int degree, const std::vector<double>& knots,
-                     std::vector<double>& out) {
+                     double* out) {
     const std::size_t p = static_cast<std::size_t>(degree);
-    out.assign(p + 1, 0.0);
-    std::vector<double> left(p + 1, 0.0);
-    std::vector<double> right(p + 1, 0.0);
+    double left[kMaxSplineDegree + 1] = {};
+    double right[kMaxSplineDegree + 1] = {};
 
+    for (std::size_t i = 0; i <= p; ++i) out[i] = 0.0;
     out[0] = 1.0;
     for (std::size_t j = 1; j <= p; ++j) {
         left[j] = u - knots[span + 1 - j];
@@ -137,6 +147,8 @@ Spline::Spline(int degree, std::vector<Vec3> control_points, std::vector<double>
 
 bool Spline::valid() const {
     if (degree_ < 1) return false;
+    // Bounds the evaluator's stack scratch; see kMaxSplineDegree.
+    if (degree_ > kMaxSplineDegree) return false;
     if (control_.size() < static_cast<std::size_t>(degree_) + 1) return false;
     if (knots_.size() != control_.size() + static_cast<std::size_t>(degree_) + 1) return false;
     if (!weights_.empty() && weights_.size() != control_.size()) return false;
@@ -160,7 +172,7 @@ Vec3 Spline::point_at(double u) const {
     const double t = std::clamp(u, domain_min(), domain_max());
     const std::size_t span = find_span(degree_, knots_, control_.size(), t);
 
-    std::vector<double> n;
+    double n[kMaxSplineDegree + 1];
     basis_functions(span, t, degree_, knots_, n);
 
     Weighted acc{Vec3{}, 0.0};
@@ -214,8 +226,33 @@ int Spline::segment_count(double chord_tolerance) const {
     // clamped so a huge drawing does not emit a million segments per curve.
     const double tol = chord_tolerance > 0.0 ? chord_tolerance : polygon * 1e-3;
     int n = arc_segment_count(polygon, 1.0, tol);
+
+    // The floor exists because a spline can wiggle between its control points,
+    // and too few samples draw a curve as a straight line.
     n = std::max(n, static_cast<int>(control_.size()) * 4);
-    return std::clamp(n, 8, 4096);
+
+    // But it must not outlive the reason for it. NEVER MORE SEGMENTS THAN THE
+    // CURVE IS PIXELS LONG: detail below a pixel cannot be seen, and the floor
+    // alone had every spline emitting sixteen segments however small it was on
+    // screen. In a drawing zoomed out to a million of them that is the whole
+    // cost of the frame, spent on wiggles nobody can resolve.
+    //
+    // Sized by the BOUNDING BOX, not the control polygon. The polygon is a
+    // deliberate over-estimate of the curve's length -- an interpolating spline
+    // overshoots, so its control polygon can be three times the curve -- and
+    // using it here would mean the bound almost never bit. The box diagonal is
+    // the honest answer to "how big is this on screen".
+    //
+    // `tol` is half a pixel of sag, so diagonal/tol is about twice the size in
+    // pixels: deliberately generous, since this bounds quality rather than
+    // setting it.
+    const BBox box = bbox();
+    const double diagonal = box.valid() ? length(box.max - box.min) : polygon;
+    const int pixels = static_cast<int>(diagonal / tol) + 1;
+    n = std::min(n, pixels);
+
+    // One segment is the least that draws anything at all.
+    return std::clamp(n, 1, 4096);
 }
 
 EntityPtr Spline::interpolating(const std::vector<Vec3>& through, int degree, const Vec3& normal) {
@@ -259,11 +296,11 @@ EntityPtr Spline::interpolating(const std::vector<Vec3>& through, int degree, co
     // One row per point: the basis functions at that point's parameter.
     std::vector<std::vector<double>> a(n, std::vector<double>(n, 0.0));
     std::vector<Weighted> rhs(n);
-    std::vector<double> basis;
+    double basis[kMaxSplineDegree + 1];
 
     for (std::size_t i = 0; i < n; ++i) {
         const std::size_t span = find_span(p, knots, n, u[i]);
-        basis_functions(span, u[i], p, knots, basis);
+        basis_functions(span, u[i], static_cast<int>(p), knots, basis);
         for (std::size_t k = 0; k <= pp; ++k) a[i][span - pp + k] = basis[k];
         rhs[i] = Weighted{through[i], 1.0};
     }

@@ -266,6 +266,16 @@ private:
 // both means a grip can move a fit point and the curve be re-solved, rather
 // than the user being handed control points and told they are the same thing.
 // DXF R13 carries both for the same reason (groups 10 and 11).
+// The highest degree a spline may have.
+//
+// Not a limit of the mathematics -- it is what lets the evaluator keep its
+// basis-function scratch on the stack, which matters because that runs once per
+// evaluated point of every spline in every frame. Fifteen is far above anything
+// a drawing contains; cubic is the overwhelming case and R12 had no splines at
+// all. A file naming a higher degree fails valid() and is kept as a Proxy
+// rather than silently drawn wrong.
+inline constexpr int kMaxSplineDegree = 15;
+
 class Spline final : public Entity {
 public:
     Spline() : Entity(EntityType::Spline) {}

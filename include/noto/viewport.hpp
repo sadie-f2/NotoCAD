@@ -123,6 +123,22 @@ private:
     Vec3 target_{};
     double view_height_{100.0};
     // Plan view: looking straight down, world X to the right, world Y up.
+    // The view basis, cached against the two angles it is derived from.
+    //
+    // SELF-VALIDATING ON PURPOSE. A dirty flag would need every mutator to
+    // remember to set it, and the one that forgot would render the whole
+    // drawing through a stale basis -- a failure that looks like corrupt
+    // geometry rather than a missing invalidation. Comparing the inputs cannot
+    // go stale, and costs two double comparisons against two sines, two cosines
+    // and a cross product.
+    //
+    // It matters because project() runs once per POINT: a drawing of twenty
+    // thousand splines projects a third of a million points a frame, and this
+    // was a third of the frame time.
+    mutable Basis cached_basis_{};
+    mutable double cached_azimuth_{1e300};
+    mutable double cached_elevation_{1e300};
+
     double azimuth_{-1.5707963267948966};  // -pi/2
     double elevation_{kMaxElevation};
 };

@@ -69,13 +69,21 @@ void Viewport::set_plan_view() {
 }
 
 Basis Viewport::basis() const {
+    // Recomputed only when the angles it depends on have moved; see the
+    // members for why the cache validates itself rather than being invalidated.
+    if (azimuth_ == cached_azimuth_ && elevation_ == cached_elevation_) return cached_basis_;
+
     // `right` is horizontal by construction, which is what keeps the world Z
     // axis vertical on screen at every elevation. Writing it from the azimuth
     // rather than as cross(worldZ, dir) is what keeps it defined at the poles.
     const Vec3 az = view_direction();
     const Vec3 ax{-std::sin(azimuth_), std::cos(azimuth_), 0.0};
     const Vec3 ay = cross(az, ax);
-    return {ax, ay, az};
+
+    cached_basis_ = {ax, ay, az};
+    cached_azimuth_ = azimuth_;
+    cached_elevation_ = elevation_;
+    return cached_basis_;
 }
 
 Mat4 Viewport::world_to_view() const {
