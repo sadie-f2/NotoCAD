@@ -402,6 +402,41 @@ once is still open.
 The NURBS curve landed with its evaluator, interpolation, entity vtable, DXF
 degrade and AutoLISP conversion. Four things were deliberately not done.
 
+**The derived object snaps are now BUILT** — NEAREST, PERPENDICULAR and TANGENT
+on SPLINE, ELLIPSE *and* POLYLINE, which turned out to have the same hole. Only
+INT remains, and it is the structural one described immediately below.
+
+The three shared one cause: `osnap_derived.cpp` dispatched through `as_line()`
+and `as_circular()`, which answer for none of them, so all three snaps returned
+false and the cursor silently offered nothing on the entity being pointed at.
+POLYLINE is now solved segment by segment against the existing exact Line and Arc
+solvers, so it is as accurate as the same geometry drawn as separate entities.
+ELLIPSE and SPLINE go through one bisection root-finder over the curve parameter,
+because all three snaps reduce to "find the roots of a scalar function of the
+parameter" and writing that three times is how three tolerances end up
+disagreeing.
+
+**The ellipse tangent is closed form, not iterated.** The chord of contact — the
+polar line of the reference point — meets the ellipse exactly where the tangents
+touch, which reduces to one `acos`. Worth knowing because AutoCAD 2026 gets this
+case visibly wrong and is inconsistent about tangents to a spline: there is no
+reference implementation worth matching here, so the tests check the defining
+condition instead, with curve directions from finite differences so they do not
+borrow the algebra they are checking.
+
+Two rules fell out that are not obvious:
+
+- **PERPENDICULAR on a polyline needs its own search.** The Line solver is
+  unclamped by design, so a segment reports feet far past its own ends — and
+  being unclamped those are often the *nearer* answer, so nearest-wins picks
+  geometry the polyline does not draw. A foot on its own segment therefore beats
+  one off the end, and only when no segment has a real foot do the extended ones
+  compete.
+- **NEAREST keeps the endpoints, PERPENDICULAR drops them.** NEA stays on the
+  entity, so a reference past the end of an elliptical arc answers with the end,
+  exactly as `circular_nearest` already did. An endpoint is not a perpendicular
+  foot.
+
 **No intersection support, so TRIM, BREAK, EXTEND and the INT osnap ignore it.**
 `intersect.cpp`'s `SubCurve` models a line segment or a circular arc and nothing
 else, so a NURBS span fits neither — this is a structural change to that file
