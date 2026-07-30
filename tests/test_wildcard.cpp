@@ -193,3 +193,99 @@ TEST_CASE("ssget filter: a point argument is not mistaken for a filter") {
     // make every windowed ssget fail.
     CHECK(f.eval("(sslength (ssget \"W\" '(-50.0 -50.0) '(50.0 50.0)))") == "4");
 }
+
+// --- symbol tables ----------------------------------------------------------
+
+TEST_CASE("tblsearch: finds an entry by name, case-insensitively") {
+    Fixture f;
+    f.eval("(command \"LAYER\" \"MAKE\" \"WALLS\" \"\")");
+
+    CHECK(f.eval("(cdr (assoc 2 (tblsearch \"LAYER\" \"WALLS\")))") == "\"WALLS\"");
+    // R12's table names are case-insensitive, and a script that wrote "walls"
+    // means the layer WALLS.
+    CHECK(f.eval("(cdr (assoc 2 (tblsearch \"LAYER\" \"walls\")))") == "\"WALLS\"");
+    CHECK(f.eval("(cdr (assoc 0 (tblsearch \"LAYER\" \"WALLS\")))") == "\"LAYER\"");
+
+    CHECK(f.eval("(tblsearch \"LAYER\" \"NOSUCHLAYER\")") == "nil");
+}
+
+TEST_CASE("tblnext: walks a table and then stays at the end") {
+    Fixture f;
+    f.eval("(command \"LAYER\" \"MAKE\" \"WALLS\" \"\")");
+    f.eval("(command \"LAYER\" \"MAKE\" \"GRID\" \"\")");
+
+    // Layer 0 always exists and comes first.
+    CHECK(f.eval("(cdr (assoc 2 (tblnext \"LAYER\" T)))") == "\"0\"");
+    CHECK(f.eval("(cdr (assoc 2 (tblnext \"LAYER\")))") == "\"WALLS\"");
+    CHECK(f.eval("(cdr (assoc 2 (tblnext \"LAYER\")))") == "\"GRID\"");
+    CHECK(f.eval("(tblnext \"LAYER\")") == "nil");
+
+    // The cursor stays put rather than wrapping, so a second call keeps saying
+    // nil instead of silently starting over -- which would make a while loop
+    // run forever.
+    CHECK(f.eval("(tblnext \"LAYER\")") == "nil");
+
+    // And rewind starts again.
+    CHECK(f.eval("(cdr (assoc 2 (tblnext \"LAYER\" T)))") == "\"0\"");
+}
+
+TEST_CASE("tblnext: each table has its own cursor") {
+    Fixture f;
+    f.eval("(command \"LAYER\" \"MAKE\" \"WALLS\" \"\")");
+
+    f.eval("(tblnext \"LAYER\" T)");
+    // Walking the linetypes must not disturb where the layer walk had got to.
+    CHECK(f.eval("(cdr (assoc 0 (tblnext \"LTYPE\" T)))") == "\"LTYPE\"");
+    CHECK(f.eval("(cdr (assoc 2 (tblnext \"LAYER\")))") == "\"WALLS\"");
+}
+
+TEST_CASE("tblsearch: the third argument sets where the walk resumes") {
+    Fixture f;
+    f.eval("(command \"LAYER\" \"MAKE\" \"WALLS\" \"\")");
+    f.eval("(command \"LAYER\" \"MAKE\" \"GRID\" \"\")");
+
+    // R12's way of starting a walk in the middle rather than at the top.
+    f.eval("(tblsearch \"LAYER\" \"WALLS\" T)");
+    CHECK(f.eval("(cdr (assoc 2 (tblnext \"LAYER\")))") == "\"GRID\"");
+
+    // Without it, the cursor is left alone.
+    f.eval("(tblnext \"LAYER\" T)");
+    f.eval("(tblsearch \"LAYER\" \"GRID\")");
+    CHECK(f.eval("(cdr (assoc 2 (tblnext \"LAYER\")))") == "\"WALLS\"");
+}
+
+TEST_CASE("tables: a layer entry carries its colour, linetype and flags") {
+    Fixture f;
+    f.eval("(command \"LAYER\" \"MAKE\" \"WALLS\" \"COLOR\" \"1\" \"\" \"\")");
+
+    const std::string entry = f.eval("(tblsearch \"LAYER\" \"WALLS\")");
+    CHECK(entry.find("(0 . \"LAYER\")") != std::string::npos);
+    CHECK(entry.find("(2 . \"WALLS\")") != std::string::npos);
+    CHECK(entry.find("(6 . \"CONTINUOUS\")") != std::string::npos);
+    // Group 70 is the flags word and must be present even when zero, since a
+    // script reads it with assoc and would get nil for an absent group.
+    CHECK(entry.find("(70 . 0)") != std::string::npos);
+}
+
+TEST_CASE("tables: an unknown table is an error, not an empty walk") {
+    Fixture f;
+    // "No such table" and "an empty table" are different answers, and a script
+    // can act on the difference. Returning nil would make a typo look like an
+    // empty drawing.
+    CHECK(f.eval("(tblnext \"STYLE\")").find("<error") == 0);
+    CHECK(f.eval("(tblsearch \"VPORT\" \"*ACTIVE\")").find("<error") == 0);
+    CHECK(f.eval("(tblnext 5)").find("<error") == 0);
+}
+
+TEST_CASE("tables: LTYPE and BLOCK walk too") {
+    Fixture f;
+    CHECK(f.eval("(cdr (assoc 2 (tblnext \"LTYPE\" T)))") == "\"CONTINUOUS\"");
+
+    // A block table starts empty, which is a legitimate answer rather than an
+    // error -- unlike naming a table that does not exist.
+    CHECK(f.eval("(tblnext \"BLOCK\" T)") == "nil");
+
+    f.eval("(command \"LINE\" '(0 0 0) '(1.0 1.0 0) \"\")");
+    f.eval("(command \"BLOCK\" \"WIDGET\" '(0 0 0) \"L\" \"\")");
+    CHECK(f.eval("(cdr (assoc 2 (tblnext \"BLOCK\" T)))") == "\"WIDGET\"");
+}

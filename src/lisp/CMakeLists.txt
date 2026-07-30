@@ -14,6 +14,7 @@ add_library(noto_lisp STATIC
   geom_subrs.cpp
   io_subrs.cpp
   wildcard.cpp
+  table_subrs.cpp
   command_subr.cpp
   command_input.cpp
 )

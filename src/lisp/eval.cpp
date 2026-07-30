@@ -444,6 +444,16 @@ bool Interp::eval_string(std::string_view source, Value& out) {
 
 Interp::~Interp() { close_all_files(); }
 
+std::size_t& Interp::table_cursor(const std::string& table) {
+    for (auto& c : table_cursors_) {
+        if (c.first == table) return c.second;
+    }
+    // A linear scan over at most a handful of table names, which is cheaper
+    // than a hash and keeps the order a script created them in.
+    table_cursors_.emplace_back(table, 0);
+    return table_cursors_.back().second;
+}
+
 std::int32_t Interp::new_file(std::FILE* fp, bool writable) {
     files_.push_back(OpenFile{fp, writable});
     return static_cast<std::int32_t>(files_.size() - 1);

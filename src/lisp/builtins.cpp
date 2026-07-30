@@ -17,6 +17,7 @@
 #include "wildcard.hpp"
 #include "sset_subrs.hpp"
 #include "sysvar_subrs.hpp"
+#include "table_subrs.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -853,6 +854,10 @@ constexpr SubrDef kSubrs[] = {
     {"STRCASE", subr_strcase, 1, 2},
     {"READ", subr_read, 1, 1},
     {"WCMATCH", subr_wcmatch, 2, 2},
+
+    // symbol tables -- how a script finds out what a drawing already contains
+    {"TBLSEARCH", subr_tblsearch, 2, 3},
+    {"TBLNEXT", subr_tblnext, 1, 2},
     {"ITOA", subr_itoa, 1, 1},
     {"ATOI", subr_atoi, 1, 1},
     {"ATOF", subr_atof, 1, 1},

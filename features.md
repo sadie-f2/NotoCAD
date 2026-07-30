@@ -213,7 +213,7 @@ headline number flatters it.
 | Geometry helpers | ~~`polar`, `distance`, `angle`, `inters`, `osnap`~~ **built** — `trans`, `textbox` remain |
 | User input | `getpoint`, `getdist`, `getangle`, `getcorner`, `getint`, `getreal`, `getstring`, `getkword`, `initget` |
 | File I/O | ~~`open`, `close`, `read-line`, `write-line`, `read-char`, `write-char`~~ **built**, plus `findfile` |
-| Tables | `tblnext`, `tblsearch` |
+| Tables | ~~`tblnext`, `tblsearch`~~ **built** for LAYER, LTYPE, BLOCK and UCS |
 | Selection | `entsel`, `nentsel`, `handent` |
 | Other | `*error*`, `load`, `eval`, `logand`, `logior`, `lsh`, `angtos`, `prompt`, `alert`, `ver` — ~~`read`~~, ~~`findfile`~~ and ~~`wcmatch`~~ built |
 

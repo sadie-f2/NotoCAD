@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <iosfwd>
 #include <string>
+#include <utility>
 #include <string_view>
 #include <vector>
 
@@ -159,6 +160,14 @@ public:
     // losing the tail to an unflushed buffer would be the worst kind of quiet.
     void close_all_files();
 
+    // Where (tblnext ...) has got to in each symbol table.
+    //
+    // Per interpreter rather than global, and keyed by name rather than by an
+    // enum, because the caller names the table as a string and this layer has no
+    // reason to hold a second list of which tables exist. `rewind` sets it back
+    // to zero; tblsearch's optional third argument sets it to a found entry.
+    std::size_t& table_cursor(const std::string& table);
+
     const EvalError& error() const { return error_; }
     void clear_error() { error_ = EvalError{}; }
 
@@ -206,6 +215,7 @@ private:
     CommandEngine* engine_{nullptr};
     std::vector<SelectionSet> ssets_;
     std::vector<OpenFile> files_;
+    std::vector<std::pair<std::string, std::size_t>> table_cursors_;
     EvalError error_{};
     std::ostream* out_{nullptr};
 
