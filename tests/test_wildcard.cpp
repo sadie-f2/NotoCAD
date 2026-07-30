@@ -289,3 +289,96 @@ TEST_CASE("tables: LTYPE and BLOCK walk too") {
     f.eval("(command \"BLOCK\" \"WIDGET\" '(0 0 0) \"L\" \"\")");
     CHECK(f.eval("(cdr (assoc 2 (tblnext \"BLOCK\" T)))") == "\"WIDGET\"");
 }
+
+// --- interruption, one-step undo, and *error* --------------------------------
+
+TEST_CASE("interrupt: a runaway loop can be stopped") {
+    Fixture f;
+    // Without this an unbounded (while ...) runs until the process is killed,
+    // which presents as a hang rather than as a defect.
+    f.in.interrupt();
+    const std::string r = f.eval("(while T (setq x 1))");
+    CHECK(r.find("<error") == 0);
+    CHECK(r.find("Function cancelled") != std::string::npos);
+
+    // The flag is consumed, so the next evaluation runs normally.
+    CHECK(f.eval("(+ 1 1)") == "2");
+}
+
+TEST_CASE("undo: a whole script is one step") {
+    Fixture f;
+    f.eval(
+        "(command \"LINE\" '(0 0 0) '(1.0 0 0) \"\")"
+        "(command \"LINE\" '(0 0 0) '(2.0 0 0) \"\")"
+        "(command \"CIRCLE\" '(0 0 0) 1.0)");
+    CHECK(f.db.order().size() == 3);
+
+    // One U, not three. A script is one action from the user's side, which is
+    // what makes Escape recoverable without counting operations.
+    CHECK(f.db.journal().undo_depth() == 1);
+    CHECK(f.db.journal().undo(f.db));
+    CHECK(f.db.order().empty());
+}
+
+TEST_CASE("undo: entmake in bulk is still one step") {
+    Fixture f;
+    f.eval(
+        "(setq i 0)"
+        "(while (< i 5)"
+        "  (entmake (list '(0 . \"LINE\") (cons 10 (list 0.0 0.0 0.0))"
+        "                 (cons 11 (list (float i) 1.0 0.0))))"
+        "  (setq i (1+ i)))");
+    CHECK(f.db.order().size() == 5);
+    CHECK(f.db.journal().undo_depth() == 1);
+}
+
+TEST_CASE("undo: a suspended command does not leave the journal unbalanced") {
+    // The case the whole resumable-command design exists for: one (command ...)
+    // starts a command, arbitrary LISP runs, a later call finishes it. Wrapping
+    // each evaluation unconditionally would leave a group nobody closes and the
+    // work would never commit at all.
+    Fixture f;
+    f.eval("(command \"LINE\" '(0 0 0))");
+    CHECK(f.engine.active());
+
+    f.eval("(setq unrelated 42)");
+    f.eval("(command '(5.0 5.0 0) \"\")");
+
+    CHECK(!f.engine.active());
+    CHECK(f.db.order().size() == 1);
+    // And it committed as one step rather than being stranded.
+    CHECK(f.db.journal().undo_depth() == 1);
+    CHECK(f.db.journal().undo(f.db));
+    CHECK(f.db.order().empty());
+}
+
+TEST_CASE("*error*: the script's own handler is called, with the message") {
+    Fixture f;
+    f.eval("(defun *error* (msg) (setq caught msg))");
+
+    // A genuine fault.
+    f.eval("(+ 1 \"not a number\")");
+    CHECK(f.eval("caught").find("bad argument type") != std::string::npos);
+
+    // And an interrupt, which handlers branch on: R12's wording is exactly
+    // "Function cancelled".
+    f.in.interrupt();
+    f.eval("(while T (setq x 1))");
+    CHECK(f.eval("caught") == "\"Function cancelled\"");
+}
+
+TEST_CASE("*error*: a handler that itself fails does not recurse forever") {
+    Fixture f;
+    // Losing the session is a worse failure than losing the command.
+    f.eval("(defun *error* (msg) (+ 1 \"also broken\"))");
+    const std::string r = f.eval("(+ 1 \"broken\")");
+    CHECK(r.find("<error") == 0);
+    // The original error survives, not the handler's.
+    CHECK(r.find("bad argument type") != std::string::npos);
+}
+
+TEST_CASE("*error*: no handler defined is not itself an error") {
+    Fixture f;
+    const std::string r = f.eval("(+ 1 \"broken\")");
+    CHECK(r.find("<error") == 0);
+}

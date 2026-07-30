@@ -468,6 +468,77 @@ gets no raw-mode work. Not yet built; it is a Qt widget concern.
   is what No does here, since there is nothing else for it to mean at a prompt
   that only ends the session.
 
+## Undo granularity, interruption, and the journal's missing ceiling
+
+**A whole LISP evaluation is ONE undo step.** Sadie's call. A script is one
+action from the user's side, so Escape then a single `U` puts the drawing back
+however many commands and `entmake`s ran. `Interp::eval_string` opens a group
+around the evaluation; groups already nested by depth, so a `(command ...)`
+inside opens no second step.
+
+`CLAUDE.md` claimed this already worked — "a LISP function calling
+`(command "LINE" ...)` three times collapses into one step rather than three."
+It did not. `begin_group` had exactly one caller, `CommandEngine::begin`. The
+nesting mechanism was built and nothing used it.
+
+**The wrap is guarded on `in_group()`, and that guard is load-bearing.** A
+command can be SUSPENDED across two `(command ...)` calls — the case the whole
+resumable-command design exists for. Wrapping unconditionally leaves the journal
+at a depth nobody closes, and the work never commits at all. When a group is
+already open the evaluation joins it, which is the right reading: it happened
+while a command was running. `tests/test_wildcard.cpp` pins it.
+
+### What was considered and NOT done: per-change undo
+
+Sadie's worry was that a script doing millions of operations held as one undo
+step could fail badly, with per-change undo as the escape hatch. Worth recording
+why that is not the fix.
+
+**Grouping costs nothing.** The journal stores before/after clones per CHANGE; a
+group is only a marker saying where a step begins. A million `entmake`s cost the
+same memory whether they are one group or a million — per-change undo would just
+make recovery need a million `U`s.
+
+**The real exposure is that the journal has no ceiling**, and that is true today
+with or without grouping: `undo.hpp` says "unlimited, back to the start of the
+session. Not a depth-limited ring."
+
+And the shape that actually falls over is not bulk creation but MODIFICATION.
+`AddEntity` keeps one clone of what was added; `ModifyEntity` keeps both before
+and after. A loop nudging one entity a million times stores two million clones
+of it while the drawing never grows.
+
+**The fix, when it is wanted, is a budget rather than a granularity switch.** A
+ceiling on changes or bytes in one group; when it is passed, stop recording and
+say so plainly rather than growing until the process dies:
+
+    Script exceeded the undo budget after 250,000 changes.
+    This operation cannot be undone. (UNDOLIMIT to change.)
+
+That turns an out-of-memory into a stated limitation the user was told about
+before they reached for `U` — the same honest-degradation discipline the DXF
+write follows. `UNDOLIMIT` as the sysvar, zero meaning unlimited.
+
+Pairs with the **suppressed-journal bulk mode**, which `CLAUDE.md` already
+anticipates from the performance side as "a suppressed-regen batch mode during
+LISP loops". Suppressing the journal in the same mode is the honest answer for
+pulling twenty thousand faces in from analysis data: that work does not belong
+in the undo stack at all, and reloading the file is the recovery.
+
+### Interruption
+
+There was NO way to stop a running script. Nothing in the evaluator checked
+anything, so `(while T ...)` ran until the process was killed — a hang rather
+than a defect, and indistinguishable from one to whoever is waiting.
+
+`Interp::interrupt()` sets a flag checked at the top of `eval()`. One site
+rather than one per loop form, because a loop that is missed is a loop that
+cannot be stopped, and the cost is a bool test per form.
+
+**Not yet wired to anything.** The flag exists and is tested; no Escape handler
+sets it. The GUI's Escape currently reaches `CommandEngine`, and routing it to
+the interpreter as well is the remaining piece.
+
 ## TANGENT to a spline is approximate — known, accepted, not yet worth fixing
 
 Sadie's call: it makes mistakes, and at the frequency she will use it that is

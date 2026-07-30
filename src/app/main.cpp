@@ -131,6 +131,11 @@ int repl(noto::lisp::Context& ctx, noto::lisp::Interp& in, bool interactive) {
             in.clear_error();
             noto::lisp::Value result;
             if (!in.eval(form, result)) {
+                // Each form typed at the REPL is a top-level action of its own,
+                // so the script's *error* handler gets its chance here just as
+                // it does inside eval_string. Without this call a handler
+                // defined at the REPL would simply never run.
+                in.run_error_handler();
                 std::cerr << "; error: " << in.error().message() << "\n";
                 break;
             }

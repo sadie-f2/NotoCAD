@@ -3,6 +3,8 @@
 
 #include "noto/lisp/eval.hpp"
 
+#include "noto/database.hpp"
+
 #include "noto/lisp/reader.hpp"
 
 #include <iostream>
@@ -45,6 +47,7 @@ const char* eval_status_message(EvalStatus s) {
         case EvalStatus::StackOverflow: return "recursion too deep";
         case EvalStatus::BadSyntax: return "malformed expression";
         case EvalStatus::ReadFailed: return "read failed";
+        case EvalStatus::Cancelled: return "Function cancelled";
     }
     return "unknown error";
 }
@@ -109,6 +112,18 @@ void Interp::unwind_to(std::size_t mark) {
 // --- eval -------------------------------------------------------------------
 
 bool Interp::eval(const Value& form, Value& out) {
+    // Checked here rather than in the loop forms, because one site covers
+    // while, repeat, foreach, recursion and any future construct at the cost of
+    // a bool test per form -- and a loop that is missed is a loop that cannot
+    // be stopped.
+    if (interrupted_) {
+        interrupted_ = false;
+        // No detail: EvalError::message() prefixes the status text, and R12's
+        // wording is exactly "Function cancelled" -- which is the string every
+        // published *error* handler tests for before deciding what to clean up.
+        return fail(EvalStatus::Cancelled, "");
+    }
+
     switch (form.type) {
         case Type::Sym: {
             Symbol* sym = form.sym;
@@ -427,11 +442,36 @@ bool Interp::eval_special(Special which, const Value& args, Value& out) {
 
 bool Interp::eval_string(std::string_view source, Value& out) {
     out = make_nil();
+
+    // ONE UNDO STEP FOR THE WHOLE EVALUATION. A script is one action from the
+    // user's side, so Escape then a single U puts the drawing back however many
+    // commands and entmakes ran. Groups nest by depth, so a (command ...)
+    // inside opens no second step.
+    //
+    // Guarded on in_group() because a command can be SUSPENDED across two
+    // (command ...) calls -- the case this whole design exists for. Wrapping
+    // unconditionally would leave the journal at a depth nobody closes, and the
+    // work would never commit at all. When a group is already open this
+    // evaluation simply joins it, which is the right reading: it happened while
+    // a command was running.
+    const bool wrap = db_ != nullptr && !db_->journal().in_group();
+    if (wrap) db_->journal().begin_group("LISP");
+
+    bool ok = true;
     Reader reader(ctx_, source);
     Value form;
     while (reader.read(form)) {
-        if (!eval(form, out)) return false;
+        if (!eval(form, out)) {
+            ok = false;
+            break;
+        }
         if (quit_) break;
+    }
+
+    if (wrap) db_->journal().end_group();
+    if (!ok) {
+        run_error_handler();
+        return false;
     }
     const ReadError& re = reader.error();
     if (re.status != ReadStatus::Ok && re.status != ReadStatus::EndOfInput) {
@@ -440,6 +480,45 @@ bool Interp::eval_string(std::string_view source, Value& out) {
                         std::to_string(re.line) + ", column " + std::to_string(re.column));
     }
     return true;
+}
+
+// Calls the script's own *error* handler, if it has defined one.
+//
+// AutoLISP's is a single global hook rather than a condition system: one
+// function, one string, no resumption. When it returns, the top-level form is
+// abandoned -- there is nothing to resume to.
+//
+// Dynamic scoping gives the standard idiom for free. A function declaring
+// *error* among its locals rebinds it for the duration and the shallow binding
+// restores the outer one on the way out, including on this path, so handlers
+// nest correctly without anything here knowing about it.
+void Interp::run_error_handler() {
+    // A handler that itself fails would otherwise call itself forever, which
+    // loses the session rather than the command.
+    if (in_error_handler_) return;
+
+    // The FUNCTION cell, not the value cell: defun stores into sym->func, so a
+    // handler defined the ordinary way is invisible to a value lookup.
+    Symbol* sym = ctx_.intern("*ERROR*");
+    if (sym == nullptr || !sym->has_func) return;
+
+    const Value handler = sym->func;
+
+    // The message the handler branches on. R12's wording for an interrupt is
+    // "Function cancelled", and published handlers test for exactly that
+    // before deciding whether to clean up or to stay quiet.
+    std::string message = error_.message();
+
+    in_error_handler_ = true;
+    const EvalError saved = error_;
+    error_ = EvalError{};
+
+    const Value args[1] = {make_str(ctx_.new_string(message))};
+    Value ignored;
+    apply(handler, args, 1, ignored);
+
+    error_ = saved;
+    in_error_handler_ = false;
 }
 
 Interp::~Interp() { close_all_files(); }

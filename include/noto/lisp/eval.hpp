@@ -42,6 +42,7 @@ enum class EvalStatus : std::uint8_t {
     StackOverflow,
     BadSyntax,
     ReadFailed,
+    Cancelled,   // the user interrupted; not a fault in the script
 };
 
 const char* eval_status_message(EvalStatus s);
@@ -168,6 +169,24 @@ public:
     // to zero; tblsearch's optional third argument sets it to a found entry.
     std::size_t& table_cursor(const std::string& table);
 
+    // --- interruption --------------------------------------------------------
+    //
+    // Set from OUTSIDE the evaluator -- an Escape at the command line, a signal
+    // handler -- and checked on every form. Without it a (while t ...) is
+    // unstoppable short of killing the process, which is a hang rather than a
+    // defect and looks the same to whoever is waiting.
+    //
+    // A plain bool because there is one interpreter per session and the flag is
+    // set by the same thread that is not currently inside eval().
+    void interrupt() { interrupted_ = true; }
+    bool interrupted() const { return interrupted_; }
+    void clear_interrupt() { interrupted_ = false; }
+
+    // Calls the script's *error* function, if it defined one. Called on the way
+    // out of a failed top-level evaluation; see the definition for why it is a
+    // hook rather than a condition system.
+    void run_error_handler();
+
     const EvalError& error() const { return error_; }
     void clear_error() { error_ = EvalError{}; }
 
@@ -216,6 +235,8 @@ private:
     std::vector<SelectionSet> ssets_;
     std::vector<OpenFile> files_;
     std::vector<std::pair<std::string, std::size_t>> table_cursors_;
+    bool interrupted_{false};
+    bool in_error_handler_{false};
     EvalError error_{};
     std::ostream* out_{nullptr};
 
