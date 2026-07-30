@@ -90,7 +90,8 @@ the end:
    touches every entity class, so it is far cheaper at three of them than at
    eight. Then selection sets, the editing commands, and interactive grips.
 
-   See `SF_todo.md` for the ordering beyond that and the open questions.
+   See `SF_todo.md` for the ordering beyond that and the open questions, and
+   `features.md` for capabilities that are wanted but not scheduled.
 
 **QPainter before OpenGL.** R12-era display is wireframe: lines, arcs, text. QPainter
 does that in a fraction of the code with no shader pipeline, no GL context management
