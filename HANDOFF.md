@@ -7,7 +7,7 @@ not already say. Delete or rewrite it rather than letting it rot.
 
 ## Where things stand
 
-- On **`main`**, HEAD `60726f9`. Twenty-two commits since `281ee1e`.
+- On **`main`**, HEAD `50e6aee`. Twenty-two commits since `281ee1e`.
 - **872 tests, 0 failed.** Clean under ASan+UBSan. `ctest` 10/10. `ncad_gui` links.
 - **An uncommitted patch sits in `~/src/iperl`** (a different repository, Sadie's).
   It adds `--pipe` to `iperl.pl` and ncad's calculator depends on it at runtime.
@@ -80,8 +80,9 @@ drives each command to its last prompt, captures the ghost, commits, and compare
 **If you add a preview, add that test.** It is the only thing standing between
 this and the usual slow divergence.
 
-Nine commands preview: LINE, PLINE, ARC, CIRCLE, MOVE/COPY, ROTATE/SCALE/MIRROR,
-ROTATE3D, STRETCH, MEASUREGEOM, ELLIPSE. Still wanted: POINT, SOLID, INSERT,
+Eleven command classes define `preview()`: LINE, PLINE, ARC, CIRCLE, ELLIPSE,
+SPLINE, MEASUREGEOM, STRETCH, ROTATE3D, `MoveCommand` (MOVE/COPY) and
+`TransformCommand` (ROTATE/SCALE/MIRROR). Still wanted: POINT, SOLID, INSERT,
 BREAK, TRIM (all cheap — the machinery exists). PEDIT is awkward, TEXT waits on
 fonts, ARRAY is deferred on repaint cost.
 
@@ -136,7 +137,7 @@ dropping as a bug. A count that adjusted itself would catch nothing.
 
 ## Codegraph
 
-`.codegraph/` exists and was re-indexed on 2026-07-29 (142 files, 3,637 nodes).
+`.codegraph/` exists and was re-indexed on 2026-07-29 (150 files, 3,953 nodes).
 
 **Only `codegraph_explore` is exposed by the MCP server.** The lightweight tools
 the user's global `CLAUDE.md` describes — `codegraph_search`, `codegraph_callers`,
@@ -153,16 +154,24 @@ in a smoke test. For a single known location, grep directly.
 ## What is next
 
 **The osnap gap on ELLIPSE and SPLINE, and it is the top item.** Sadie confirmed
-it by testing: on an ellipse, QUA and CEN work and *nothing else does* — NEAREST
-especially, which surprised her and is the one that will be missed.
+it by testing: on a full ellipse, QUA and CEN work and *nothing else does* —
+NEAREST especially, which surprised her and is the one that will be missed.
 
-The split is not obvious from outside, so: **QUA and CEN are STORED snaps**,
-reported by the entity's own `osnap_points()`, which is why QUA is correctly
-orientation-independent. **NEAREST, PERPENDICULAR and TANGENT are DERIVED**,
-computed in `osnap_derived.cpp`, which reaches for `as_line()` or `as_circular()`
-and gets neither from an ellipse or a spline. **INT** fails for a third reason:
-`intersect.cpp`'s `decompose()` returns an empty span list, which also makes both
-entities invisible to TRIM, BREAK and EXTEND.
+The split is not obvious from outside, and it is not the same split on the two
+entities. **The STORED snaps are whatever the entity's own `osnap_points()`
+reports, and those work.** For `Ellipse` (`entities.cpp:391`) that is CEN, four
+QUA, and — on an elliptical *arc* only — both ENDs, which is why testing on an
+arc rather than a full ellipse makes the report look wrong. QUA is correctly
+orientation-independent because it comes from the entity. For `Spline`
+(`spline.cpp:329`) the stored set is entirely different: END, NODE on each fit
+point, and a parameter-space MID. No CEN and no QUA exist on a spline at all.
+
+What both entities share is the DERIVED half. **NEAREST, PERPENDICULAR and
+TANGENT are computed in `osnap_derived.cpp`**, which reaches for `as_line()` or
+`as_circular()` and gets neither from an ellipse or a spline. **INT** fails for
+a third reason: `intersect.cpp`'s `decompose()` has no case for either type and
+returns an empty span list, which also makes both invisible to TRIM, BREAK and
+EXTEND.
 
 `SF_todo.md`'s "Spline: what was left undone" has the full analysis and the
 likely shape of the fix. Three separable pieces, cheapest first:
@@ -170,12 +179,37 @@ likely shape of the fix. Three separable pieces, cheapest first:
 1. **NEAREST** on both. A projection onto the curve — closed form for an
    ellipse, a Newton iteration on the distance function for a spline.
    Independent of everything below.
-2. **PERPENDICULAR and TANGENT.** Same machinery, more algebra.
+2. **PERPENDICULAR and TANGENT.** Same machinery, more algebra. See the deferred
+   tangent below before building TANGENT — it changes what the answer has to be.
 3. **INT, and therefore TRIM/BREAK/EXTEND.** This is the structural one:
    `SubCurve` models a line segment or a circular arc, and neither an ellipse
    nor a NURBS span is either. The likely answer is a third `SubCurve` form
    carrying a flattened polyline with its parameter mapping — which costs
    exactness at the intersection, and is a real decision rather than a detail.
+
+### The deferred tangent — a real gap, found by Sadie in AutoCAD 2026
+
+**TANGENT as the FIRST point of a line cannot be resolved when it is picked.**
+There is no tangent until the other end exists. AutoCAD defers it: the pick
+records *which circle* was hit, the point slides along that circle as the second
+point moves, and it lands on the true tangent when the second point is fixed.
+ncad does not do this — an initial TAN pick resolves immediately to whatever
+point it likes at pick time, and that point then stays put, so the finished line
+is not tangent to anything. Same for the tangent-tangent case, where neither end
+is known until both are.
+
+This is not a rendering or preview bug, and the signature is the evidence:
+`tangent_points(const Entity&, const Vec3& ref, Vec3 out[2])` in
+`osnap_derived.hpp:45` *requires* the far end. On a first pick there is no `ref`
+to give it. It means an osnap result needs to be able to be a **constraint
+carrying its source entity**, resolved at commit, rather than only a `Vec3`. Worth deciding before TANGENT is built for ellipse and
+spline, because retrofitting the deferred form afterwards touches the same code
+twice. R12 behaved this way too, so this is fidelity, not a divergence.
+
+**Do not validate ellipse TANGENT against AutoCAD 2026 — Sadie tested it and it
+finds the wrong point.** Check ours against the geometry directly: the tangency
+condition, not a reference implementation. This is a case where the newer tool
+is simply wrong and matching it would be a bug.
 
 After that, in Sadie's stated priority order:
 
