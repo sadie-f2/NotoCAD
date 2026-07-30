@@ -625,9 +625,13 @@ void ViewportWidget::paintEvent(QPaintEvent*) {
 }
 
 void ViewportWidget::draw_nameplate(QPainter& painter) const {
-    const QString name = QStringLiteral("NotoCAD \u00A9");
-    const QString stamp =
-        QString::fromLatin1(kNotoVersion) + QChar(' ') + QString::fromLatin1(kNotoGitHash);
+    // Three lines, stacked. The hash gets its own so the version reads as a
+    // version rather than as the first half of a longer token.
+    const QString lines[] = {
+        QStringLiteral("NotoCAD \u00A9"),
+        QStringLiteral("Ver:") + QString::fromLatin1(kNotoVersion),
+        QString::fromLatin1(kNotoGitHash),
+    };
 
     // Sized to a share of the viewport rather than to a point size, so it holds
     // its proportions when the window is resized or the display changes scale.
@@ -637,8 +641,11 @@ void ViewportWidget::draw_nameplate(QPainter& painter) const {
     QFont font = painter.font();
     font.setPixelSize(kNameplateProbePx);
     const QFontMetricsF probe(font);
-    const double widest =
-        std::max(probe.horizontalAdvance(name), probe.horizontalAdvance(stamp));
+
+    // The widest line is what has to fit the tenth, or the block overflows the
+    // width it was asked for.
+    double widest = 0.0;
+    for (const QString& line : lines) widest = std::max(widest, probe.horizontalAdvance(line));
     if (widest <= 0.0) return;
 
     const double scaled = kNameplateProbePx * target / widest;
@@ -650,7 +657,7 @@ void ViewportWidget::draw_nameplate(QPainter& painter) const {
     double y = kNameplateMarginPx + fm.ascent();
 
     painter.setPen(kNameplate);
-    for (const QString& line : {name, stamp}) {
+    for (const QString& line : lines) {
         // Right-aligned, so the block stays anchored to the corner rather than
         // ragged against it.
         painter.drawText(QPointF(right - fm.horizontalAdvance(line), y), line);

@@ -4,6 +4,7 @@
 #include "noto/commands.hpp"
 
 #include "noto/curve_edit.hpp"
+#include "noto/about.hpp"
 #include "noto/intersect.hpp"
 #include "noto/osnap_derived.hpp"
 #include "noto/pick.hpp"
@@ -5346,6 +5347,17 @@ Step AreaCommand::next(CommandContext& ctx, const InputValue& value) {
 
 Step ListCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
 
+// --- ABOUT ------------------------------------------------------------------
+
+Step AboutCommand::start(CommandContext&) { return Step::done(about_text()); }
+
+Step AboutCommand::next(CommandContext&, const InputValue&) {
+    // start() finishes, so nothing can arrive here. Returning done rather than
+    // failing keeps a stray value from turning an informational command into an
+    // error the user has to acknowledge.
+    return Step::done();
+}
+
 Step ListCommand::next(CommandContext& ctx, const InputValue& value) {
     switch (select_.feed(ctx, value)) {
         case SelectionPrompter::Result::Selecting:
@@ -5461,6 +5473,7 @@ Step DxfOutCommand::next(CommandContext& ctx, const InputValue& value) {
 
 CommandPtr make_command(std::string_view name) {
     const std::string upper = upcase(name);
+    if (upper == "ABOUT") return std::make_unique<AboutCommand>();
     if (upper == "LINE") return std::make_unique<LineCommand>();
     if (upper == "ARC") return std::make_unique<ArcCommand>();
     if (upper == "ELLIPSE") return std::make_unique<EllipseCommand>();
@@ -5518,7 +5531,7 @@ CommandPtr make_command(std::string_view name) {
 
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
-        "ARC", "AREA", "ARRAY", "CIRCLE", "ELLIPSE",
+        "ABOUT", "ARC", "AREA", "ARRAY", "CIRCLE", "ELLIPSE",
         "MEASUREGEOM", "ORTHO", "OSNAP", "SETVAR", "SPLINE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",

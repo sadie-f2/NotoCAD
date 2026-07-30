@@ -247,6 +247,17 @@ cmake --build build-asan && ./build-asan/tests/noto_tests
 tilted planes. Opening it in another CAD application is the real correctness gate
 for the DXF and ECS code — headless tests only prove self-consistency.
 
+`ABOUT` prints the version, the build's git hash and the licence of every
+component the binary actually carries — conditioned on the build, so a
+`NOTO_WITH_DWG=ON` binary says it must be conveyed under GPLv3 and a default one
+says it links no GPL code. The Hershey acknowledgements are there because that
+licence requires them to travel with the font data, and the data is compiled in;
+a test asserts they are present, so falling out of compliance fails the suite.
+
+The version's patch number is the command count — 0.0.54 means 54 commands —
+and `tests/test_registry.cpp` asserts the two agree. Adding a command means
+raising the literal there and `project(VERSION)` in the root CMakeLists.
+
 `cmake -B build -DNOTO_BUILD_GUI=ON` adds `./build/src/gui/ncad_gui`, the Qt
 shell: the same drawing, engine and interpreter as `ncad`, with a viewport.
 Middle-drag pans, shift+middle orbits, wheel zooms about the cursor, Home is

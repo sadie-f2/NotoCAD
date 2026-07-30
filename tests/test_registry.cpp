@@ -16,6 +16,7 @@
 
 #include "test.hpp"
 
+#include "noto/about.hpp"
 #include "noto/commands.hpp"
 #include "noto/version.hpp"
 #include "noto/database.hpp"
@@ -76,7 +77,7 @@ TEST_CASE("registry: the command count is what we think it is") {
     // exactly what this file exists to catch, and a count that adjusts itself
     // would catch nothing -- so raise it ON PURPOSE when adding a command, and
     // treat it dropping as a bug until proven otherwise.
-    CHECK(command_names().size() == 53);
+    CHECK(command_names().size() == 54);
     if (command_names().size() != 53) {
         std::printf("       registry holds %zu commands\n", command_names().size());
     }
@@ -102,4 +103,29 @@ TEST_CASE("registry: the version's patch number IS the command count") {
 
     const std::string patch = v.substr(last_dot + 1);
     CHECK(patch == std::to_string(command_names().size()));
+}
+
+TEST_CASE("about: names every licence this build actually carries") {
+    const std::string s = about_text();
+
+    // The version and the build stamp, so a bug report can say which binary.
+    CHECK(s.find(kNotoVersion) != std::string::npos);
+    CHECK(s.find(kNotoGitHash) != std::string::npos);
+
+    // The Hershey acknowledgements are a LICENCE CONDITION, not a courtesy:
+    // they must travel with the font data, and that data is compiled in here.
+    // If this assertion ever fails, the binary is out of compliance.
+    CHECK(s.find("A. V. Hershey") != std::string::npos);
+    CHECK(s.find("James Hurt") != std::string::npos);
+
+    CHECK(s.find("BSD-3-Clause") != std::string::npos);
+    CHECK(s.find("LGPLv3") != std::string::npos);
+
+    // And it must be honest about what is NOT linked. A default build carries
+    // no GPL code, and saying otherwise either way would be the failure.
+#ifdef NOTO_WITH_DWG
+    CHECK(s.find("CONVEYED UNDER GPLv3") != std::string::npos);
+#else
+    CHECK(s.find("links no GPL code") != std::string::npos);
+#endif
 }

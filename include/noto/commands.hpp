@@ -1269,6 +1269,15 @@ private:
     std::vector<Vec3> points_;
 };
 
+// ABOUT: what this build is, and the licence of everything it carries. Takes
+// no arguments and touches nothing, so it answers in one step.
+class AboutCommand final : public Command {
+public:
+    const char* name() const override { return "ABOUT"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
 // LIST: dump what the database holds for the selected entities.
 class ListCommand final : public Command {
 public:

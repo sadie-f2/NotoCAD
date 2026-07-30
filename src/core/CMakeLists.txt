@@ -34,6 +34,7 @@ add_library(noto_core STATIC
   dxf_read.cpp
   command.cpp
   commands.cpp
+  about.cpp
   input_text.cpp
 )
 
