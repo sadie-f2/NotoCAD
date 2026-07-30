@@ -334,8 +334,13 @@ public:
     // DXF degrade and the renderer must agree about what the curve looks like.
     int segment_count(double chord_tolerance) const;
 
-private:
+    // Public because DXF READ needs it: a SPLINE record carries its fit points
+    // (group 11) alongside its control points, and they are the user's own
+    // input rather than something derivable from the curve. Setting them does
+    // not re-solve anything -- see interpolating() for the direction that does.
     void set_fit_points(std::vector<Vec3> pts) { fit_ = std::move(pts); }
+
+private:
 
     int degree_{3};
     std::vector<Vec3> control_;

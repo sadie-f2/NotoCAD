@@ -13,8 +13,28 @@
 // empty it, and "we do not support DIMENSION yet" is not a reason to destroy
 // one.
 //
-// R12 only. A later version's file is refused rather than half-read, because a
-// half-read drawing looks like a damaged one.
+// READING IS DELIBERATELY AHEAD OF WRITING, and that asymmetry is the point:
+// read the format the rest of the world emits, guarantee the one the rest of
+// the world can read. Writing stays AC1009.
+//
+// This comment used to claim a later version's file was refused. It never was --
+// `newer_version` is reported and OPEN warns, which is what the tests pin. And
+// modern files turn out to read well, because the structure was already
+// tolerant rather than because anything was written for it: the CLASSES and
+// OBJECTS sections are stepped over, group 100 subclass markers and group 5
+// handles are simply not asked for, and anything with no class here becomes a
+// Proxy. So the work of importing a 2018 file is a list of entity mappings, not
+// a parser.
+//
+// Read natively but never written: ELLIPSE, LWPOLYLINE and SPLINE. The first
+// and last close a real hole -- the database has held both exactly for a while
+// and could not read one back, so a round trip through DXF turned an ellipse
+// into a polyline permanently. LWPOLYLINE matters because modern AutoCAD writes
+// it where R12 wrote POLYLINE, which is most polylines in most files.
+//
+// Still Proxy, on purpose: MTEXT, HATCH, DIMENSION, LEADER, TABLE, IMAGE, and
+// the ACIS entities. Each needs a decision about what it degrades TO, and a
+// guess there is worse than an honest passthrough.
 #pragma once
 
 #include <string>

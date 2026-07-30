@@ -256,6 +256,136 @@ EntityPtr Reader::build(const EntityGroups& g, GroupStream& in, int& pending_cod
     if (g.name == "POLYLINE") {
         return build_polyline(g, in, pending_code, pending_value, has_pending);
     }
+
+    // --- Entities newer than AC1009 -----------------------------------------
+    //
+    // None of these can appear in an R12 file, so reading them is purely about
+    // IMPORT: modern AutoCAD writes LWPOLYLINE where R12 wrote POLYLINE, and
+    // the database has held ELLIPSE and SPLINE natively for a while without
+    // being able to read one back. Writing still degrades to R12 -- that
+    // asymmetry is deliberate, and AC1009 remains the interchange guarantee.
+
+    if (g.name == "ELLIPSE") {
+        // Centre and major axis are in WORLD coordinates here, not ECS -- the
+        // major axis is a vector from the centre rather than a point. That is
+        // unlike CIRCLE and ARC in the same file, and getting it wrong puts a
+        // tilted ellipse in the wrong place while leaving a flat one perfect.
+        const Vec3 centre = g.point(10);
+        const Vec3 major = g.point(11);
+        const double ratio = g.real(40, 1.0);
+        const double start = g.real(41, 0.0);
+        const double end = g.real(42, kFullTurn);
+
+        auto e = std::make_unique<Ellipse>(centre, major, ratio, start, end, g.normal());
+        apply_common(*e, g);
+        e->set_center(centre);
+        e->set_major_axis(major);
+        return e;
+    }
+
+    if (g.name == "LWPOLYLINE") {
+        auto e = std::make_unique<Polyline>();
+        apply_common(*e, g);
+        e->set_closed((static_cast<int>(g.real(70, 0.0)) & 1) != 0);
+
+        // Vertices arrive as REPEATED group codes, so this walks the groups in
+        // order rather than asking for one by number: every 10 opens a vertex
+        // and the 20, 40, 41 and 42 that follow belong to it.
+        const double elevation = g.real(38, 0.0);
+        const double constant_width = g.real(43, 0.0);
+        const Mat4 to_world = ecs_to_world(e->props().normal);
+
+        bool open = false;
+        Vec3 pos{};
+        double bulge = 0.0;
+        double w0 = constant_width;
+        double w1 = constant_width;
+        auto flush = [&]() {
+            if (!open) return;
+            e->add(to_world.transform_point(Vec3{pos.x, pos.y, elevation}), bulge, w0, w1);
+            bulge = 0.0;
+            w0 = constant_width;
+            w1 = constant_width;
+        };
+
+        for (const DxfGroup& x : g.groups) {
+            switch (x.code) {
+                case 10:
+                    flush();
+                    open = true;
+                    pos = Vec3{to_double(x.value), 0.0, 0.0};
+                    break;
+                case 20: pos.y = to_double(x.value); break;
+                case 40: w0 = to_double(x.value); break;
+                case 41: w1 = to_double(x.value); break;
+                case 42: bulge = to_double(x.value); break;
+                default: break;
+            }
+        }
+        flush();
+        return e;
+    }
+
+    if (g.name == "SPLINE") {
+        const int degree = static_cast<int>(g.real(71, 3.0));
+
+        std::vector<Vec3> control;
+        std::vector<Vec3> fit;
+        std::vector<double> knots;
+        std::vector<double> weights;
+
+        // Control points, fit points, knots and weights are all repeated codes,
+        // and a control point's three coordinates arrive as separate groups.
+        Vec3 c{};
+        Vec3 f{};
+        bool has_c = false;
+        bool has_f = false;
+        for (const DxfGroup& x : g.groups) {
+            switch (x.code) {
+                case 10:
+                    if (has_c) control.push_back(c);
+                    c = Vec3{to_double(x.value), 0.0, 0.0};
+                    has_c = true;
+                    break;
+                case 20: c.y = to_double(x.value); break;
+                case 30: c.z = to_double(x.value); break;
+                case 11:
+                    if (has_f) fit.push_back(f);
+                    f = Vec3{to_double(x.value), 0.0, 0.0};
+                    has_f = true;
+                    break;
+                case 21: f.y = to_double(x.value); break;
+                case 31: f.z = to_double(x.value); break;
+                case 40: knots.push_back(to_double(x.value)); break;
+                case 41: weights.push_back(to_double(x.value)); break;
+                default: break;
+            }
+        }
+        if (has_c) control.push_back(c);
+        if (has_f) fit.push_back(f);
+
+        // A rational spline carries one weight per control point; anything else
+        // is a file saying it is rational without saying how, and a partial
+        // weight list would silently distort the curve. Dropping them makes it
+        // uniform, which is at least a curve the control points describe.
+        if (!weights.empty() && weights.size() != control.size()) weights.clear();
+
+        auto e = std::make_unique<Spline>(degree, std::move(control), std::move(knots),
+                                          std::move(weights), g.normal());
+        apply_common(*e, g);
+        e->set_fit_points(std::move(fit));
+
+        // An unusable spline becomes a Proxy rather than a broken entity: the
+        // groups survive untouched and the drawing is not quietly damaged.
+        if (!e->valid()) {
+            auto p = std::make_unique<Proxy>();
+            p->set_dxf_name(g.name);
+            for (const DxfGroup& x : g.groups) p->add_group(x.code, x.value);
+            ++result_.proxies;
+            return p;
+        }
+        return e;
+    }
     if (g.name == "POINT") {
         auto e = std::make_unique<PointEntity>();
         apply_common(*e, g);

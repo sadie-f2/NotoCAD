@@ -523,7 +523,52 @@ rational curve that derivative is the quotient rule over two B-spline
 derivatives, and the result is normalised away immediately. If anything ever
 needs curvature rather than direction, this is where it goes.
 
-## Writing DXF versions later than R12
+## DXF versions later than R12
+
+**READING them is BUILT. Writing them is still wanted, not now.** Sadie asked for
+import first and called it an asymmetric ask; it is, and the asymmetry is the
+right way round -- read what everyone emits, guarantee what everyone can read.
+
+What made it cheap: the reader was already structurally version-tolerant, and
+nothing had been written for that. HEADER, CLASSES and OBJECTS are stepped over
+because the section loop only recognises TABLES, ENTITIES and BLOCKS; group 100
+subclass markers and group 5 handles are ignored because entities are built by
+asking for the codes they want rather than by walking every group; and anything
+with no class here becomes a Proxy. A 2018 file therefore already imported, with
+its modern entities landing as proxies. The work was a list of entity mappings.
+
+Read natively now: **ELLIPSE**, **LWPOLYLINE**, **SPLINE**. The first and last
+close a real hole rather than adding a feature -- the database has held both
+exactly since they were built and could not read either back, so a round trip
+through DXF turned an ellipse into a polyline *permanently*. That is what Sadie
+hit when a saved-and-reloaded ellipse snapped like a polyline, because it was
+one. LWPOLYLINE matters for a duller reason: modern AutoCAD writes it where R12
+wrote POLYLINE, so it is most polylines in most files.
+
+Three details worth not rediscovering:
+
+- **An ELLIPSE's centre and major axis are WORLD, not ECS**, and the major axis
+  is a vector from the centre rather than a point. CIRCLE and ARC in the same
+  file are ECS. Getting it wrong leaves a flat ellipse perfect and puts a tilted
+  one somewhere else entirely.
+- **An LWPOLYLINE's height is group 38, one elevation for the whole entity**, not
+  a z per vertex. Ignoring it flattens the drawing silently.
+- **Repeated group codes need the groups walked in order.** `EntityGroups::real`
+  returns the first match, which is right for every R12 entity and wrong for
+  every vertex list and knot vector.
+
+Still Proxy on purpose: MTEXT, HATCH, DIMENSION, LEADER, TABLE, IMAGE and the
+ACIS entities. Each needs a decision about what it degrades *to*, and guessing is
+worse than an honest passthrough. **MTEXT is the one worth doing next** now that
+TEXT renders -- it is common, and the question is only how much of its inline
+formatting to discard.
+
+Not looked at yet: **binary DXF**, which modern AutoCAD can write and this reader
+would garble rather than refuse -- it should detect the sentinel and say so. And
+**encoding**: AC1021 and later are UTF-8 where R12 was ANSI, which matters the
+moment text is non-ASCII, since the bundled Hershey font covers ASCII only.
+
+### Writing later versions
 
 **Wanted eventually, not now.** Sadie's: modern AutoCAD offers a range of write
 formats and still lists R12 in 2026, so being able to emit AC1015 or later is

@@ -305,3 +305,146 @@ TEST_CASE("dxf read: carriage returns and padded codes are tolerated") {
     CHECK(db.size() == 1);
     CHECK_VEC(static_cast<const Line*>(db.get(db.order()[0]))->end(), 3.0, 4.0, 0.0, 1e-12);
 }
+
+// --- Entities newer than AC1009 ---------------------------------------------
+//
+// Import only. Writing still degrades to R12, which is the asymmetry Sadie
+// asked for: read the format everyone else emits, guarantee the one everyone
+// else can read.
+
+TEST_CASE("dxf read: an R13+ ELLIPSE becomes a real ellipse, not a proxy") {
+    Database db;
+    // Note the subclass markers and the handle -- present in every file newer
+    // than R12 and absent from every R12 one. They are ignored, not tripped on.
+    const DxfReadResult r = read_dxf_text(db, dxf({kEntitiesOpen,
+        "  0", "ELLIPSE", "  5", "2B",
+        "100", "AcDbEntity", "  8", "0", "100", "AcDbEllipse",
+        " 10", "3.0", " 20", "4.0", " 30", "0.0",
+        " 11", "20.0", " 21", "0.0", " 31", "0.0",
+        " 40", "0.5", " 41", "0.0", " 42", "6.283185307179586",
+        kEnd}));
+
+    CHECK(r.ok);
+    CHECK(r.proxies == 0);
+    REQUIRE(db.order().size() == 1);
+
+    const Entity* e = db.get(db.order()[0]);
+    REQUIRE(e->type() == EntityType::Ellipse);
+    const Ellipse& el = static_cast<const Ellipse&>(*e);
+
+    // Centre and major axis are WORLD here, and the major axis is a VECTOR from
+    // the centre -- unlike CIRCLE in the same file, whose centre is ECS.
+    CHECK_VEC(el.center(), 3.0, 4.0, 0.0, 1e-12);
+    CHECK_NEAR(el.major_length(), 20.0, 1e-12);
+    CHECK_NEAR(el.ratio(), 0.5, 1e-12);
+    CHECK(el.is_full());
+}
+
+TEST_CASE("dxf read: an LWPOLYLINE becomes a polyline, with bulge and elevation") {
+    Database db;
+    const DxfReadResult r = read_dxf_text(db, dxf({kEntitiesOpen,
+        "  0", "LWPOLYLINE", "  5", "2C",
+        "100", "AcDbEntity", "  8", "0", "100", "AcDbPolyline",
+        " 90", "3", " 70", "1", " 38", "2.0",
+        " 10", "0.0", " 20", "0.0", " 42", "1.0",
+        " 10", "5.0", " 20", "5.0",
+        " 10", "10.0", " 20", "0.0",
+        kEnd}));
+
+    CHECK(r.ok);
+    CHECK(r.proxies == 0);
+    REQUIRE(db.order().size() == 1);
+
+    const Entity* e = db.get(db.order()[0]);
+    REQUIRE(e->type() == EntityType::Polyline);
+    const Polyline& p = static_cast<const Polyline&>(*e);
+
+    REQUIRE(p.size() == 3);
+    CHECK(p.closed());
+    // Elevation is group 38, not a z on each vertex -- it is the one place a
+    // LWPOLYLINE keeps its height, and dropping it flattens the drawing.
+    CHECK_VEC(p.vertices()[0].pos, 0.0, 0.0, 2.0, 1e-12);
+    CHECK_VEC(p.vertices()[2].pos, 10.0, 0.0, 2.0, 1e-12);
+    // The bulge belongs to the vertex it followed, not to the next one.
+    CHECK_NEAR(p.vertices()[0].bulge, 1.0, 1e-12);
+    CHECK_NEAR(p.vertices()[1].bulge, 0.0, 1e-12);
+}
+
+TEST_CASE("dxf read: an R13+ SPLINE becomes a NURBS curve") {
+    Database db;
+    const DxfReadResult r = read_dxf_text(db, dxf({kEntitiesOpen,
+        "  0", "SPLINE", "  5", "2E",
+        "100", "AcDbEntity", "  8", "0", "100", "AcDbSpline",
+        " 70", "8", " 71", "3", " 72", "8", " 73", "4", " 74", "0",
+        " 40", "0.0", " 40", "0.0", " 40", "0.0", " 40", "0.0",
+        " 40", "1.0", " 40", "1.0", " 40", "1.0", " 40", "1.0",
+        " 10", "0.0", " 20", "0.0", " 30", "0.0",
+        " 10", "3.0", " 20", "9.0", " 30", "0.0",
+        " 10", "9.0", " 20", "-3.0", " 30", "0.0",
+        " 10", "12.0", " 20", "6.0", " 30", "0.0",
+        kEnd}));
+
+    CHECK(r.ok);
+    CHECK(r.proxies == 0);
+    REQUIRE(db.order().size() == 1);
+
+    const Entity* e = db.get(db.order()[0]);
+    REQUIRE(e->type() == EntityType::Spline);
+    const Spline& s = static_cast<const Spline&>(*e);
+
+    CHECK(s.degree() == 3);
+    CHECK(s.control_points().size() == 4);
+    CHECK(s.knots().size() == 8);
+    CHECK(s.valid());
+    // A clamped knot vector means the curve starts and ends on its outer
+    // control points, which is the cheapest check that the knots landed in the
+    // right order rather than merely in the right quantity.
+    CHECK_VEC(s.start_point(), 0.0, 0.0, 0.0, 1e-9);
+    CHECK_VEC(s.end_point(), 12.0, 6.0, 0.0, 1e-9);
+}
+
+TEST_CASE("dxf read: an unusable SPLINE survives as a proxy rather than as wreckage") {
+    Database db;
+    // Knot count must be control points + degree + 1. This one says degree 3
+    // with four control points and only three knots.
+    const DxfReadResult r = read_dxf_text(db, dxf({kEntitiesOpen,
+        "  0", "SPLINE", "100", "AcDbEntity", "  8", "0", "100", "AcDbSpline",
+        " 71", "3", " 73", "4",
+        " 40", "0.0", " 40", "1.0", " 40", "2.0",
+        " 10", "0.0", " 20", "0.0", " 30", "0.0",
+        " 10", "3.0", " 20", "9.0", " 30", "0.0",
+        " 10", "9.0", " 20", "-3.0", " 30", "0.0",
+        " 10", "12.0", " 20", "6.0", " 30", "0.0",
+        kEnd}));
+
+    CHECK(r.ok);
+    CHECK(r.proxies == 1);
+    REQUIRE(db.order().size() == 1);
+    // Kept whole, so saving the file back does not destroy what we could not
+    // use -- the same contract every unknown entity already gets.
+    CHECK(db.get(db.order()[0])->type() == EntityType::Proxy);
+}
+
+TEST_CASE("dxf read: a 2018 file's sections and markers are stepped over") {
+    Database db;
+    const DxfReadResult r = read_dxf_text(db,
+        "  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1032\n  0\nENDSEC\n"
+        "  0\nSECTION\n  2\nCLASSES\n"
+        "  0\nCLASS\n  1\nACDBDICTIONARYWDFLT\n  2\nAcDbDictionaryWithDefault\n 90\n0\n"
+        "  0\nENDSEC\n"
+        "  0\nSECTION\n  2\nENTITIES\n"
+        "  0\nLINE\n  5\n2A\n100\nAcDbEntity\n  8\n0\n100\nAcDbLine\n"
+        " 10\n0.0\n 20\n0.0\n 30\n0.0\n 11\n10.0\n 21\n5.0\n 31\n0.0\n"
+        "  0\nENDSEC\n"
+        "  0\nSECTION\n  2\nOBJECTS\n"
+        "  0\nDICTIONARY\n  5\nC\n100\nAcDbDictionary\n  3\nACAD_GROUP\n350\nD\n"
+        "  0\nENDSEC\n  0\nEOF\n");
+
+    CHECK(r.ok);
+    CHECK(r.version == "AC1032");
+    CHECK(r.newer_version);
+    // CLASSES and OBJECTS carry nothing this program models, and stepping over
+    // them is why a modern file reads at all.
+    REQUIRE(db.order().size() == 1);
+    CHECK(db.get(db.order()[0])->type() == EntityType::Line);
+}
