@@ -35,8 +35,14 @@ bool screen_distance(const Viewport& vp, const ScreenPoint& cursor, const Vec3& 
 // nearer end" work, and it is the same rule that snaps to a circle's centre
 // from its rim. Filtering points by distance instead would mean you had to be
 // on the snap already in order to find it.
+// `deferred` is a parameter rather than something the caller patches onto
+// out.back() afterwards, because this function does not always append: a point
+// that will not project is dropped. Setting the flag after the call therefore
+// marked whatever hit happened to be last -- another entity's, or this
+// ellipse's own CENTRE -- and a CENTRE marked deferred is resolved by LINE as
+// though it were a tangent, so the centre snap silently walked onto the curve.
 void add_hit(std::vector<OsnapHit>& out, const Viewport& vp, const ScreenPoint& cursor,
-             const Vec3& pos, OsnapType type, Handle a, Handle b) {
+             const Vec3& pos, OsnapType type, Handle a, Handle b, bool deferred = false) {
     double d = 0.0;
     if (!screen_distance(vp, cursor, pos, &d)) return;
 
@@ -47,6 +53,7 @@ void add_hit(std::vector<OsnapHit>& out, const Viewport& vp, const ScreenPoint& 
     h.entity2 = b;
     h.distance_px = d;
     h.valid = true;
+    h.deferred = deferred;
     out.push_back(h);
 }
 
@@ -103,8 +110,7 @@ void collect_derived(std::vector<OsnapHit>& out, const Candidate& c, const Viewp
     // solves the constraint once it has the far end.
     if (!q.from_point_is_base && q.has_reference && osnap_enabled(q.mask, OsnapType::Tangent) &&
         nearest_point(*c.entity, q.reference, &p)) {
-        add_hit(out, vp, cursor, p, OsnapType::Tangent, c.handle, kNullHandle);
-        if (!out.empty()) out.back().deferred = true;
+        add_hit(out, vp, cursor, p, OsnapType::Tangent, c.handle, kNullHandle, true);
     }
 
     // PER and TAN are measured from the rubber-band base, not the cursor.

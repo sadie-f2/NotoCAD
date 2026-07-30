@@ -391,16 +391,29 @@ BBox Ellipse::bbox() const {
 void Ellipse::osnap_points(std::vector<OsnapPoint>& out) const {
     out.push_back({center_, OsnapType::Center});
 
-    Vec3 q[4];
-    axis_points(q);
-    for (const Vec3& p : q) out.push_back({p, OsnapType::Quadrant});
+    // Quadrants are FILTERED BY THE SWEEP, exactly as Arc::osnap_points filters
+    // its own. Offering all four unconditionally -- which this did -- puts snap
+    // points on an elliptical arc at the ends of axes it does not reach, so the
+    // cursor catches geometry that is not drawn.
+    const double params[4] = {0.0, kTwoPi * 0.25, kTwoPi * 0.5, kTwoPi * 0.75};
+    for (const double t : params) {
+        if (is_full() || normalize_angle(t - start_param_) <= sweep() + kEps) {
+            out.push_back({point_at(t), OsnapType::Quadrant});
+        }
+    }
 
-    // An elliptical arc has ends; a whole one does not, and offering its start
-    // as an endpoint would put an ENDPOINT snap somewhere the curve does not
-    // stop.
+    // An elliptical arc has ends and a middle; a whole one has neither, and
+    // offering its start as an endpoint would put an ENDPOINT snap somewhere the
+    // curve does not stop.
     if (!is_full()) {
         out.push_back({start_point(), OsnapType::Endpoint});
         out.push_back({end_point(), OsnapType::Endpoint});
+
+        // MIDPOINT by PARAMETER, not by arc length -- the same approximation
+        // Spline::osnap_points makes and for the same reason: arc length needs a
+        // numerical integral per query and no snap is worth that. An ellipse was
+        // offering no midpoint at all, which an arc does.
+        out.push_back({point_at(start_param_ + sweep() * 0.5), OsnapType::Midpoint});
     }
 }
 

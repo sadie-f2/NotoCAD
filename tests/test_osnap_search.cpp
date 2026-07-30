@@ -446,3 +446,29 @@ TEST_CASE("osnap search: TAN is measured from the base point too") {
         CHECK_NEAR(dot(normalize(h.pos - q.from_point), normalize(h.pos)), 0.0, 1e-9);
     }
 }
+
+TEST_CASE("osnap search: only the deferred tangent is ever marked deferred") {
+    // Regression. The deferred flag was set by patching out.back() after
+    // add_hit, which does not always append -- a point that will not project is
+    // dropped. So the flag landed on whatever hit happened to be last, and a
+    // CENTRE marked deferred is resolved by LINE as though it were a tangent:
+    // the centre snap silently walked onto the curve.
+    Database db;
+    db.add(std::make_unique<Ellipse>(Vec3{0, 0, 0}, Vec3{100, 0, 0}, 0.5));
+    db.add(std::make_unique<Circle>(Vec3{0, 0, 0}, 40.0));
+    const Viewport v = plan_800x600();
+
+    OsnapQuery q;
+    q.mask = kOsnapAll;
+    q.aperture_px = 10.0;
+    q.reference = Vec3{100, 0, 0};
+    q.has_reference = true;
+
+    std::vector<OsnapHit> all;
+    osnap_candidates(db, v, at(100, 0), q, all);
+    CHECK(!all.empty());
+
+    for (const OsnapHit& h : all) {
+        if (h.deferred) CHECK(h.type == OsnapType::Tangent);
+    }
+}

@@ -15,6 +15,7 @@
 #include "test.hpp"
 
 #include "noto/entities.hpp"
+#include "noto/osnap.hpp"
 #include "noto/osnap_derived.hpp"
 
 #include <cmath>
@@ -340,4 +341,52 @@ TEST_CASE("polyline: a straight one has no tangents to offer") {
 
     Vec3 pts[kMaxTangents];
     CHECK(tangent_points(p, {30, 30, 0}, pts) == 0);
+}
+
+// --- ELLIPSE static snaps ---------------------------------------------------
+
+TEST_CASE("ellipse arc: quadrants are filtered by the sweep, as an arc's are") {
+    // The upper half only. The -Y axis end is not on it, and offering a QUA
+    // there puts a snap on geometry the drawing does not contain.
+    const Ellipse arc({0, 0, 0}, {10, 0, 0}, 0.5, 0.0, kPi);
+
+    std::vector<OsnapPoint> pts;
+    arc.osnap_points(pts);
+
+    bool has_bottom = false;
+    int quadrants = 0;
+    for (const OsnapPoint& p : pts) {
+        if (p.type != OsnapType::Quadrant) continue;
+        ++quadrants;
+        if (near_equal(p.pos, Vec3{0, -5, 0}, 1e-9)) has_bottom = true;
+    }
+    CHECK(!has_bottom);
+    CHECK(quadrants == 3);  // +X, +Y, -X; the -Y end is off the sweep
+}
+
+TEST_CASE("ellipse arc: has a midpoint, and a whole ellipse does not") {
+    const Ellipse arc({0, 0, 0}, {10, 0, 0}, 0.5, 0.0, kPi);
+
+    std::vector<OsnapPoint> pts;
+    arc.osnap_points(pts);
+
+    bool mid = false;
+    for (const OsnapPoint& p : pts) {
+        if (p.type == OsnapType::Midpoint) {
+            mid = true;
+            // By parameter, which for a half sweep is the +Y axis end.
+            CHECK(near_equal(p.pos, Vec3{0, 5, 0}, 1e-9));
+        }
+    }
+    CHECK(mid);
+
+    // A whole ellipse has no ends and no middle between them.
+    const Ellipse full({0, 0, 0}, {10, 0, 0}, 0.5);
+    pts.clear();
+    full.osnap_points(pts);
+    for (const OsnapPoint& p : pts) {
+        CHECK(p.type != OsnapType::Midpoint);
+        CHECK(p.type != OsnapType::Endpoint);
+    }
+    CHECK(pts.size() == 5);  // centre and four quadrants
 }
