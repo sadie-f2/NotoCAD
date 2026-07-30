@@ -5568,11 +5568,26 @@ Step DxfInCommand::next(CommandContext& ctx, const InputValue& value) {
         return Step::failed("a file name is required");
     }
 
-    std::string path = value.text;
-    if (path.size() < 4 || path.compare(path.size() - 4, 4, ".dxf") != 0) path += ".dxf";
+    // The same treatment every other file command gives a name: ~ expanded, and
+    // .dxf added only when there is no extension at all. This used to append
+    // ".dxf" to anything not ending in exactly that, so "plan.DXF" became
+    // "plan.DXF.dxf" and "~/plan" was looked for in the current directory.
+    const std::string path = ensure_extension(expand_user_path(value.text), ".dxf");
 
     const DxfReadResult r = read_dxf_file(ctx.db, path);
     if (!r.ok) return Step::failed(r.error.empty() ? "could not read the file" : r.error);
+
+    // THE DRAWING IS NOW THIS FILE. Recorded here and not only in SAVE, or
+    // opening a drawing and saving it would prompt for a name as though it had
+    // come from nowhere -- and worse, a name left over from an earlier SAVE
+    // would be offered for a drawing it has nothing to do with.
+    //
+    // Set after the read succeeds, so a failed open leaves both the drawing and
+    // its name alone.
+    const std::string full = normalised_path(path);
+    ctx.db.sysvars().set_metadata(Sysvar::DwgPrefix,
+                                  SysvarValue::of_string(path_directory(full)));
+    ctx.db.sysvars().set_metadata(Sysvar::DwgName, SysvarValue::of_string(path_filename(full)));
 
     // The selection named entities in a drawing that no longer exists.
     ctx.selection.clear();

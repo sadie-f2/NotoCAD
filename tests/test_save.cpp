@@ -276,3 +276,78 @@ TEST_CASE("new: a clean drawing is replaced without a question") {
     // start() finished it: nothing to lose, so nothing to ask.
     CHECK(!engine.active());
 }
+
+TEST_CASE("open: the drawing remembers the file it came from") {
+    // Reported from use: open, edit, SAVE -- and the prompt asked for a name as
+    // though the drawing had come from nowhere. DWGNAME was set by SAVE and by
+    // nothing else.
+    const std::string path = temp_path("opened.dxf");
+    std::filesystem::remove(path);
+
+    {
+        Database seed;
+        CommandEngine engine(seed);
+        make_edit(seed, 3.0);
+        engine.begin(make_command("SAVE"));
+        engine.supply(InputValue::of_string(path));
+    }
+
+    Database db;
+    CommandEngine engine(db);
+    engine.begin(make_command("OPEN"));
+    engine.supply(InputValue::of_string(path));
+
+    CHECK(db.sysvars().get_string(Sysvar::DwgName) == "opened.dxf");
+    CHECK(!db.journal().dirty());  // a freshly opened drawing owes nothing
+
+    // And QSAVE can now write it back without asking anything at all.
+    make_edit(db, 4.0);
+    engine.begin(make_command("QSAVE"));
+    CHECK(!engine.active());
+    CHECK(!db.journal().dirty());
+}
+
+TEST_CASE("open: a stale name does not survive onto a different drawing") {
+    const std::string first = temp_path("stale_a.dxf");
+    const std::string second = temp_path("stale_b.dxf");
+    std::filesystem::remove(first);
+    std::filesystem::remove(second);
+
+    Database db;
+    CommandEngine engine(db);
+    make_edit(db, 1.0);
+
+    engine.begin(make_command("SAVE"));
+    engine.supply(InputValue::of_string(first));
+
+    // Build a second file, then open it. The name must follow the OPEN, or SAVE
+    // would offer the first drawing's name for the second drawing's contents.
+    {
+        Database other;
+        CommandEngine oe(other);
+        make_edit(other, 2.0);
+        oe.begin(make_command("SAVE"));
+        oe.supply(InputValue::of_string(second));
+    }
+
+    engine.begin(make_command("OPEN"));
+    engine.supply(InputValue::of_string(second));
+    CHECK(db.sysvars().get_string(Sysvar::DwgName) == "stale_b.dxf");
+}
+
+TEST_CASE("open: a failed read leaves the drawing and its name alone") {
+    const std::string path = temp_path("keeper.dxf");
+    std::filesystem::remove(path);
+
+    Database db;
+    CommandEngine engine(db);
+    make_edit(db, 1.0);
+    engine.begin(make_command("SAVE"));
+    engine.supply(InputValue::of_string(path));
+
+    engine.begin(make_command("OPEN"));
+    engine.supply(InputValue::of_string(temp_path("no_such_file_here.dxf")));
+
+    CHECK(db.order().size() == 1);
+    CHECK(db.sysvars().get_string(Sysvar::DwgName) == "keeper.dxf");
+}
