@@ -67,6 +67,13 @@ struct Fixture {
         return prin1(v);
     }
 
+    double real_of(const std::string& source) {
+        in.clear_error();
+        Value v;
+        if (!in.eval_string(source, v)) return -1e30;
+        return is_number(v) ? as_double(v) : -1e30;
+    }
+
     // Source with a path spliced in, since every test here needs one.
     std::string evalf(const std::string& fmt, const std::string& path) {
         std::string s = fmt;
@@ -206,44 +213,77 @@ TEST_CASE("lisp findfile: the full path, or nil") {
     CHECK(f.eval("(findfile \"/no/such/file/at/all\")") == "nil");
 }
 
+TEST_CASE("lisp read: the first expression only, unevaluated") {
+    Fixture f;
+    // The FIRST, not all of them. That is R12's behaviour rather than an
+    // economy, and it is why the parenthesis idiom below exists.
+    CHECK(f.eval("(read \"1 2 3\")") == "1");
+    CHECK(f.eval("(read \"(a b c)\")") == "(A B C)");
+
+    // Nothing is evaluated: this is the three-element list, not 3.
+    CHECK(f.eval("(read \"(+ 1 2)\")") == "(+ 1 2)");
+
+    // A blank line in a data file is a thing that happens, so an empty string
+    // is nil rather than an error -- otherwise every caller has to guard.
+    CHECK(f.eval("(read \"\")") == "nil");
+    CHECK(f.eval("(read \"   \")") == "nil");
+
+    // Malformed input IS an error: that is a broken file, not a blank one.
+    CHECK(f.eval("(read \"(a b\")").find("<error") == 0);
+    CHECK(f.eval("(read 5)").find("<error") == 0);
+}
+
+TEST_CASE("lisp read: the idiom that splits a record") {
+    // Wrapping a line in parentheses makes the reader do the splitting, which
+    // is how AutoLISP has always parsed a whitespace-separated record and the
+    // reason `read` was the missing piece rather than a split-string function.
+    Fixture f;
+    CHECK(f.eval("(read (strcat \"(\" \"30.0 40.0\" \")\"))") == "(30.0 40.0)");
+    CHECK(f.eval("(car (read (strcat \"(\" \"30.0 40.0\" \")\")))") == "30.0");
+
+    // And a blank record collapses to nil, which a caller can test in one step.
+    CHECK(f.eval("(read (strcat \"(\" \"\" \")\"))") == "nil");
+}
+
 TEST_CASE("lisp: the round trip the project exists for") {
     // External analysis data in, geometry out, results back to a file. Each
     // function working is not the same claim as this working.
     const std::string in_path = temp_path("points.txt");
     const std::string out_path = temp_path("lengths.txt");
     std::filesystem::remove(out_path);
+    // A blank line in the middle, because real data files have them.
     write_file(in_path,
                "0.0 0.0\n"
                "30.0 40.0\n"
+               "\n"
                "30.0 0.0\n");
 
     Fixture f;
     f.evalf(
-        "(setq g (open \"@PATH@\" \"r\") pts '())"
-        // Each line is "x y". No string splitting exists yet, so the file is
-        // read with read-char into a form the reader can take -- which is
-        // itself a fair demonstration that the primitives are enough.
+        "(setq g (open \"@PATH@\" \"r\") prev nil total 0.0)"
+        // The whole point: each line becomes a real point through `read`, and
+        // consecutive points become geometry.
         "(while (setq ln (read-line g))"
-        "  (setq pts (cons ln pts)))"
-        "(close g)"
-        "(setq n (length pts))",
+        "  (setq p (read (strcat \"(\" ln \")\")))"
+        "  (if p"
+        "    (progn"
+        "      (if prev (progn (command \"LINE\" prev p \"\")"
+        "                      (setq total (+ total (distance prev p)))))"
+        "      (setq prev p))))"
+        "(close g)",
         in_path);
-    CHECK(f.eval("n") == "3");
 
-    // Build geometry from computed points and measure it back.
-    f.eval(
-        "(setq a '(0.0 0.0 0.0) b '(30.0 40.0 0.0))"
-        "(command \"LINE\" a b \"\")"
-        "(setq d (distance a b))");
-    CHECK(f.eval("d") == "50.0");
-    CHECK(f.db.order().size() == 1);
+    // Three points survive; the blank line is skipped rather than breaking it.
+    CHECK(f.db.order().size() == 2);
+    // 0,0 -> 30,40 is 50; 30,40 -> 30,0 is 40.
+    CHECK_NEAR(f.real_of("total"), 90.0, 1e-9);
 
+    // And the answer goes back out to a file.
     f.evalf(
         "(setq o (open \"@PATH@\" \"w\"))"
-        "(write-line (strcat \"length=\" (rtos d 2 1)) o)"
+        "(write-line (strcat \"total=\" (rtos total 2 1)) o)"
         "(close o)",
         out_path);
 
-    const std::string written = read_file(out_path);
-    CHECK(written.find("length=50.0") != std::string::npos);
+    CHECK(read_file(out_path).find("total=90.0") != std::string::npos);
 }

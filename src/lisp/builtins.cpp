@@ -7,6 +7,7 @@
 // and one real argument makes the whole result real. (/ 7 2) is 3, not 3.5.
 // That is not a rounding artifact to be smoothed over -- LISP files depend on it.
 #include "noto/lisp/eval.hpp"
+#include "noto/lisp/reader.hpp"
 
 #include "entity_subrs.hpp"
 #include "command_subr.hpp"
@@ -690,6 +691,44 @@ bool subr_ascii(Interp& in, const Value* a, std::size_t, Value& out) {
 
 // --- output -----------------------------------------------------------------
 
+
+// (read "string") -> the FIRST expression in the string, unevaluated.
+//
+// The first, not all of them: (read "1 2") is 1, and that is R12's behaviour
+// rather than an economy. The idiom that makes it useful for parsing a line of
+// data is to wrap the line in parentheses so it reads as one list --
+//
+//     (read (strcat "(" (read-line f) ")"))   ; "30.0 40.0" -> (30.0 40.0)
+//
+// which is how AutoLISP has always split a whitespace-separated record, and the
+// reason this was the missing piece rather than a string-splitting function.
+//
+// Nothing is evaluated. (read "(+ 1 2)") is the three-element list, not 3.
+bool subr_read(Interp& in, const Value* a, std::size_t, Value& out) {
+    if (a[0].type != Type::Str) {
+        return in.fail(EvalStatus::BadArgumentType, "read: not a string: " + prin1(a[0]));
+    }
+
+    ReadError err;
+    const Value v = read_one(in.ctx(), a[0].str->view(), &err);
+
+    // Nothing there at all is nil rather than an error: a blank line in a data
+    // file is a thing that happens, and refusing to read one would make every
+    // caller guard against it.
+    if (err.status == ReadStatus::EndOfInput) {
+        out = make_nil();
+        return true;
+    }
+    if (!err.ok()) {
+        return in.fail(EvalStatus::BadArgumentType,
+                       std::string("read: ") + read_status_message(err.status) + " in " +
+                           prin1(a[0]));
+    }
+
+    out = v;
+    return true;
+}
+
 bool subr_princ(Interp& in, const Value* a, std::size_t n, Value& out) {
     out = n == 0 ? make_nil() : a[0];
     if (n > 0) in.output() << princ(a[0]);
@@ -792,6 +831,7 @@ constexpr SubrDef kSubrs[] = {
     {"STRLEN", subr_strlen, 0, kNoMax},
     {"SUBSTR", subr_substr, 2, 3},
     {"STRCASE", subr_strcase, 1, 2},
+    {"READ", subr_read, 1, 1},
     {"ITOA", subr_itoa, 1, 1},
     {"ATOI", subr_atoi, 1, 1},
     {"ATOF", subr_atof, 1, 1},

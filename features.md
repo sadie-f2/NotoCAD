@@ -215,7 +215,7 @@ headline number flatters it.
 | File I/O | ~~`open`, `close`, `read-line`, `write-line`, `read-char`, `write-char`~~ **built**, plus `findfile` |
 | Tables | `tblnext`, `tblsearch` |
 | Selection | `entsel`, `nentsel`, `handent` |
-| Other | `wcmatch`, `*error*`, `load`, `read`, `eval`, `logand`, `logior`, `lsh`, `angtos`, `prompt`, `alert`, `findfile`, `ver` |
+| Other | `wcmatch`, `*error*`, `load`, `eval`, `logand`, `logior`, `lsh`, `angtos`, `prompt`, `alert`, `ver` — ~~`read`~~ and ~~`findfile`~~ built |
 
 ### Can a classic script run?
 
@@ -245,10 +245,10 @@ project exists for, and `CLAUDE.md` names solid file I/O in its own scope.
    get the same `~` expansion the file commands give, so a script and the SAVE
    prompt agree about what `~/drawings/x.dxf` means.
 
-   **Still missing for text handling:** there is no way to split a string, so a
-   line of `"30.0 40.0"` cannot become two numbers without `read`. That makes
-   `read` — parsing a string into a value — the next thing worth adding, and it
-   is small.
+   **`read` closed the text-handling gap.** `(read (strcat "(" line ")"))` turns
+   `"30.0 40.0"` into the list `(30.0 40.0)` — the reader does the splitting,
+   which is how AutoLISP has always parsed a whitespace-separated record and why
+   this was the missing piece rather than a split-string function.
 3. **The `get*` family with `initget`.** See "Interactive AutoLISP input is not
    implemented" below, which explains why bare `(ssget)` refuses rather than
    returning an empty set.
