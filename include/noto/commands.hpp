@@ -1278,6 +1278,47 @@ public:
     Step next(CommandContext& ctx, const InputValue& value) override;
 };
 
+// SAVE, SAVEAS and QSAVE -- one command, three entry points.
+//
+// They differ only in WHEN they ask for a name: QSAVE never asks if one is
+// known, SAVEAS always asks, SAVE asks with the current name offered. Writing
+// them as one class is what stops the overwrite rule and the dirty rule from
+// being implemented three times and agreeing twice.
+//
+// R12's SAVE wrote DWG and DXFOUT exported DXF. Here DXF IS the native format,
+// so these are the save and DXFOUT stays an export: it takes a name every time,
+// and it clears neither the drawing name nor the modified flag.
+class SaveCommand final : public Command {
+public:
+    enum class Mode { Save, SaveAs, QSave };
+
+    explicit SaveCommand(Mode mode) : mode_(mode) {}
+    const char* name() const override;
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    Step write_to(CommandContext& ctx, const std::string& path);
+
+    enum class State { AskName, ConfirmOverwrite };
+
+    Mode mode_{Mode::Save};
+    State state_{State::AskName};
+    std::string pending_;
+};
+
+// NEW: start an empty drawing. Warns first if the current one has unsaved work,
+// which is the same question QUIT asks and for the same reason.
+class NewCommand final : public Command {
+public:
+    const char* name() const override { return "NEW"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    bool asked_{false};
+};
+
 // LIST: dump what the database holds for the selected entities.
 class ListCommand final : public Command {
 public:

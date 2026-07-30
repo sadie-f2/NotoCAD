@@ -467,6 +467,60 @@ or a height change inside a paragraph is discarded rather than honoured. Line
 spacing is the 3-on-5 default scaled by group 44; the exact-distance mode (group
 73 = 2) is not distinguished. Columns are ignored entirely.
 
+## The save cycle — built, and the trap in the obvious design
+
+**Dirty is answered by a SERIAL, not a depth.** Sadie proposed tracking the undo
+position at the last save, or resetting a counter to zero on write and treating
+negatives as dirty. Those are the same idea with different origins, and both
+identify a state by how many groups deep it is — which is not unique:
+
+> Save at depth five. Undo twice. Draw two new things. The redo stack is
+> discarded by the new work, the depth is five again, and a depth comparison
+> reports the drawing as saved while it holds two entirely different entities.
+
+So each committed group carries a `serial`, never reused, and `mark_saved()`
+records the serial on top of the undo stack rather than its size. A rebuilt
+branch of the same depth carries different serials and stays dirty — correctly,
+and until it is saved again. `redo()` *moves* a group rather than rebuilding it,
+so serials survive any number of undo/redo round trips for free.
+`tests/test_save.cpp` has the branch case; a depth-based answer passes every
+other test in that file and fails only that one, which is how it would have
+shipped.
+
+**`Sysvars::set_metadata` exists because of a bug this caused.** DWGNAME and
+DWGPREFIX are journalled writes if set the ordinary way, so SAVE recorded a
+change of its own — the command's group closed *after* `mark_saved()`, pushed a
+new serial, and the drawing was dirty the instant it was saved. Those two
+describe where the drawing lives rather than what it contains, so they are
+outside undo rather than escaping it. Anything that is drawing content still
+goes through `set_owned`.
+
+**`same_file()` exists because of another.** `~/x` and the absolute path are one
+file spelled two ways, and a string comparison made QSAVE warn about overwriting
+the drawing it had just written. Comparison and storage both normalise now.
+
+Decided along the way: **DXFOUT stays an export.** It takes a name every time and
+clears neither the drawing name nor the modified flag. R12's SAVE wrote DWG and
+DXFOUT exported DXF; here DXF *is* the native format, so SAVE/SAVEAS/QSAVE are
+the save. That leaves DXFOUT the jobs SAVE will not want anyway — a subset, or a
+different DXF version once that lands. Modern AutoCAD folded both into
+OPEN/SAVEAS, which is worth knowing but is not the same situation.
+
+**Tab completion is GUI-only**, per `CLAUDE.md`'s standing rule that the terminal
+gets no raw-mode work. Not yet built; it is a Qt widget concern.
+
+### Known limits
+
+- **NEW and OPEN do not reset the tables.** Layers, linetypes, blocks and UCS
+  definitions survive both. `reset_drawing()` matches what `read_dxf_text` has
+  always done, so this is consistent rather than new — but a genuinely new
+  drawing should probably start with only layer 0.
+- **DBMOD is not implemented.** R12's bit-coded modified flag would need every
+  mutation to update it; the boolean is read from the journal instead.
+- **The quit confirmation is Yes/No.** A third answer meaning "cancel the quit"
+  is what No does here, since there is nothing else for it to mean at a prompt
+  that only ends the session.
+
 ## TANGENT to a spline is approximate — known, accepted, not yet worth fixing
 
 Sadie's call: it makes mistakes, and at the frequency she will use it that is

@@ -350,7 +350,27 @@ bool PromptSession::feed_line(const std::string& line) {
     const std::string head = tokens.front();
     const std::string upper = upcase(head);
 
-    if (upper == "QUIT" || upper == "EXIT") return false;
+    if (confirm_quit_) {
+        confirm_quit_ = false;
+        if (upper == "Y" || upper == "YES") return false;
+        out_.write("Drawing kept.\n");
+        return true;
+    }
+
+    if (upper == "QUIT" || upper == "EXIT") {
+        // Nothing to lose, so nothing to ask.
+        if (!engine_.db().journal().dirty()) return false;
+
+        // Asked rather than refused, and defaulting to the answer that loses
+        // nothing. Cancel is a real third answer: without it there is no way to
+        // back out of a QUIT you did not mean, and the two-answer version makes
+        // "No" ambiguous between "do not save" and "do not quit".
+        out_.write("Drawing has unsaved changes.\n");
+        out_.write("  Yes    -- quit and lose them\n");
+        out_.write("  No     -- stay in the drawing\n");
+        confirm_quit_ = true;
+        return true;
+    }
     if (head == "?") {
         list_commands();
         return true;

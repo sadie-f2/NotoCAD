@@ -110,6 +110,11 @@ struct Change {
 struct UndoGroup {
     std::string name;  // the command that made it, for "UNDO LINE" style echo
     std::vector<Change> changes;
+
+    // Unique and never reused. This is what makes "is the drawing saved?"
+    // answerable -- see UndoJournal::dirty(), where the reason a DEPTH cannot
+    // do the job is spelled out.
+    std::uint64_t serial{0};
 };
 
 class UndoJournal {
@@ -157,6 +162,31 @@ public:
     std::size_t undo_depth() const { return undo_.size(); }
     std::size_t redo_depth() const { return redo_.size(); }
 
+    // --- The save point ------------------------------------------------------
+    //
+    // Called when the whole drawing has been written to a file. Remembers WHICH
+    // group was on top, not how many there were.
+    //
+    // A DEPTH cannot answer this, and the failure is not exotic: save at depth
+    // five, undo twice, then draw two new things. The redo stack is discarded
+    // by the new work, the depth is five again, and a depth comparison reports
+    // the drawing as saved when it holds two entirely different entities. A
+    // count of steps from the save point has the same hole for the same reason.
+    //
+    // Serials are unique and never reused, so a rebuilt branch of the same
+    // depth carries different ones and stays dirty -- correctly, and until it is
+    // saved again. Undoing back to the save point restores the same serial and
+    // goes clean; redoing forward past it goes dirty. Every direction is right
+    // by construction rather than by case analysis.
+    void mark_saved() { saved_serial_ = top_serial(); }
+
+    // True when the drawing differs from what was last written. An empty
+    // journal with no save recorded is clean: a drawing nobody has touched has
+    // nothing to lose.
+    bool dirty() const { return top_serial() != saved_serial_; }
+
+    std::uint64_t top_serial() const { return undo_.empty() ? 0 : undo_.back().serial; }
+
     // Drops all history. NEW and OPEN do this -- undoing past the load of a
     // drawing is not meaningful.
     void clear();
@@ -169,6 +199,11 @@ private:
     UndoGroup open_;
     int depth_{0};
     bool replaying_{false};
+
+    // Never reused, and never rewound -- redo() MOVES a group back rather than
+    // rebuilding it, so a serial survives any number of undo/redo round trips.
+    std::uint64_t next_serial_{1};
+    std::uint64_t saved_serial_{0};
 };
 
 }  // namespace noto

@@ -5,6 +5,7 @@
 
 #include "noto/curve_edit.hpp"
 #include "noto/about.hpp"
+#include "noto/paths.hpp"
 #include "noto/intersect.hpp"
 #include "noto/osnap_derived.hpp"
 #include "noto/pick.hpp"
@@ -5347,6 +5348,147 @@ Step AreaCommand::next(CommandContext& ctx, const InputValue& value) {
 
 Step ListCommand::start(CommandContext& ctx) { return Step::ask(select_.prompt(ctx)); }
 
+// --- SAVE, SAVEAS, QSAVE ----------------------------------------------------
+
+const char* SaveCommand::name() const {
+    switch (mode_) {
+        case Mode::Save: return "SAVE";
+        case Mode::SaveAs: return "SAVEAS";
+        case Mode::QSave: return "QSAVE";
+    }
+    return "SAVE";
+}
+
+namespace {
+
+std::string current_drawing_path(const CommandContext& ctx) {
+    const std::string dir = ctx.db.sysvars().get_string(Sysvar::DwgPrefix);
+    const std::string file = ctx.db.sysvars().get_string(Sysvar::DwgName);
+    return file.empty() ? std::string{} : dir + file;
+}
+
+}  // namespace
+
+Step SaveCommand::start(CommandContext& ctx) {
+    const std::string current = current_drawing_path(ctx);
+
+    // QSAVE is the one that must not interrupt: a known name means write it and
+    // say nothing. That is the whole reason it exists.
+    if (mode_ == Mode::QSave && !current.empty()) return write_to(ctx, current);
+
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Save drawing as";
+    // SAVE offers the current name so Enter accepts it; SAVEAS does not, because
+    // asking again and defaulting to the same answer is how you overwrite the
+    // file you meant to branch from.
+    if (mode_ != Mode::SaveAs && !current.empty()) {
+        p.message += " <" + current + ">";
+        p.allow_empty = true;
+    }
+    state_ = State::AskName;
+    return Step::ask(p);
+}
+
+Step SaveCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (state_ == State::ConfirmOverwrite) {
+        // Default No: the answer that loses nothing is the one Enter gives.
+        const bool yes = value.kind == InputKind::Keyword && keyword_is(value, "YES");
+        if (!yes) return Step::done("Not saved");
+        return write_to(ctx, pending_);
+    }
+
+    std::string typed;
+    if (value.kind == InputKind::None) {
+        typed = current_drawing_path(ctx);  // Enter accepted the offered name
+    } else if (value.kind == InputKind::String) {
+        typed = value.text;
+    }
+    if (typed.empty()) return Step::failed("a file name is required");
+
+    const std::string path = ensure_extension(expand_user_path(typed), ".dxf");
+
+    // Overwriting the file this drawing already came from is not a collision --
+    // it is what saving means. Only a DIFFERENT existing file is a surprise.
+    if (path_exists(path) && !same_file(path, current_drawing_path(ctx))) {
+        pending_ = path;
+        state_ = State::ConfirmOverwrite;
+
+        Prompt p;
+        p.kind = PromptKind::String;
+        p.message = path + " exists. Overwrite? [Yes/No] <No>";
+        p.keywords.push_back("No");
+        p.keywords.push_back("Yes");
+        p.allow_empty = true;
+        return Step::ask(p);
+    }
+
+    return write_to(ctx, path);
+}
+
+Step SaveCommand::write_to(CommandContext& ctx, const std::string& raw) {
+    // Normalised before it is recorded, so DWGPREFIX is a directory that can be
+    // used rather than whatever mixture of dots and tildes was typed.
+    const std::string path = normalised_path(raw);
+
+    if (!write_dxf_file(ctx.db, path)) {
+        // The flag stays set. Clearing it next to the call rather than on the
+        // success branch is how a full disk quietly becomes a lost drawing.
+        return Step::failed("could not write " + path);
+    }
+
+    ctx.db.sysvars().set_metadata(Sysvar::DwgPrefix, SysvarValue::of_string(path_directory(path)));
+    ctx.db.sysvars().set_metadata(Sysvar::DwgName, SysvarValue::of_string(path_filename(path)));
+    ctx.db.journal().mark_saved();
+    return Step::done("Saved " + path);
+}
+
+// --- NEW --------------------------------------------------------------------
+
+namespace {
+
+// Exactly what read_dxf_text does when a drawing is opened, and for the same
+// reason: undoing past the start of a drawing is not meaningful, and the reset
+// itself is not an edit. Clearing the journal is also what makes the new
+// drawing clean, since an empty stack has top serial zero.
+//
+// Layers, linetypes, blocks and UCS definitions survive this, as they survive
+// OPEN. That is a known limit rather than an intention -- see SF_todo.md.
+void reset_drawing(Database& db) {
+    db.clear();
+    db.journal().clear();
+    db.sysvars().set_metadata(Sysvar::DwgName, SysvarValue::of_string(""));
+    db.sysvars().set_metadata(Sysvar::DwgPrefix, SysvarValue::of_string(""));
+}
+
+}  // namespace
+
+Step NewCommand::start(CommandContext& ctx) {
+    if (!ctx.db.journal().dirty()) {
+        reset_drawing(ctx.db);
+        return Step::done("New drawing");
+    }
+
+    asked_ = true;
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Drawing has unsaved changes. Discard them? [Yes/No] <No>";
+    p.keywords.push_back("No");
+    p.keywords.push_back("Yes");
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step NewCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (!asked_) return Step::done();
+
+    const bool yes = value.kind == InputKind::Keyword && keyword_is(value, "YES");
+    if (!yes) return Step::done("Drawing kept");
+
+    reset_drawing(ctx.db);
+    return Step::done("New drawing");
+}
+
 // --- ABOUT ------------------------------------------------------------------
 
 Step AboutCommand::start(CommandContext&) { return Step::done(about_text()); }
@@ -5474,6 +5616,10 @@ Step DxfOutCommand::next(CommandContext& ctx, const InputValue& value) {
 CommandPtr make_command(std::string_view name) {
     const std::string upper = upcase(name);
     if (upper == "ABOUT") return std::make_unique<AboutCommand>();
+    if (upper == "SAVE") return std::make_unique<SaveCommand>(SaveCommand::Mode::Save);
+    if (upper == "SAVEAS") return std::make_unique<SaveCommand>(SaveCommand::Mode::SaveAs);
+    if (upper == "QSAVE") return std::make_unique<SaveCommand>(SaveCommand::Mode::QSave);
+    if (upper == "NEW") return std::make_unique<NewCommand>();
     if (upper == "LINE") return std::make_unique<LineCommand>();
     if (upper == "ARC") return std::make_unique<ArcCommand>();
     if (upper == "ELLIPSE") return std::make_unique<EllipseCommand>();
@@ -5531,7 +5677,7 @@ CommandPtr make_command(std::string_view name) {
 
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
-        "ABOUT", "ARC", "AREA", "ARRAY", "CIRCLE", "ELLIPSE",
+        "ABOUT", "ARC", "AREA", "ARRAY", "CIRCLE", "ELLIPSE", "NEW", "SAVE", "SAVEAS", "QSAVE",
         "MEASUREGEOM", "ORTHO", "OSNAP", "SETVAR", "SPLINE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",

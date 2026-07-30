@@ -35,6 +35,7 @@ add_library(noto_core STATIC
   command.cpp
   commands.cpp
   about.cpp
+  paths.cpp
   input_text.cpp
 )
 

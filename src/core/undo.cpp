@@ -47,6 +47,7 @@ void UndoJournal::end_group() {
     // An empty group is not a step. A command that asked a question and was
     // cancelled should not cost an undo that visibly does nothing.
     if (!open_.changes.empty()) {
+        open_.serial = next_serial_++;
         undo_.push_back(std::move(open_));
         redo_.clear();
     }
@@ -65,6 +66,7 @@ void UndoJournal::push(Change&& c) {
     // command line is exactly this.
     UndoGroup g;
     g.changes.push_back(std::move(c));
+    g.serial = next_serial_++;
     undo_.push_back(std::move(g));
     redo_.clear();
 }
@@ -326,6 +328,12 @@ void UndoJournal::clear() {
     redo_.clear();
     open_ = UndoGroup{};
     depth_ = 0;
+    // NEW and OPEN land here, and both leave a drawing that is not modified
+    // relative to what is on disk. An empty stack has top serial zero, so
+    // matching the save point to zero makes that fall out rather than being a
+    // special case anywhere else. Serials themselves keep counting up: reusing
+    // them is the one thing that would reintroduce the ambiguity.
+    saved_serial_ = 0;
 }
 
 }  // namespace noto

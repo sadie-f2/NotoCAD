@@ -74,6 +74,12 @@ public:
     // True while an unterminated LISP form is still open across lines.
     bool continuing() const { return !pending_.empty(); }
 
+    // True while QUIT is waiting to be told whether unsaved work may be lost.
+    // The caller shows current_prompt() and feeds the answer back like any
+    // other line -- so the question works identically at the terminal and in
+    // the Qt command line, which is the whole reason it lives here.
+    bool confirming_quit() const { return confirm_quit_; }
+
     // Call when input ends. False if it ended inside an unterminated form.
     bool finish();
 
@@ -86,6 +92,9 @@ private:
     CommandEngine& engine_;
     PromptOutput& out_;
     bool interactive_;
+
+    // QUIT arrived with unsaved changes and the next line answers for it.
+    bool confirm_quit_{false};
     std::string pending_;       // an incomplete LISP form spanning lines
     std::string last_command_;  // what Enter repeats
 };

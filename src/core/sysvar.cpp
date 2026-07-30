@@ -69,6 +69,8 @@ constexpr SysvarDef kTable[] = {
     {"UCSFOLLOW", Sysvar::UcsFollow, SysvarType::Int, false, true, 0, 0, 1, 0.0, "", {}},
     // 0 off, 1 on, 2 on and at the origin -- R12 packs both answers into one.
     {"UCSICON", Sysvar::UcsIcon, SysvarType::Int, false, true, 1, 0, 2, 0.0, "", {}},
+    {"DWGNAME", Sysvar::DwgName, SysvarType::String, true, true, 0, 0, 0, 0.0, "", {}},
+    {"DWGPREFIX", Sysvar::DwgPrefix, SysvarType::String, true, true, 0, 0, 0, 0.0, "", {}},
 };
 
 static_assert(sizeof(kTable) / sizeof(kTable[0]) == static_cast<std::size_t>(Sysvar::kCount),
@@ -229,6 +231,16 @@ Sysvars::SetStatus Sysvars::set_owned(Sysvar id, const SysvarValue& v) {
     const SysvarValue before = values_[index_of(id)];
     values_[index_of(id)] = v;
     journal_write(id, before);
+    return SetStatus::Ok;
+}
+
+Sysvars::SetStatus Sysvars::set_metadata(Sysvar id, const SysvarValue& v) {
+    const SysvarDef& d = sysvar_def(id);
+    if (d.type != v.type) return SetStatus::WrongType;
+
+    // No journal_write: see the header for why these specifically are outside
+    // undo rather than escaping it.
+    values_[index_of(id)] = v;
     return SetStatus::Ok;
 }
 

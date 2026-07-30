@@ -45,6 +45,7 @@ add_executable(noto_tests
   test_osnap_curves.cpp
   test_deferred_tangent.cpp
   test_mtext.cpp
+  test_save.cpp
   test_rotate3d.cpp
   test_render.cpp
   test_viewport.cpp

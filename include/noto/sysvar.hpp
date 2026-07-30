@@ -89,6 +89,12 @@ enum class Sysvar : std::uint16_t {
     UcsFollow,
     // Whether the UCS icon is shown, and whether at the origin. UCSICON sets it.
     UcsIcon,
+    // The drawing's own name, split as R12 splits it: DWGPREFIX is the
+    // directory with its trailing separator, DWGNAME the file within it. Both
+    // read-only and written through set_owned by the file commands, so
+    // AutoLISP's getvar can ask what is open without a new mechanism.
+    DwgName,
+    DwgPrefix,
     kCount,
 };
 
@@ -148,6 +154,22 @@ public:
     // journals, because a write that escapes the journal is how undo grows
     // holes, and that reasoning does not care who is doing the writing.
     SetStatus set_owned(Sysvar id, const SysvarValue& v);
+
+    // The one door that does NOT journal, and it is narrow on purpose: only for
+    // values that describe where the drawing LIVES rather than what it
+    // contains.
+    //
+    // DWGNAME and DWGPREFIX are the case, and they are the whole case. Undo
+    // must not change which file you are editing -- that is not a hole in undo,
+    // it is undo's scope. Journalling them is worse than useless: SAVE would
+    // record a change of its own, so the group closing after mark_saved() would
+    // push a new serial and the drawing would be dirty the instant it was
+    // saved. Which is exactly the bug that produced this method.
+    //
+    // Anything that is drawing CONTENT goes through set_owned, for the reason
+    // written above it. Adding a caller here needs the same argument made
+    // again.
+    SetStatus set_metadata(Sysvar id, const SysvarValue& v);
 
     // The name-driven path, for getvar and setvar. get() is false for an unknown
     // name, which is how getvar knows to return nil.
