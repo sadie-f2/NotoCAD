@@ -163,3 +163,16 @@ why — the language dialect and its restraint rules, why the arbitrary axis
 algorithm is foundational rather than a feature, why commands must be resumable
 state machines, and why the AutoLISP implementation is written from scratch
 rather than derived from XLISP.
+
+## Trademarks
+
+AutoCAD, AutoLISP and Autodesk are trademarks of Autodesk, Inc. NotoCAD is an
+independent project and is not affiliated with, endorsed by, or sponsored by
+Autodesk.
+
+Those names are used throughout this documentation only to identify the software,
+file formats and language dialect NotoCAD is compatible with. There is no other
+way to say which DXF version it writes or which LISP dialect its interpreter
+implements. Nothing here is derived from Autodesk source: the AutoLISP dialect is
+reimplemented from its documented semantics, and the R12 DXF reader and writer
+work from the published format.

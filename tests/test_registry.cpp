@@ -129,3 +129,14 @@ TEST_CASE("about: names every licence this build actually carries") {
     CHECK(s.find("links no GPL code") != std::string::npos);
 #endif
 }
+
+TEST_CASE("about: disclaims affiliation, which is what makes naming the marks fair") {
+    const std::string s = about_text();
+
+    // Naming AutoLISP is unavoidable -- there is no other way to say which
+    // dialect the interpreter implements -- and nominative fair use turns on
+    // nothing implying sponsorship. The disclaimer is that condition, so it is
+    // asserted rather than left to survive a future edit of the text.
+    CHECK(s.find("trademarks of Autodesk") != std::string::npos);
+    CHECK(s.find("not affiliated with") != std::string::npos);
+}

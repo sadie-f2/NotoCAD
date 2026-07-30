@@ -31,6 +31,16 @@ std::string about_text() {
     s += "it covers this program's documentation as well as its source.\n";
     s += "\n";
 
+    s += "--- Trademarks ------------------------------------------------\n";
+    s += "AutoCAD, AutoLISP and Autodesk are trademarks of Autodesk, Inc.\n";
+    s += "NotoCAD is an independent project, not affiliated with, endorsed\n";
+    s += "by or sponsored by Autodesk. Those names appear here and in the\n";
+    s += "documentation only to identify the file formats and the LISP\n";
+    s += "dialect this program is compatible with -- there is no other way\n";
+    s += "to say which dialect the interpreter implements or which version\n";
+    s += "of DXF it writes.\n";
+    s += "\n";
+
     s += "--- Bundled: Hershey fonts ------------------------------------\n";
     s += "TEXT and MTEXT are drawn with the Hershey Roman Simplex stroke\n";
     s += "font, compiled into this binary. Its licence permits any use,\n";
