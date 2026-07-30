@@ -527,9 +527,10 @@ public:
     double oblique() const { return oblique_; }
     void set_oblique(double o) { oblique_ = o; }
 
-    // The width the placeholder assumes. Without a font this is a guess, and it
-    // is only used for the box and the bounding box.
-    double approximate_width() const;
+    // The advance width of the string in world units, summed from the bundled
+    // stroke font. Exact, not a nominal -- which is what lets justification, the
+    // bounding box and TEXT's Aligned and Fit modes all rely on it.
+    double text_width() const;
 
     TextHAlign h_align() const { return h_align_; }
     TextVAlign v_align() const { return v_align_; }
@@ -556,9 +557,10 @@ public:
     // cannot disagree.
     const Vec3& position_for_drawing() const { return is_justified() ? align_point_ : pos_; }
 
-    // The lower-left corner of the placeholder box, in world space, with the
-    // justification applied.
-    Vec3 box_origin() const;
+    // Where the baseline starts, in world space, with the justification
+    // applied: the pen's origin for the first glyph. Everything that has to
+    // agree about where the text sits on the page goes through this.
+    Vec3 baseline_origin() const;
 
     EntityPtr clone() const override;
     void transform(const Mat4& m) override;

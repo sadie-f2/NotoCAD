@@ -1923,7 +1923,7 @@ Step TextCommand::build(CommandContext& ctx, const std::string& value) {
         // factor; both modes solve for whichever factor makes it equal the
         // distance. Without a font this is the placeholder metric, which makes
         // the result approximate in the same way the drawing already is.
-        const double nominal = text->approximate_width();
+        const double nominal = text->text_width();
         if (nominal < 1e-12) return Step::failed("cannot fit empty text");
 
         if (h_align_ == TextHAlign::Aligned) {

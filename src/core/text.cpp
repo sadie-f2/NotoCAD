@@ -1,30 +1,24 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-// TEXT: the entity, with a placeholder where the glyphs will go.
+// TEXT: the entity, drawn with the bundled Hershey stroke font.
 #include "noto/dxf.hpp"
 #include "noto/ecs.hpp"
 #include "noto/entities.hpp"
+#include "noto/font.hpp"
 #include "noto/render.hpp"
 
 #include <cmath>
 #include <numbers>
+#include <vector>
 
 namespace noto {
-namespace {
 
-// Character cell width as a fraction of height, for the placeholder box. R12's
-// stroke fonts run around this; it is a guess and is used for nothing that has
-// to be right.
-constexpr double kNominalAspect = 0.6;
-
-}  // namespace
-
-double Text::approximate_width() const {
-    return static_cast<double>(value_.size()) * height_ * kNominalAspect * width_factor_;
+double Text::text_width() const {
+    return StrokeFont::romans().width(value_) * height_ * width_factor_;
 }
 
-Vec3 Text::box_origin() const {
+Vec3 Text::baseline_origin() const {
     const Basis b = arbitrary_axis(props().normal);
     const Vec3 along = (b.ax * std::cos(rotation_) + b.ay * std::sin(rotation_));
     const Vec3 up = (b.ay * std::cos(rotation_) - b.ax * std::sin(rotation_));
@@ -38,25 +32,31 @@ Vec3 Text::box_origin() const {
         case TextHAlign::Aligned:
         case TextHAlign::Fit: dx = 0.0; break;
         case TextHAlign::Center:
-        case TextHAlign::Middle: dx = -0.5 * approximate_width(); break;
-        case TextHAlign::Right: dx = -approximate_width(); break;
+        case TextHAlign::Middle: dx = -0.5 * text_width(); break;
+        case TextHAlign::Right: dx = -text_width(); break;
     }
 
-    // Baseline and Bottom differ only by the descender depth, which needs a
-    // font to know. They are treated alike until there is one, which is a
-    // visible approximation rather than a silent one -- see CLAUDE.md.
+    // Baseline and Bottom differ by the descender depth, which the font knows:
+    // Bottom puts the deepest descender on the insertion point, so the baseline
+    // sits that far above it. Until there was a font these were fudged together.
     double dy = 0.0;
     switch (v_align_) {
-        case TextVAlign::Baseline:
-        case TextVAlign::Bottom: dy = 0.0; break;
+        case TextVAlign::Baseline: dy = 0.0; break;
+        case TextVAlign::Bottom: dy = StrokeFont::romans().descender() * height_; break;
         case TextVAlign::Middle: dy = -0.5 * height_; break;
         case TextVAlign::Top: dy = -height_; break;
     }
 
     // Middle is the one mode that is vertically centred by its horizontal code
     // rather than by group 73, which is why it appears in both switches.
+    //
+    // And it is NOT the same as MC, which is the trap: AutoCAD's Middle centres
+    // on the text INCLUDING descenders, while MC centres on the uppercase
+    // height. They coincide only for a string that has no descender, which is
+    // why the difference survives casual testing. The font is what makes the
+    // distinction expressible at all -- before it, both were height/2.
     if (h_align_ == TextHAlign::Middle && v_align_ == TextVAlign::Baseline) {
-        dy = -0.5 * height_;
+        dy = -0.5 * height_ * (1.0 - StrokeFont::romans().descender());
     }
 
     return position_for_drawing() + along * dx + up * dy;
@@ -97,19 +97,23 @@ void Text::transform(const Mat4& m) {
 }
 
 BBox Text::bbox() const {
-    // The placeholder's extent. Wrong in detail until there is a font, but the
-    // right order of magnitude -- and a box that is roughly right keeps text
-    // pickable and inside ZOOM Extents, where an empty box would not.
+    // The cell the text occupies: from the deepest descender to the cap height,
+    // across the exact advance width. Deliberately the cell rather than the ink,
+    // so that a string of lowercase letters does not report a box half the
+    // height of the same string with a capital in it -- ZOOM Extents and picking
+    // both want the line, not the letterforms.
     const Basis b = arbitrary_axis(props().normal);
     const Vec3 along = (b.ax * std::cos(rotation_) + b.ay * std::sin(rotation_));
     const Vec3 up = (b.ay * std::cos(rotation_) - b.ax * std::sin(rotation_));
 
-    const Vec3 origin = box_origin();
+    const double w = text_width();
+    const double below = StrokeFont::romans().descender() * height_;
+    const Vec3 origin = baseline_origin();
+
     BBox box;
-    box.expand(origin);
-    box.expand(origin + along * approximate_width());
-    box.expand(origin + up * height_);
-    box.expand(origin + along * approximate_width() + up * height_);
+    for (const double dx : {0.0, w}) {
+        for (const double dy : {-below, height_}) box.expand(origin + along * dx + up * dy);
+    }
     return box;
 }
 
@@ -142,10 +146,41 @@ void Text::draw(const DrawContext&, Renderer& r) const {
     const Vec3 along = (b.ax * std::cos(rotation_) + b.ay * std::sin(rotation_));
     const Vec3 up = (b.ay * std::cos(rotation_) - b.ax * std::sin(rotation_));
 
-    const double w = approximate_width();
-    const Vec3 o = box_origin();
-    const Vec3 box[4] = {o, o + along * w, o + along * w + up * height_, o + up * height_};
-    r.polyline(box, 4, true);
+    const StrokeFont& font = StrokeFont::romans();
+    const Vec3 origin = baseline_origin();
+
+    // Oblique leans the glyph by shearing x with y, which is what a slant is --
+    // the baseline does not move, so obliqued text still sits on its line.
+    const double shear = std::tan(oblique_);
+
+    // Glyph coordinates arrive with the baseline at y = 0 and the cap height at
+    // y = 1, so `height_` scales them directly and TEXT's height means cap
+    // height, exactly as R12 says.
+    std::vector<Vec3> pts;
+    double pen = 0.0;
+    for (const char ch : value_) {
+        const Glyph g = font.glyph(static_cast<unsigned char>(ch));
+
+        for (std::uint32_t s = 0; s < g.stroke_count; ++s) {
+            const std::uint32_t first = g.stroke_begin[s];
+            const std::uint32_t last = g.stroke_begin[s + 1];
+
+            pts.clear();
+            pts.reserve(last - first);
+            for (std::uint32_t k = first; k < last; ++k) {
+                const Vec3& p = g.points[k];
+                const double x = (pen + p.x + p.y * shear) * width_factor_ * height_;
+                pts.push_back(origin + along * x + up * (p.y * height_));
+            }
+
+            // A one-point stroke is a dot in the source data and nothing on
+            // screen; emitting it as a polyline would draw a zero-length
+            // segment that hit-testing then has to reason about.
+            if (pts.size() >= 2) r.polyline(pts.data(), pts.size(), false);
+        }
+
+        pen += g.advance;
+    }
 }
 
 void Text::dxf_write(DxfWriter& w) const {

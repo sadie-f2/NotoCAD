@@ -490,7 +490,7 @@ condition.
 
 ---
 
-## TEXT: bundle a Hershey font, and it is not a hack
+## TEXT: bundle a Hershey font, and it is not a hack — BUILT
 
 Open question 2 has been "SHX, bundle a vector font, or approximate on screen"
 since phase 7. Sadie's memory that R12's text was "simple pure stroke" is right,
@@ -514,11 +514,31 @@ glyph-to-polylines interface. Same layering as DXF-first with DWG optional: the
 in-tree implementation is complete on its own, and the compatibility path is an
 addition rather than a rewrite.
 
-**Check before it goes in-tree:** the Hershey data is public-domain in origin,
-but the commonly circulated distributions carry an attribution condition from
-their packaging rather than from the original work. Given how carefully this
-project handles licensing — the whole DWG and Qt reasoning — that wants reading
-rather than assuming.
+**The licence was read, not assumed, and it is clear.** The notice permits use by
+anyone for any purpose, commercial or otherwise, on two conditions: the
+acknowledgements to Dr. A. V. Hershey and to James Hurt of Cognition, Inc. must be
+distributed *with the font data*, and the data may be converted to any format except
+the one distributed by the U.S. NTIS. Both are satisfied. The first attaches to the
+source tree rather than to the binary, which is why the verbatim notice lives in
+`third_party/hershey/HERSHEY-NOTICE.txt` rather than only in a comment. Nothing here
+is copyleft, so unlike DWG and Qt it needs no compile-time module boundary.
+
+**What was built.** `include/noto/font.hpp` and `src/core/font_hershey.cpp`: Roman
+Simplex embedded as `.jhf` text and parsed on first use, so the core keeps no runtime
+data path and the tests need no fixtures. Glyphs arrive with the baseline at y = 0 and
+the cap height at y = 1, so `Text::height()` means cap height exactly as R12 says.
+
+Three things fell out of having real metrics, all of which had been fudged:
+`Text::text_width()` is now exact rather than a 0.6-aspect guess (and was renamed from
+`approximate_width()` because the old name would have become a lie); `bbox()` reserves
+the descender; and **Middle and MC stopped being the same thing** — AutoCAD's Middle
+centres on the text *including* descenders while MC centres on the uppercase height,
+a distinction that is inexpressible without a font and that coincides for any string
+without a descender, which is how it survives casual testing.
+
+`romand` and `timesi` are vendored but unused: R12 reaches fonts through the STYLE
+table, which does not exist yet, and building one font end to end first kept that from
+becoming a second project inside this one.
 
 **Consequence for dimensioning:** TEXT is a prerequisite, and it is now unblocked
 in principle. But see MEASUREGEOM below: most of what dimensions were wanted for

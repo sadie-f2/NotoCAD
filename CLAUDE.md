@@ -199,10 +199,20 @@ rather than pre-solved here; the entity vtable, stable handles and `transform(Ma
 already carry over, and a solids kernel is accepted as possibly warranting a fresh
 start rather than being retrofitted.
 
-**Text and dimensions are deferred, deliberately and separately.** TEXT exists as an
-entity — geometry, DXF, snaps — so DXF read cannot silently destroy content, but is
-drawn as a placeholder until the font question is settled. Dimensioning is not built at
-all; R12's are non-associative and are blocks, so they cost nothing to defer.
+**TEXT is drawn with a bundled Hershey stroke font.** R12's SHX fonts — `romans`,
+`romand`, `italicc` — descend from the Hershey set, and a Hershey glyph is a list of
+polylines, which is exactly what `draw()` already emits. So this is not an
+approximation of what R12 did but the same thing from the same ancestry, and the core
+stays headless: no Qt fonts, so screen text and DXF text come from one source. The
+data lives in `third_party/hershey/` with the attribution its licence requires, and
+is embedded in the binary so there is no runtime data path. An SHX parser, which
+would let a drawing use the user's own AutoCAD fonts, sits behind the same interface
+later — the same layering as DXF-first with DWG optional.
+
+**Dimensioning is deferred, and separately.** Not built at all; R12's are
+non-associative and are blocks, so they cost nothing to defer. It is on the roadmap
+rather than out of scope, and TEXT no longer blocks it — but see MEASUREGEOM, which
+turned out to answer most of what dimensions were wanted for.
 
 ## Build
 
@@ -242,8 +252,8 @@ Executables are `ncad*`; libraries are `noto_*`.
 
 ```
 include/noto/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, dxf,
-                     command, commands, input_text, osnap_derived, osnap_search,
-                     pick, render, scene, sysvar, viewport
+                     command, commands, font, input_text, osnap_derived,
+                     osnap_search, pick, render, scene, sysvar, viewport
 include/noto/lisp/   arena, value, reader, eval
 src/core/            geometry kernel, entities, database, DXF writer, commands
 src/lisp/            interpreter: arena, values, reader, eval, builtins, subrs

@@ -238,7 +238,13 @@ TEST_CASE("text: the middle of a Middle-justified string is where it was put") {
     REQUIRE(t != nullptr);
     const BBox box = t->bbox();
     CHECK_NEAR((box.min.x + box.max.x) * 0.5, 0.0, 1e-9);
-    CHECK_NEAR((box.min.y + box.max.y) * 0.5, 0.0, 1e-9);
+
+    // MC centres on the UPPERCASE height, not on the whole cell -- that is what
+    // separates it from Middle. So the cap top sits half a height above the
+    // point and the baseline half a height below it, and the box then runs
+    // lower still because it reserves the descender the font declares.
+    CHECK_NEAR(box.max.y, 1.0, 1e-9);
+    CHECK(box.min.y < -1.0);
 }
 
 TEST_CASE("text: the INSERT snap follows the justification point") {
@@ -278,7 +284,7 @@ TEST_CASE("text: Align spans the two points and derives the height") {
     REQUIRE(t != nullptr);
     CHECK(t->h_align() == TextHAlign::Aligned);
     // The height was solved for, so the placeholder now spans the distance.
-    CHECK_NEAR(t->approximate_width(), 10.0, 1e-9);
+    CHECK_NEAR(t->text_width(), 10.0, 1e-9);
     CHECK_NEAR(t->width_factor(), 1.0, 1e-12);
 }
 
@@ -298,7 +304,7 @@ TEST_CASE("text: Fit spans the two points and squeezes the width instead") {
     REQUIRE(t != nullptr);
     CHECK(t->h_align() == TextHAlign::Fit);
     CHECK_NEAR(t->height(), 3.0, 1e-12);
-    CHECK_NEAR(t->approximate_width(), 10.0, 1e-9);
+    CHECK_NEAR(t->text_width(), 10.0, 1e-9);
 }
 
 TEST_CASE("text: Align takes its rotation from the two points") {

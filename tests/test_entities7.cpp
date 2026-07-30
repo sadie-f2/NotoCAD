@@ -11,6 +11,7 @@
 #include "noto/entities.hpp"
 #include "noto/render.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <numbers>
@@ -204,20 +205,53 @@ TEST_CASE("text: the entity holds what a font would need") {
     CHECK_VEC(pts[0].pos, 1.0, 2.0, 0.0, kTol);
 }
 
-TEST_CASE("text: the placeholder is a box of the right height") {
+TEST_CASE("text: glyphs are drawn as open strokes on the baseline") {
     Text t({0, 0, 0}, "ABC", 2.0);
     Capture cap;
     t.draw(DrawContext{}, cap);
 
-    CHECK(cap.runs.size() == 1);
-    CHECK(cap.closed_flags[0]);
-    CHECK(cap.runs[0].size() == 4);
+    // Three letters of Roman Simplex are several separate pen-down runs -- A
+    // alone is three. None of them is closed: a stroke font has no filled
+    // shapes, and a closed run would join the end of a letter to its start.
+    CHECK(cap.runs.size() >= 6);
+    for (std::size_t i = 0; i < cap.runs.size(); ++i) {
+        CHECK(!cap.closed_flags[i]);
+        CHECK(cap.runs[i].size() >= 2);
+    }
 
-    // Honest about what is known -- position, height, extent -- and silent
-    // about letterforms, which are not.
-    CHECK_VEC(cap.runs[0][0], 0.0, 0.0, 0.0, kTol);
-    CHECK_NEAR(cap.runs[0][3].y, 2.0, kTol);
-    CHECK(cap.runs[0][1].x > 0.0);
+    double lo = 1e9, hi = -1e9, right = -1e9;
+    for (const auto& run : cap.runs) {
+        for (const Vec3& p : run) {
+            lo = std::min(lo, p.y);
+            hi = std::max(hi, p.y);
+            right = std::max(right, p.x);
+            CHECK(p.x >= -kTol);
+        }
+    }
+
+    // Height means CAP height, so uppercase reaches exactly it, and none of
+    // these three letters descends below the baseline.
+    CHECK_NEAR(hi, 2.0, kTol);
+    CHECK_NEAR(lo, 0.0, kTol);
+    CHECK(right <= t.text_width() + kTol);
+}
+
+TEST_CASE("text: a descender goes below the baseline and a capital does not") {
+    Capture caps;
+    Text({0, 0, 0}, "H", 1.0).draw(DrawContext{}, caps);
+    Capture desc;
+    Text({0, 0, 0}, "p", 1.0).draw(DrawContext{}, desc);
+
+    double cap_lo = 1e9, desc_lo = 1e9;
+    for (const auto& run : caps.runs) {
+        for (const Vec3& p : run) cap_lo = std::min(cap_lo, p.y);
+    }
+    for (const auto& run : desc.runs) {
+        for (const Vec3& p : run) desc_lo = std::min(desc_lo, p.y);
+    }
+
+    CHECK_NEAR(cap_lo, 0.0, kTol);
+    CHECK(desc_lo < -0.05);
 }
 
 TEST_CASE("text: empty text draws nothing") {
