@@ -33,9 +33,21 @@ There is a Qt6 shell, `ncad_gui` — a wireframe viewport with pan, zoom and orb
 and a command line driving the same engine and interpreter as `ncad`. It is a
 viewer you can type at; picking geometry with the cursor is the next phase.
 
-Geometry can be generated procedurally from LISP and written to DXF today. The
-emitted DXF has been verified to open correctly in AutoCAD 2026, including
-entities on arbitrary tilted planes.
+Geometry can be generated procedurally from LISP and written to DXF today.
+
+**What has actually been verified in AutoCAD 2026**, stated precisely rather
+than generally, because the general version of this sentence hid a real defect
+for weeks:
+
+- Entities on arbitrary tilted planes, from the sample drawing, open correctly.
+- A full round trip: an AutoCAD-written R12 DXF opened in NotoCAD, saved out,
+  and reopened in AutoCAD — 19 block definitions, 1,643 nested INSERTs, 4
+  polylines and 1,408 vertices preserved exactly.
+
+The vaguer claim that "emitted DXF opens in AutoCAD" was true and useless: the
+sample drawing it was tested on contains **no polylines at all**, so it never
+exercised the VERTEX and SEQEND records — which is exactly where the bug was.
+Say which drawing was tested and what it contained.
 
 **Not yet:** the remaining R12 entities, a DXF reader, UCS, and in the shell,
 entity hit-testing, osnap cursor tracking and grips.

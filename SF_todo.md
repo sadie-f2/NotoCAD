@@ -539,7 +539,18 @@ cannot be stopped, and the cost is a bool test per form.
 sets it. The GUI's Escape currently reaches `CommandEngine`, and routing it to
 the interpreter as well is the remaining piece.
 
-## AutoCAD called our R12 DXF corrupt — handles
+## AutoCAD called our R12 DXF corrupt — handles (FIXED, and confirmed)
+
+**Confirmed by round trip.** With handles removed, an AutoCAD-written R12 DXF
+opened in NotoCAD, saved out, and reopened in AutoCAD. Counts identical on both
+sides: 19 BLOCK definitions, 1,643 nested INSERTs, 4 POLYLINE/SEQEND pairs, 1,408
+VERTEX records, one top-level INSERT.
+
+And AutoCAD's own file settled what it expects: `$HANDLING = 1`, `$HANDSEED =
+11FA` above the maximum, and **3,081 distinct handles out of 3,082** — a unique
+one on every record including each VERTEX. That is precisely what ours failed to
+do. Writing none is the other legal R12 option and is what we now do.
+
 
 Reported from use, and NOT a regression despite looking like one. The cause was
 latent from the day polylines could be written, and the sample drawing
