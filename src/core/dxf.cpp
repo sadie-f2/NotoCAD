@@ -317,7 +317,13 @@ void DxfWriter::write_tables() {
         (void)vw_owner;
         code(0, "ENDTAB");
 
+        // DIMSTYLE is the one table whose HEADER carries a second subclass
+        // marker of its own, plus a count in group 71. Without it AutoCAD
+        // refuses the file: "Class separator for class AcDbDimStyleTable
+        // expected". Every other table stops at AcDbSymbolTable.
         const std::string dim_owner = begin_table("DIMSTYLE", 1);
+        subclass("AcDbDimStyleTable");
+        code(71, 1);
         table_record("DIMSTYLE", dim_owner, "AcDbDimStyleTableRecord");
         code(2, "STANDARD");
         code(70, 0);

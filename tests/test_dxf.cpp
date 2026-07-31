@@ -504,6 +504,15 @@ TEST_CASE("dxf r2000: the sections and tables a later reader expects") {
     CHECK(tables.count("VPORT") == 1);
     CHECK(tables.count("DIMSTYLE") == 1);
 
+    // DIMSTYLE's table HEADER carries a second subclass marker of its own,
+    // unlike every other table. AutoCAD refuses the file without it: "Class
+    // separator for class AcDbDimStyleTable expected".
+    bool dim_marker = false;
+    for (std::size_t i = 0; i + 1 < p.size(); ++i) {
+        if (p[i].code == 100 && p[i].value == "AcDbDimStyleTable") dim_marker = true;
+    }
+    CHECK(dim_marker);
+
     // R12 has none of them.
     const std::vector<Pair> r12 = parse(dump_as(db, DxfVersion::R12), &ok);
     std::set<std::string> r12_sections;
