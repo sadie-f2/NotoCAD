@@ -751,6 +751,37 @@ TEST_CASE("dxf r2000: an INSERT's shape does not depend on its content") {
     CHECK(inserts == 2);
     CHECK(with_scale == 2);
 
+    // The array record carries its extrusion even at the default 0,0,1: it is
+    // the LAST of AcDbBlockReference's fields, so omitting it leaves the
+    // separator where the reader still expects the parent class. A plain
+    // INSERT has nothing after it to be misread and keeps the omission.
+    bool array_has_210 = false;
+    bool plain_has_210 = false;
+    bool is_array_rec = false;
+    bool saw_210 = false;
+    auto flush = [&]() {
+        if (is_array_rec) {
+            array_has_210 = array_has_210 || saw_210;
+        } else if (saw_210) {
+            plain_has_210 = true;
+        }
+        saw_210 = false;
+        is_array_rec = false;
+    };
+    in_insert = false;
+    for (const Pair& g : p) {
+        if (g.code == 0) {
+            if (in_insert) flush();
+            in_insert = (g.value == "INSERT");
+        }
+        if (!in_insert) continue;
+        if (g.code == 70) is_array_rec = true;
+        if (g.code == 210) saw_210 = true;
+    }
+    if (in_insert) flush();
+    CHECK(array_has_210);
+    CHECK(!plain_has_210);
+
     // R12 still omits what is default, and that output is confirmed good.
     const std::vector<Pair> r12 = parse(dump_as(db, DxfVersion::R12), &ok);
     CHECK(ok);

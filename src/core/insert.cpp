@@ -309,7 +309,19 @@ void Insert::dxf_write(DxfWriter& w) const {
     // written BEFORE the second marker -- the same rule that puts an ARC's 210
     // before AcDbArc. A plain INSERT has only the one class and no such
     // ordering to get wrong.
-    if (is_array() && dxf_requires_handles(w.version())) w.write_extrusion(p.normal);
+    //
+    // And it is written even when it is the default 0,0,1, which
+    // write_extrusion would otherwise omit. It is the LAST of
+    // AcDbBlockReference's fields, so leaving it out is what puts the separator
+    // where the reader is still expecting the parent class -- the same
+    // shape-follows-content fault as the scale factors below, one group
+    // further along. A plain INSERT is unaffected: nothing follows it that
+    // could be misread.
+    if (is_array() && dxf_requires_handles(w.version())) {
+        w.code(210, p.normal.x);
+        w.code(220, p.normal.y);
+        w.code(230, p.normal.z);
+    }
 
     if (is_array()) {
         // A MINSERT is a block reference that then declares itself an
