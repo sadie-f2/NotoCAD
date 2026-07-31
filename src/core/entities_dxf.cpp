@@ -61,6 +61,23 @@ void Arc::dxf_write(DxfWriter& w) const {
 // handles at write time that no entity owns would put identifiers in the file
 // that cannot be resolved on the way back in.
 void Ellipse::dxf_write(DxfWriter& w) const {
+    // R2000 can name an ELLIPSE, so it gets the curve itself: centre, the major
+    // axis as a VECTOR from it, the ratio and the parameter range. Fifteen
+    // numbers instead of a tessellation, and a round trip that loses nothing.
+    if (dxf_has_modern_entities(w.version())) {
+        if (major_length() <= kEps) return;
+        w.write_common(*this);
+        w.subclass("AcDbEllipse");
+        w.point(10, center_);
+        // Group 11 is a vector, not a point: it rotates without translating.
+        w.point(11, major_);
+        w.write_extrusion(props().normal);
+        w.code(40, ratio_);
+        w.code(41, start_param_);
+        w.code(42, end_param_);
+        return;
+    }
+
     // THE DIVERGENCE, PAID FOR HERE. AC1009 has no ELLIPSE entity, so this
     // writes what R12 itself wrote: a polyline approximation. The database
     // keeps the exact curve; the file gets something every R12 reader

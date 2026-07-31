@@ -399,12 +399,40 @@ void Spline::draw(const DrawContext& ctx, Renderer& r) const {
 }
 
 void Spline::dxf_write(DxfWriter& w) const {
+    if (!valid()) return;
+
+    // R2000 has a real SPLINE, so the curve goes out as itself: degree, knots,
+    // control points and weights. Around 500 bytes where the R12 tessellation
+    // below takes 1,400, and nothing is lost -- which is the whole reason a
+    // later version is worth offering.
+    if (dxf_has_modern_entities(w.version())) {
+        w.write_common(*this);
+        w.subclass("AcDbSpline");
+        w.write_extrusion(props().normal);
+
+        // Bit 8 is planar, which every spline this program makes is.
+        int flags = 8;
+        if (is_closed()) flags |= 1;
+        if (is_rational()) flags |= 4;
+        w.code(70, flags);
+        w.code(71, degree_);
+        w.code(72, static_cast<int>(knots_.size()));
+        w.code(73, static_cast<int>(control_.size()));
+        w.code(74, static_cast<int>(fit_.size()));
+
+        for (const double k : knots_) w.code(40, k);
+        for (const double wt : weights_) w.code(41, wt);
+        for (const Vec3& c : control_) w.point(10, c);
+        // Fit points travel too when there are any: they are what the user
+        // chose, and a caller that made the curve from them gets them back.
+        for (const Vec3& f : fit_) w.point(11, f);
+        return;
+    }
+
     // The same bargain Ellipse makes, and a costlier one: AC1009 has no SPLINE,
     // so this writes the tessellation. A round trip through DXF turns the curve
     // into the polyline R12 would have stored, and nothing recovers the knots.
     // SF_todo.md records AC1015 as the eventual answer.
-    if (!valid()) return;
-
     const int segments = segment_count(0.0);
     if (segments <= 0) return;
 

@@ -95,6 +95,12 @@ enum class Sysvar : std::uint16_t {
     // AutoLISP's getvar can ask what is open without a new mechanism.
     DwgName,
     DwgPrefix,
+    // Which DXF revision a write targets: "R12" or "R2000".
+    //
+    // A system variable rather than only a prompt, so a script can choose --
+    // which matters most for the case that wants R2000 at all, generating
+    // geometry in bulk and saving it without a person present.
+    DxfVersionVar,
     kCount,
 };
 

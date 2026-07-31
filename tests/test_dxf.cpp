@@ -8,7 +8,13 @@
 #include "noto/ecs.hpp"
 #include "noto/entities.hpp"
 
+#include "noto/dxf_read.hpp"
+#include "noto/sysvar.hpp"
+
 #include <algorithm>
+#include <map>
+#include <memory>
+#include <set>
 #include <numbers>
 #include <sstream>
 #include <string>
@@ -336,4 +342,174 @@ TEST_CASE("dxf: every VERTEX sits inside a POLYLINE that a SEQEND closes") {
     CHECK(!in_poly);
     CHECK(polylines == 3);
     CHECK(polylines == seqends);
+}
+
+// --- writing a later revision -----------------------------------------------
+
+namespace {
+
+std::string dump_as(const Database& db, DxfVersion v) {
+    std::ostringstream out;
+    DxfWriter w(out, db, v);
+    w.set_handle_seed_hint(dxf_count_handles(db, v));
+    w.write_document();
+    return out.str();
+}
+
+void add_one_of_each(Database& db) {
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{10, 10, 0}));
+    db.add(std::make_unique<Ellipse>(Vec3{20, 0, 0}, Vec3{10, 0, 0}, 0.5));
+    db.add(Spline::interpolating({{0, 50, 0}, {10, 60, 0}, {20, 45, 0}, {30, 55, 0}}));
+    db.add(std::make_unique<MText>(Vec3{0, 90, 0}, "one\\Ptwo", 2.0, 20.0));
+}
+
+std::size_t count_records(const std::vector<Pair>& p, const char* type) {
+    std::size_t n = 0;
+    for (const Pair& g : p) {
+        if (g.code == 0 && g.value == type) ++n;
+    }
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("dxf r2000: the three degrading entities are written as themselves") {
+    Database db;
+    add_one_of_each(db);
+
+    bool ok = true;
+    const std::vector<Pair> p = parse(dump_as(db, DxfVersion::R2000), &ok);
+    CHECK(ok);
+
+    // The whole reason a later revision is worth offering.
+    CHECK(count_records(p, "ELLIPSE") == 1);
+    CHECK(count_records(p, "SPLINE") == 1);
+    CHECK(count_records(p, "MTEXT") == 1);
+    // And no tessellation: the curves are not polylines any more.
+    CHECK(count_records(p, "POLYLINE") == 0);
+    CHECK(count_records(p, "VERTEX") == 0);
+
+    // R12 still degrades all three, which is the interchange guarantee.
+    const std::vector<Pair> r12 = parse(dump_as(db, DxfVersion::R12), &ok);
+    CHECK(count_records(r12, "ELLIPSE") == 0);
+    CHECK(count_records(r12, "SPLINE") == 0);
+    CHECK(count_records(r12, "MTEXT") == 0);
+    CHECK(count_records(r12, "POLYLINE") == 2);  // the ellipse and the spline
+    CHECK(count_records(r12, "TEXT") == 2);      // the mtext, one per line
+}
+
+TEST_CASE("dxf r2000: a round trip through our own writer is LOSSLESS") {
+    // The claim the revision exists to make. At R12 an ellipse comes back a
+    // polyline and nothing recovers it -- which is what cost an afternoon.
+    Database db;
+    add_one_of_each(db);
+    db.sysvars().set_string(Sysvar::DxfVersionVar, "R2000");
+
+    Database back;
+    const DxfReadResult r = read_dxf_text(back, dump_as(db, DxfVersion::R2000));
+    CHECK(r.ok);
+    CHECK(r.proxies == 0);
+
+    std::map<EntityType, int> kinds;
+    for (const Handle h : back.order()) ++kinds[back.get(h)->type()];
+
+    CHECK(kinds[EntityType::Line] == 1);
+    CHECK(kinds[EntityType::Ellipse] == 1);
+    CHECK(kinds[EntityType::Spline] == 1);
+    CHECK(kinds[EntityType::MText] == 1);
+    CHECK(kinds[EntityType::Polyline] == 0);  // nothing degraded
+
+    // And the geometry survived, not merely the type.
+    for (const Handle h : back.order()) {
+        const Entity* e = back.get(h);
+        if (e->type() == EntityType::Ellipse) {
+            const Ellipse& el = static_cast<const Ellipse&>(*e);
+            CHECK_NEAR(el.major_length(), 10.0, 1e-9);
+            CHECK_NEAR(el.ratio(), 0.5, 1e-9);
+        } else if (e->type() == EntityType::Spline) {
+            CHECK(static_cast<const Spline&>(*e).valid());
+            CHECK(static_cast<const Spline&>(*e).degree() == 3);
+        } else if (e->type() == EntityType::MText) {
+            // The RAW string, inline codes intact.
+            CHECK(static_cast<const MText&>(*e).text() == "one\\Ptwo");
+        }
+    }
+}
+
+TEST_CASE("dxf r2000: handles are unique and every owner resolves") {
+    // R13 and later make handles mandatory, which is what R12 does not. The
+    // failure this guards is the one AutoCAD rejected our R12 files for.
+    Database db;
+    add_one_of_each(db);
+
+    bool ok = true;
+    const std::vector<Pair> p = parse(dump_as(db, DxfVersion::R2000), &ok);
+    CHECK(ok);
+
+    std::set<std::string> allocated;
+    std::vector<std::string> owners;
+    std::string seed;
+    bool in_header = false;
+    std::size_t handle_records = 0;
+
+    for (std::size_t i = 0; i < p.size(); ++i) {
+        if (p[i].code == 0 && p[i].value == "SECTION" && i + 1 < p.size()) {
+            in_header = (p[i + 1].value == "HEADER");
+        }
+        if (p[i].code == 9 && p[i].value == "$HANDSEED" && i + 1 < p.size()) seed = p[i + 1].value;
+        else if (p[i].code == 5 && !in_header) {
+            ++handle_records;
+            allocated.insert(p[i].value);
+        } else if (p[i].code == 330) {
+            owners.push_back(p[i].value);
+        }
+    }
+
+    CHECK(handle_records > 0);
+    CHECK(allocated.size() == handle_records);  // no duplicates anywhere
+
+    // $HANDSEED is the NEXT handle to issue and must clear every one present.
+    unsigned long max_used = 0;
+    for (const std::string& h : allocated) max_used = std::max(max_used, std::stoul(h, nullptr, 16));
+    CHECK(!seed.empty());
+    CHECK(std::stoul(seed, nullptr, 16) > max_used);
+
+    // An entity owned by nothing is rejected, so every owner must exist. "0" is
+    // the document itself, which the tables hang off.
+    for (const std::string& o : owners) {
+        CHECK(o == "0" || allocated.count(o) == 1);
+    }
+}
+
+TEST_CASE("dxf r2000: the sections and tables a later reader expects") {
+    Database db;
+    add_one_of_each(db);
+
+    bool ok = true;
+    const std::vector<Pair> p = parse(dump_as(db, DxfVersion::R2000), &ok);
+    CHECK(ok);
+
+    std::set<std::string> sections;
+    std::set<std::string> tables;
+    for (std::size_t i = 0; i + 1 < p.size(); ++i) {
+        if (p[i].code == 0 && p[i].value == "SECTION") sections.insert(p[i + 1].value);
+        if (p[i].code == 0 && p[i].value == "TABLE") tables.insert(p[i + 1].value);
+    }
+
+    CHECK(sections.count("CLASSES") == 1);
+    CHECK(sections.count("OBJECTS") == 1);
+    // BLOCK_RECORD is the one R12 has no concept of, and entities name its
+    // *Model_Space entry as their owner.
+    CHECK(tables.count("BLOCK_RECORD") == 1);
+    CHECK(tables.count("VPORT") == 1);
+    CHECK(tables.count("DIMSTYLE") == 1);
+
+    // R12 has none of them.
+    const std::vector<Pair> r12 = parse(dump_as(db, DxfVersion::R12), &ok);
+    std::set<std::string> r12_sections;
+    for (std::size_t i = 0; i + 1 < r12.size(); ++i) {
+        if (r12[i].code == 0 && r12[i].value == "SECTION") r12_sections.insert(r12[i + 1].value);
+    }
+    CHECK(r12_sections.count("CLASSES") == 0);
+    CHECK(r12_sections.count("OBJECTS") == 0);
 }

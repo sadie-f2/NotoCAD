@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <fstream>
+#include <streambuf>
 #include <ostream>
 
 namespace noto {
@@ -62,12 +63,56 @@ void DxfWriter::point(int base, const Vec3& p) {
     code(base + 20, p.z);
 }
 
+const char* dxf_version_name(DxfVersion v) {
+    switch (v) {
+        case DxfVersion::R12: return "AC1009";
+        case DxfVersion::R2000: return "AC1015";
+    }
+    return "AC1009";
+}
+
+const char* dxf_version_label(DxfVersion v) {
+    switch (v) {
+        case DxfVersion::R12: return "R12";
+        case DxfVersion::R2000: return "R2000";
+    }
+    return "R12";
+}
+
+DxfVersion dxf_version_from_name(const std::string& name) {
+    std::string up;
+    for (const char c : name) up.push_back((c >= 'a' && c <= 'z') ? static_cast<char>(c - 32) : c);
+    if (up == "R2000" || up == "AC1015" || up == "2000") return DxfVersion::R2000;
+    return DxfVersion::R12;
+}
+
+bool dxf_has_modern_entities(DxfVersion v) { return v != DxfVersion::R12; }
+bool dxf_requires_handles(DxfVersion v) { return v != DxfVersion::R12; }
+
+std::string DxfWriter::next_handle() { return to_hex(next_handle_++); }
+
+void DxfWriter::subclass(const char* name) {
+    // R12 has no subclass markers at all, and emitting one there would be a
+    // group code the reader does not expect.
+    if (!dxf_requires_handles(version_)) return;
+    code(100, name);
+}
+
 void DxfWriter::write_common(const Entity& e) { write_common_as(e, e.type_name()); }
 
 void DxfWriter::write_common_as(const Entity& e, const char* type_name) {
     const EntityProps& props = e.props();
 
     code(0, type_name);
+
+    // R13 and later: a unique handle, an owner, and the base subclass. The
+    // owner is the model-space block record, whose handle is fixed before any
+    // entity is written -- an entity owned by nothing is rejected.
+    if (dxf_requires_handles(version_)) {
+        code(5, next_handle());
+        if (!model_space_owner_.empty()) code(330, model_space_owner_);
+        subclass("AcDbEntity");
+    }
 
     const LayerId lid = props.layer;
     code(8, lid < db_.layers().size() ? db_.layer(lid).name : std::string("0"));
@@ -108,7 +153,7 @@ void DxfWriter::write_header() {
     begin_section("HEADER");
 
     code(9, "$ACADVER");
-    code(1, "AC1009");
+    code(1, dxf_version_name(version_));
 
     // NO HANDLES. R12 made them optional -- $HANDLING defaults to 0 and most
     // R12 files carry none -- and they became mandatory only in R13.
@@ -130,8 +175,16 @@ void DxfWriter::write_header() {
     //
     // R13 and later require them, so a version-aware writer will have to solve
     // the allocation properly. See SF_todo.md.
-    code(9, "$HANDLING");
-    code(70, 0);
+    if (dxf_requires_handles(version_)) {
+        // R13 and later require handles, and $HANDSEED must clear every one
+        // issued -- which is only known after the document has been written, so
+        // write_dxf_* runs a counting pass first and hands the answer back here.
+        code(9, "$HANDSEED");
+        code(5, to_hex(seed_hint_ != 0 ? seed_hint_ : 0xFFFF));
+    } else {
+        code(9, "$HANDLING");
+        code(70, 0);
+    }
 
     code(9, "$INSBASE");
     point(10, db_.sysvars().get_point(Sysvar::InsBase));
@@ -181,11 +234,9 @@ void DxfWriter::write_tables() {
     begin_section("TABLES");
 
     // LTYPE must precede LAYER, since layers reference linetypes by name.
-    code(0, "TABLE");
-    code(2, "LTYPE");
-    code(70, static_cast<int>(db_.linetypes().size()));
+    const std::string lt_owner = begin_table("LTYPE", static_cast<int>(db_.linetypes().size()));
     for (const Linetype& lt : db_.linetypes()) {
-        code(0, "LTYPE");
+        table_record("LTYPE", lt_owner, "AcDbLinetypeTableRecord");
         code(2, lt.name);
         code(70, 0);
         code(3, lt.description);
@@ -198,11 +249,9 @@ void DxfWriter::write_tables() {
     }
     code(0, "ENDTAB");
 
-    code(0, "TABLE");
-    code(2, "LAYER");
-    code(70, static_cast<int>(db_.layers().size()));
+    const std::string la_owner = begin_table("LAYER", static_cast<int>(db_.layers().size()));
     for (const Layer& ly : db_.layers()) {
-        code(0, "LAYER");
+        table_record("LAYER", la_owner, "AcDbLayerTableRecord");
         code(2, ly.name);
         code(70, ly.frozen ? 1 : 0);
         code(62, static_cast<int>(ly.color));
@@ -215,12 +264,10 @@ void DxfWriter::write_tables() {
     // expects the table and does not find it is a worse failure than an empty
     // one -- and because an empty table is the honest report for a drawing
     // that has saved none.
-    code(0, "TABLE");
-    code(2, "UCS");
-    code(70, static_cast<int>(db_.ucs_table().size()));
+    const std::string ucs_owner = begin_table("UCS", static_cast<int>(db_.ucs_table().size()));
     for (const UcsDef& def : db_.ucs_table()) {
         if (def.name.empty()) continue;  // deleted by UCS Del
-        code(0, "UCS");
+        table_record("UCS", ucs_owner, "AcDbUCSTableRecord");
         code(2, def.name);
         code(70, 0);
         point(10, def.ucs.origin);
@@ -231,10 +278,8 @@ void DxfWriter::write_tables() {
 
     // A STANDARD text style and the ACAD application id: both are expected to
     // exist by most readers even when nothing references them yet.
-    code(0, "TABLE");
-    code(2, "STYLE");
-    code(70, 1);
-    code(0, "STYLE");
+    const std::string st_owner = begin_table("STYLE", 1);
+    table_record("STYLE", st_owner, "AcDbTextStyleTableRecord");
     code(2, "STANDARD");
     code(70, 0);
     code(40, 0.0);
@@ -246,13 +291,38 @@ void DxfWriter::write_tables() {
     code(4, "");
     code(0, "ENDTAB");
 
-    code(0, "TABLE");
-    code(2, "APPID");
-    code(70, 1);
-    code(0, "APPID");
+    const std::string app_owner = begin_table("APPID", 1);
+    table_record("APPID", app_owner, "AcDbRegAppTableRecord");
     code(2, "ACAD");
     code(70, 0);
     code(0, "ENDTAB");
+
+    // The rest exist only for R13 and later, which expect them present even when
+    // a drawing has nothing to put in them.
+    if (dxf_requires_handles(version_)) {
+        const std::string vp_owner = begin_table("VPORT", 1);
+        table_record("VPORT", vp_owner, "AcDbViewportTableRecord");
+        code(2, "*ACTIVE");
+        code(70, 0);
+        point(10, Vec3{0.0, 0.0, 0.0});
+        point(11, Vec3{1.0, 1.0, 0.0});
+        point(12, Vec3{0.0, 0.0, 0.0});
+        code(40, 1.0);
+        code(41, 1.0);
+        code(0, "ENDTAB");
+
+        const std::string vw_owner = begin_table("VIEW", 0);
+        (void)vw_owner;
+        code(0, "ENDTAB");
+
+        const std::string dim_owner = begin_table("DIMSTYLE", 1);
+        table_record("DIMSTYLE", dim_owner, "AcDbDimStyleTableRecord");
+        code(2, "STANDARD");
+        code(70, 0);
+        code(0, "ENDTAB");
+
+        write_block_records();
+    }
 
     end_section();
 }
@@ -264,24 +334,62 @@ void DxfWriter::write_blocks() {
     // entities are written by the same dxf_write() the drawing uses, because a
     // block's contents are ordinary entities that merely live somewhere else --
     // which is also why a block can contain an INSERT with no extra work.
+    // R13 and later require the two layout blocks to exist even when empty --
+    // model space is where every ordinary entity lives, and a reader looks for
+    // it by name.
+    if (dxf_requires_handles(version_)) {
+        for (const char* name : {"*Model_Space", "*Paper_Space"}) {
+            code(0, "BLOCK");
+            code(5, next_handle());
+            code(330, model_space_owner_);
+            subclass("AcDbEntity");
+            code(8, "0");
+            subclass("AcDbBlockBegin");
+            code(2, name);
+            code(70, 0);
+            point(10, Vec3{0.0, 0.0, 0.0});
+            code(3, name);
+            code(1, "");
+            code(0, "ENDBLK");
+            code(5, next_handle());
+            code(330, model_space_owner_);
+            subclass("AcDbEntity");
+            code(8, "0");
+            subclass("AcDbBlockEnd");
+        }
+    }
+
     for (const std::unique_ptr<BlockDef>& def : db_.blocks()) {
         if (!def) continue;
 
         code(0, "BLOCK");
+        if (dxf_requires_handles(version_)) {
+            code(5, next_handle());
+            code(330, model_space_owner_);
+            subclass("AcDbEntity");
+        }
         code(8, "0");
+        subclass("AcDbBlockBegin");
         code(2, def->name);
         code(70, static_cast<int>(def->flags));
         point(10, def->base);
         // R12 repeats the name in group 3. Readers differ on which they trust,
         // so both are written.
         code(3, def->name);
+        if (dxf_requires_handles(version_)) code(1, "");
 
         for (const EntityPtr& e : def->entities) {
             if (e) e->dxf_write(*this);
         }
 
         code(0, "ENDBLK");
+        if (dxf_requires_handles(version_)) {
+            code(5, next_handle());
+            code(330, model_space_owner_);
+            subclass("AcDbEntity");
+        }
         code(8, "0");
+        subclass("AcDbBlockEnd");
     }
 
     end_section();
@@ -297,17 +405,124 @@ void DxfWriter::write_entities() {
 
 void DxfWriter::write_document() {
     write_header();
+    write_classes();
     write_tables();
     write_blocks();
     write_entities();
+    write_objects();
     code(0, "EOF");
 }
 
-bool write_dxf_file(const Database& db, const std::string& path) {
+std::string DxfWriter::begin_table(const char* name, int count) {
+    code(0, "TABLE");
+    code(2, name);
+
+    std::string owner;
+    if (dxf_requires_handles(version_)) {
+        owner = next_handle();
+        code(5, owner);
+        // Handle 0 is the document itself: the tables hang off the root.
+        code(330, "0");
+        subclass("AcDbSymbolTable");
+    }
+    code(70, count);
+    return owner;
+}
+
+void DxfWriter::table_record(const char* type, const std::string& owner,
+                             const char* record_subclass) {
+    code(0, type);
+    if (dxf_requires_handles(version_)) {
+        code(5, next_handle());
+        code(330, owner);
+        subclass("AcDbSymbolTableRecord");
+        subclass(record_subclass);
+    }
+}
+
+void DxfWriter::write_classes() {
+    // R12 has no CLASSES section. Later versions expect one, and an empty one is
+    // correct here: it describes application-defined classes, and this program
+    // defines none.
+    if (!dxf_requires_handles(version_)) return;
+    begin_section("CLASSES");
+    end_section();
+}
+
+void DxfWriter::write_block_records() {
+    if (!dxf_requires_handles(version_)) return;
+
+    const std::size_t count = db_.blocks().size() + 2;  // + model and paper space
+    const std::string owner = begin_table("BLOCK_RECORD", static_cast<int>(count));
+
+    // Model space first, and its handle is kept: every entity in the drawing
+    // names it as owner, and an entity owned by nothing is rejected.
+    table_record("BLOCK_RECORD", owner, "AcDbBlockTableRecord");
+    model_space_owner_ = to_hex(next_handle_ - 1);
+    code(2, "*Model_Space");
+    code(70, 0);
+
+    table_record("BLOCK_RECORD", owner, "AcDbBlockTableRecord");
+    code(2, "*Paper_Space");
+    code(70, 0);
+
+    for (const auto& b : db_.blocks()) {
+        if (!b) continue;
+        table_record("BLOCK_RECORD", owner, "AcDbBlockTableRecord");
+        code(2, b->name);
+        code(70, 0);
+    }
+    code(0, "ENDTAB");
+}
+
+void DxfWriter::write_objects() {
+    // The named object dictionary. R2000 expects a root dictionary to exist even
+    // when it holds nothing this program uses; layouts and groups hang off it.
+    if (!dxf_requires_handles(version_)) return;
+
+    begin_section("OBJECTS");
+    code(0, "DICTIONARY");
+    code(5, next_handle());
+    code(330, "0");
+    subclass("AcDbDictionary");
+    code(281, 1);
+    end_section();
+}
+
+namespace {
+
+// Discards everything. Used for the counting pass below.
+class NullBuf final : public std::streambuf {
+protected:
+    int overflow(int c) override { return c; }
+};
+
+}  // namespace
+
+Handle dxf_count_handles(const Database& db, DxfVersion version) {
+    // A version that needs handles needs $HANDSEED in the HEADER, which is
+    // written first -- and the seed is one past every handle issued, which is
+    // known only at the end. So the document is written once to nowhere to
+    // count, then again for real.
+    //
+    // Two passes rather than buffering the output: a drawing that fills a
+    // gigabyte should not need a second gigabyte of memory to be saved, and the
+    // pass is cheap next to the I/O it avoids buffering.
+    if (!dxf_requires_handles(version)) return 0;
+
+    NullBuf nb;
+    std::ostream sink(&nb);
+    DxfWriter counter(sink, db, version);
+    counter.write_document();
+    return counter.handle_seed();
+}
+
+bool write_dxf_file(const Database& db, const std::string& path, DxfVersion version) {
     std::ofstream out(path, std::ios::binary);
     if (!out) return false;
 
-    DxfWriter w(out, db);
+    DxfWriter w(out, db, version);
+    w.set_handle_seed_hint(dxf_count_handles(db, version));
     w.write_document();
     return out.good();
 }

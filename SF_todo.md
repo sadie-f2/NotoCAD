@@ -819,9 +819,63 @@ would garble rather than refuse -- it should detect the sentinel and say so. And
 **encoding**: AC1021 and later are UTF-8 where R12 was ANSI, which matters the
 moment text is non-ASCII, since the bundled Hershey font covers ASCII only.
 
-### Writing later versions
+### Writing later versions — BUILT (AC1015)
 
-**Wanted eventually, not now.** Sadie's: modern AutoCAD offers a range of write
+`DXFVERSION` chooses: `"R12"` or `"R2000"`. SAVE, SAVEAS, QSAVE and DXFOUT all
+follow it, and DXFOUT names the revision it wrote in its reply, since that is the
+one thing a user cannot see from the filename.
+
+**One writer with a version, not two.** Every entity already knew how to write
+itself at R12; the version picks between that and a native form. Entities branch
+on `dxf_has_modern_entities(w.version())` rather than on the enum, so adding a
+version later does not mean revisiting every entity.
+
+**The payoff, measured** on a drawing holding one of everything: 8,397 bytes at
+R12, **4,525 at R2000** — and the R2000 file is lossless where the R12 one is
+not. ELLIPSE, SPLINE and MTEXT go out as themselves instead of as a
+tessellation, a tessellation and a run of TEXT records.
+
+**But R2000 is not always smaller.** A drawing with none of those three gets
+*larger*: handles, owner pointers and subclass markers on every record are pure
+overhead when there is nothing they enable. `Drawing8.dxf` went 387K at R12 to
+449K at R2000. The rule is that R2000 pays when the drawing holds entities R12
+cannot name, and costs when it does not.
+
+#### What R2000 needed beyond R12
+
+Mostly structure rather than entities, and it is worth listing because none of it
+is optional:
+
+- **Handles on every record**, unique, including VERTEX and SEQEND. `$HANDSEED`
+  must clear them all — and it lives in the HEADER, which is written first, so
+  the document is written **twice**: once to a null sink to count, then for real.
+  Two passes rather than buffering, because a drawing that fills a gigabyte
+  should not need a second gigabyte to be saved.
+- **A BLOCK_RECORD table**, with `*Model_Space` and `*Paper_Space` entries. The
+  model space record's handle is captured as it is written, because every entity
+  names it as owner and an entity owned by nothing is rejected.
+- **Owner pointers** (group 330) on every entity and table record.
+- **Subclass markers** (group 100), `AcDbEntity` plus the per-entity class.
+- **CLASSES and OBJECTS sections**, and VPORT, VIEW and DIMSTYLE tables. CLASSES
+  is legitimately empty here: it describes application-defined classes and this
+  program defines none.
+
+#### DXFVERSION is NOT saved in the drawing
+
+It says how to *write* a file, not anything about the drawing's contents. Marking
+it `save_in_drawing` means OPEN resets it, so choosing R2000 and then opening
+something silently reverts to R12 — which it did, once, before the flag was
+corrected.
+
+#### Not done
+
+R2000 output has **not been opened in AutoCAD**. Structure is verified by tests —
+handles unique, seed clearing, every owner resolving, sections and tables present
+— and by a lossless round trip through our own reader. That is not the same as a
+real reader accepting it, and the R12 handle bug is the standing proof that
+structural self-checks miss things.
+
+**Wanted eventually, not now:** Sadie's: modern AutoCAD offers a range of write
 formats and still lists R12 in 2026, so being able to emit AC1015 or later is
 warranted — but nothing needs it yet, and AC1009 remains the interchange
 guarantee.

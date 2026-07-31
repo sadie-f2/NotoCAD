@@ -297,6 +297,39 @@ void MText::draw(const DrawContext&, Renderer& r) const {
 }
 
 void MText::dxf_write(DxfWriter& w) const {
+    if (height_ <= 0.0) return;
+
+    // R2000 has MTEXT, so the paragraph goes out whole -- the raw string with
+    // its inline codes, the reference width, the attachment. The R12 path below
+    // flattens it to a run of TEXT records and cannot be rejoined.
+    if (dxf_has_modern_entities(w.version())) {
+        const Mat4 to_ecs = world_to_ecs(props().normal);
+        w.write_common(*this);
+        w.subclass("AcDbMText");
+        w.point(10, to_ecs.transform_point(pos_));
+        w.write_extrusion(props().normal);
+        w.code(40, height_);
+        w.code(41, width_);
+        w.code(71, static_cast<int>(attach_));
+        w.code(72, 1);  // drawing direction: by style
+        if (line_spacing_ != 1.0) {
+            w.code(73, 2);  // exact, scaled by the factor below
+            w.code(44, line_spacing_);
+        }
+        if (rotation_ != 0.0) w.code(50, rotation_ * 180.0 / std::numbers::pi);
+
+        // Text over 250 characters is split across group 3 chunks with the tail
+        // in group 1 -- the same rule the reader honours, from the other side.
+        constexpr std::size_t kChunk = 250;
+        std::size_t at = 0;
+        while (text_.size() - at > kChunk) {
+            w.code(3, text_.substr(at, kChunk));
+            at += kChunk;
+        }
+        w.code(1, text_.substr(at));
+        return;
+    }
+
     // THE DIVERGENCE, PAID FOR HERE. AC1009 has no MTEXT, so this writes what
     // R12 itself would have held: one TEXT record per laid-out line, formatting
     // discarded and the wrap already applied. Every reader understands it.

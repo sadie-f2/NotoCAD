@@ -71,6 +71,12 @@ constexpr SysvarDef kTable[] = {
     {"UCSICON", Sysvar::UcsIcon, SysvarType::Int, false, true, 1, 0, 2, 0.0, "", {}},
     {"DWGNAME", Sysvar::DwgName, SysvarType::String, true, true, 0, 0, 0, 0.0, "", {}},
     {"DWGPREFIX", Sysvar::DwgPrefix, SysvarType::String, true, true, 0, 0, 0, 0.0, "", {}},
+    // Writable, unlike the two above, and NOT saved in the drawing: it says how
+    // to WRITE a file, not anything about the drawing's contents. Making it a
+    // drawing variable means OPEN resets it, so choosing R2000 and then opening
+    // something silently reverts to R12 -- which is exactly the surprise it
+    // caused before this comment existed.
+    {"DXFVERSION", Sysvar::DxfVersionVar, SysvarType::String, false, false, 0, 0, 0, 0.0, "R12", {}},
 };
 
 static_assert(sizeof(kTable) / sizeof(kTable[0]) == static_cast<std::size_t>(Sysvar::kCount),

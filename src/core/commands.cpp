@@ -5431,7 +5431,9 @@ Step SaveCommand::write_to(CommandContext& ctx, const std::string& raw) {
     // used rather than whatever mixture of dots and tildes was typed.
     const std::string path = normalised_path(raw);
 
-    if (!write_dxf_file(ctx.db, path)) {
+    const DxfVersion version =
+        dxf_version_from_name(ctx.db.sysvars().get_string(Sysvar::DxfVersionVar));
+    if (!write_dxf_file(ctx.db, path, version)) {
         // The flag stays set. Clearing it next to the call rather than on the
         // success branch is how a full disk quietly becomes a lost drawing.
         return Step::failed("could not write " + path);
@@ -5618,12 +5620,16 @@ Step DxfOutCommand::next(CommandContext& ctx, const InputValue& value) {
         return Step::failed("a file name is required");
     }
 
-    // R12 supplies the extension when you leave it off.
-    std::string path = value.text;
-    if (path.size() < 4 || upcase(path.substr(path.size() - 4)) != ".DXF") path += ".dxf";
+    // The same treatment every other file command gives a name.
+    const std::string path = ensure_extension(expand_user_path(value.text), ".dxf");
 
-    if (!write_dxf_file(ctx.db, path)) return Step::failed("cannot write " + path);
-    return Step::done(path + " written");
+    const DxfVersion version =
+        dxf_version_from_name(ctx.db.sysvars().get_string(Sysvar::DxfVersionVar));
+    if (!write_dxf_file(ctx.db, path, version)) return Step::failed("cannot write " + path);
+
+    // The revision is named in the reply, because which one was written is the
+    // thing a user needs to know and cannot see from the filename.
+    return Step::done(path + " written as " + dxf_version_label(version));
 }
 
 // --- registry ---------------------------------------------------------------
