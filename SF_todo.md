@@ -539,6 +539,44 @@ cannot be stopped, and the cost is a bool test per form.
 sets it. The GUI's Escape currently reaches `CommandEngine`, and routing it to
 the interpreter as well is the remaining piece.
 
+## AutoCAD called our R12 DXF corrupt — handles
+
+Reported from use, and NOT a regression despite looking like one. The cause was
+latent from the day polylines could be written, and the sample drawing
+`gen_sample` emits contains no polylines at all — which is why "verified to open
+in AutoCAD 2026" never touched the path.
+
+**A POLYLINE's VERTEX and SEQEND records are not database entities.** They have
+no handles of their own, so they were emitted carrying the PARENT'S handle: a
+degraded ellipse wrote eighteen records all claiming to be handle 6. Measured on
+a drawing with one of every entity type: 106 handle records, 11 distinct.
+
+Handles must be unique, and the header declared `$HANDLING = 1`, which tells the
+reader to check. `$HANDSEED` was wrong too — it is the *next* handle to allocate
+and must exceed every one present, and ours equalled the maximum.
+
+**The fix is to write no handles at all.** R12 made them optional, `$HANDLING`
+defaults to 0, and most R12 files carry none; they became mandatory only in R13.
+Writing them correctly would mean allocating handles for subordinate records at
+write time and knowing the total before the header is emitted — a two-pass write,
+for something **nothing reads**: `dxf_read` ignores group 5 entirely and assigns
+fresh handles on load.
+
+Two lines saved on every record as well, which on a drawing of a million polyline
+vertices is not a rounding error. The one-of-everything file went from 9,047 to
+8,397 bytes; on vertex-heavy output the saving is proportionally much larger.
+
+**Consequence for later DXF versions:** R13 and up REQUIRE handles, so a
+version-aware writer has to solve the allocation properly — subordinate records
+need their own, and `$HANDSEED` has to be known before the header is written.
+That is a real constraint on the writer's shape, and it is why it is recorded
+here rather than in the commit alone.
+
+Pinned by two tests: no group 5 is emitted and the header does not claim any, and
+every VERTEX sits inside a POLYLINE that a SEQEND closes with no other entity
+interrupting the sequence. The second is the other way a file gets called corrupt
+and the degrading entities are the ones that emit those records.
+
 ## Rendering cost — measured, and the three things gdb found
 
 Sadie made a polar array of a spline, 100 copies, then a 10,000-element

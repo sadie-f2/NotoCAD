@@ -99,13 +99,11 @@ void Ellipse::dxf_write(DxfWriter& w) const {
     for (int i = 0; i < count; ++i) {
         const double t = start_param_ + span * (static_cast<double>(i) / segments);
         w.code(0, "VERTEX");
-        w.code(5, w.handle_text(handle()));
         w.code(8, w.layer_name(*this));
         w.point(10, to_ecs.transform_point(point_at(t)));
     }
 
     w.code(0, "SEQEND");
-    w.code(5, w.handle_text(handle()));
     w.code(8, w.layer_name(*this));
 }
 
@@ -126,7 +124,6 @@ void Polyline::dxf_write(DxfWriter& w) const {
 
     for (const PolyVertex& v : vertices_) {
         w.code(0, "VERTEX");
-        w.code(5, w.handle_text(handle()));
         w.code(8, w.layer_name(*this));
         w.point(10, to_ecs.transform_point(v.pos));
         // Widths are written per vertex rather than as the header's defaults,
@@ -139,7 +136,6 @@ void Polyline::dxf_write(DxfWriter& w) const {
     }
 
     w.code(0, "SEQEND");
-    w.code(5, w.handle_text(handle()));
     w.code(8, w.layer_name(*this));
 }
 

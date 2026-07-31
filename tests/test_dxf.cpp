@@ -247,7 +247,9 @@ TEST_CASE("dxf: entity properties are emitted only when non-default") {
     CHECK(value_in_entity(p, second, 8) == "WALLS");
     CHECK(value_in_entity(p, second, 62) == "5");
     CHECK_NEAR(std::stod(value_in_entity(p, second, 39)), 0.5, 1e-12);
-    CHECK(!value_in_entity(p, second, 5).empty());  // handle written
+    // No handle. R12 made them optional and we no longer write any -- see the
+    // header comment in dxf.cpp, and the test below for why.
+    CHECK(value_in_entity(p, second, 5).empty());
     CHECK(h != kNullHandle);
 }
 
@@ -258,4 +260,80 @@ TEST_CASE("dxf: output is deterministic") {
     db.add(std::make_unique<Arc>(Vec3{0, 0, 0}, 1.0, 0.1, 1.2));
 
     CHECK(dump(db) == dump(db));
+}
+
+// --- what made AutoCAD call the file corrupt --------------------------------
+
+TEST_CASE("dxf: no handles are written, because ours could not be unique") {
+    // A POLYLINE's VERTEX and SEQEND records are not database entities and have
+    // no handles of their own, so they were emitted carrying the PARENT'S. A
+    // degraded ellipse wrote eighteen records all claiming handle 6. Handles
+    // must be unique, and $HANDLING = 1 told the reader to check -- so AutoCAD
+    // rejected the file outright.
+    Database db;
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{10, 10, 0}));
+    db.add(std::make_unique<Ellipse>(Vec3{20, 0, 0}, Vec3{10, 0, 0}, 0.5));
+    db.add(Spline::interpolating({{0, 50, 0}, {10, 60, 0}, {20, 45, 0}, {30, 55, 0}}));
+
+    const std::string out = dump(db);
+    bool ok = true;
+    const std::vector<Pair> p = parse(out, &ok);
+    CHECK(ok);
+
+    std::size_t handles = 0;
+    for (const Pair& g : p) {
+        if (g.code == 5) ++handles;
+    }
+    CHECK(handles == 0);
+
+    // And the header must not claim they are there.
+    for (std::size_t i = 0; i + 1 < p.size(); ++i) {
+        if (p[i].code == 9 && p[i].value == "$HANDLING") CHECK(p[i + 1].value == "0");
+        CHECK(!(p[i].code == 9 && p[i].value == "$HANDSEED"));
+    }
+}
+
+TEST_CASE("dxf: every VERTEX sits inside a POLYLINE that a SEQEND closes") {
+    // The structure a reader walks. An entity appearing between a POLYLINE and
+    // its SEQEND, or a SEQEND with no POLYLINE open, is the other way a file is
+    // called corrupt -- and the degrading entities are the ones that emit these
+    // records, so they are the ones worth pinning.
+    Database db;
+    db.add(std::make_unique<Ellipse>(Vec3{20, 0, 0}, Vec3{10, 0, 0}, 0.5));
+    db.add(Spline::interpolating({{0, 50, 0}, {10, 60, 0}, {20, 45, 0}, {30, 55, 0}}));
+    {
+        auto poly = std::make_unique<Polyline>();
+        poly->add({0, 70, 0});
+        poly->add({10, 75, 0}, 1.0);
+        poly->add({20, 70, 0});
+        db.add(std::move(poly));
+    }
+    db.add(std::make_unique<MText>(Vec3{0, 90, 0}, "one\\Ptwo", 2.0));
+
+    bool ok = true;
+    const std::vector<Pair> p = parse(dump(db), &ok);
+    CHECK(ok);
+
+    bool in_poly = false;
+    std::size_t polylines = 0;
+    std::size_t seqends = 0;
+    for (const Pair& g : p) {
+        if (g.code != 0) continue;
+        if (g.value == "POLYLINE") {
+            CHECK(!in_poly);  // never nested
+            in_poly = true;
+            ++polylines;
+        } else if (g.value == "SEQEND") {
+            CHECK(in_poly);  // never orphaned
+            in_poly = false;
+            ++seqends;
+        } else if (g.value == "VERTEX") {
+            CHECK(in_poly);  // never loose
+        } else if (in_poly && g.value != "ENDSEC") {
+            CHECK(false);  // no other entity may interrupt the sequence
+        }
+    }
+    CHECK(!in_poly);
+    CHECK(polylines == 3);
+    CHECK(polylines == seqends);
 }

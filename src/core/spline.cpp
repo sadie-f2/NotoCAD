@@ -422,13 +422,11 @@ void Spline::dxf_write(DxfWriter& w) const {
     for (int i = 0; i <= segments; ++i) {
         const Vec3 p = point_at(lo + (hi - lo) * (static_cast<double>(i) / segments));
         w.code(0, "VERTEX");
-        w.code(5, w.handle_text(handle()));
         w.code(8, w.layer_name(*this));
         w.point(10, to_ecs.transform_point(p));
     }
 
     w.code(0, "SEQEND");
-    w.code(5, w.handle_text(handle()));
     w.code(8, w.layer_name(*this));
 }
 

@@ -336,8 +336,7 @@ void MText::dxf_write(DxfWriter& w) const {
             first = false;
         } else {
             w.code(0, "TEXT");
-            w.code(5, w.handle_text(handle()));
-            w.code(8, w.layer_name(*this));
+                w.code(8, w.layer_name(*this));
         }
 
         w.point(10, to_ecs.transform_point(origin + along * indent));

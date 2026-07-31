@@ -68,7 +68,6 @@ void DxfWriter::write_common_as(const Entity& e, const char* type_name) {
     const EntityProps& props = e.props();
 
     code(0, type_name);
-    code(5, to_hex(e.handle()));
 
     const LayerId lid = props.layer;
     code(8, lid < db_.layers().size() ? db_.layer(lid).name : std::string("0"));
@@ -111,10 +110,28 @@ void DxfWriter::write_header() {
     code(9, "$ACADVER");
     code(1, "AC1009");
 
+    // NO HANDLES. R12 made them optional -- $HANDLING defaults to 0 and most
+    // R12 files carry none -- and they became mandatory only in R13.
+    //
+    // We used to write them, and it made AutoCAD call the file corrupt. A
+    // POLYLINE's VERTEX and SEQEND records are not database entities and have no
+    // handles of their own, so they were emitted carrying the PARENT'S handle:
+    // a degraded ellipse wrote eighteen records all claiming to be handle 6.
+    // Handles must be unique, and $HANDLING = 1 told the reader to check.
+    // $HANDSEED was wrong as well -- it is the next handle to allocate and must
+    // exceed every one present, and ours equalled the maximum.
+    //
+    // Writing them correctly would mean allocating handles for subordinate
+    // records at write time and knowing the total before the header is emitted,
+    // which is a two-pass write for something NOTHING READS: dxf_read ignores
+    // group 5 entirely and assigns fresh handles on load. So they go. Two lines
+    // saved on every record, which on a drawing of a million polyline vertices
+    // is not a rounding error either.
+    //
+    // R13 and later require them, so a version-aware writer will have to solve
+    // the allocation properly. See SF_todo.md.
     code(9, "$HANDLING");
-    code(70, 1);
-    code(9, "$HANDSEED");
-    code(5, to_hex(db_.peek_next_handle()));
+    code(70, 0);
 
     code(9, "$INSBASE");
     point(10, db_.sysvars().get_point(Sysvar::InsBase));
