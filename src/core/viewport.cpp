@@ -96,7 +96,26 @@ double Viewport::world_per_pixel() const {
 }
 
 DrawContext Viewport::draw_context() const {
-    return DrawContext{world_per_pixel() * 0.5};
+    DrawContext ctx;
+    ctx.chord_tolerance = world_per_pixel() * 0.5;
+
+    // The visible rectangle, in view space and in world units. A couple of
+    // pixels of slack on every side, so an entity straddling the edge is drawn
+    // rather than popping in and out as the view moves by a fraction.
+    const Basis b = basis();
+    const double half_w = world_per_pixel() * static_cast<double>(width_px_) * 0.5;
+    const double half_h = world_per_pixel() * static_cast<double>(height_px_) * 0.5;
+    const double slack = world_per_pixel() * 2.0;
+
+    ctx.clip_active = true;
+    ctx.clip_origin = target_;
+    ctx.clip_x = b.ax;
+    ctx.clip_y = b.ay;
+    ctx.clip_min_x = -half_w - slack;
+    ctx.clip_max_x = half_w + slack;
+    ctx.clip_min_y = -half_h - slack;
+    ctx.clip_max_y = half_h + slack;
+    return ctx;
 }
 
 ScreenPoint Viewport::project(const Vec3& world) const {

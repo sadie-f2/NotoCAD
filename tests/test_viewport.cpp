@@ -4,10 +4,15 @@
 #include "test.hpp"
 
 #include "noto/entities.hpp"
+#include "noto/database.hpp"
+#include "noto/scene.hpp"
+#include "noto/render.hpp"
 #include "noto/viewport.hpp"
 
 #include <cmath>
 #include <numbers>
+
+#include <memory>
 
 using namespace noto;
 
@@ -306,4 +311,112 @@ TEST_CASE("viewport: the cached basis follows the camera") {
     vp.set_azimuth(vp.azimuth() - 1.0);
     CHECK_NEAR(vp.basis().ax.x, plan.ax.x, 1e-12);
     CHECK_NEAR(vp.basis().ay.y, plan.ay.y, 1e-12);
+}
+
+// --- view culling -----------------------------------------------------------
+//
+// draw_database used to flatten and project every entity in the drawing
+// whatever the viewport was showing, and let QPainter throw the pixels away.
+
+namespace {
+
+struct CountingRenderer final : Renderer {
+    void begin_entity(const EntityProps&) override {}
+    void polyline(const Vec3*, std::size_t, bool) override { ++runs; }
+    std::size_t runs{0};
+};
+
+std::size_t drawn(const Database& db, const DrawContext& ctx) {
+    CountingRenderer r;
+    draw_database(db, ctx, r);
+    return r.runs;
+}
+
+}  // namespace
+
+TEST_CASE("culling: what is off screen is not drawn, what is on screen is") {
+    Database db;
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{10, 10, 0}));       // at the target
+    db.add(std::make_unique<Line>(Vec3{9000, 9000, 0}, Vec3{9010, 9010, 0}));  // far away
+
+    Viewport vp;
+    vp.set_size(800, 600);
+    vp.set_target(Vec3{5, 5, 0});
+    vp.set_view_height(100.0);
+
+    CHECK(drawn(db, vp.draw_context()) == 1);
+
+    // Move the view to the other one and the answer swaps, rather than both
+    // being drawn or neither.
+    vp.set_target(Vec3{9005, 9005, 0});
+    CHECK(drawn(db, vp.draw_context()) == 1);
+
+    // Wide enough for both.
+    vp.set_target(Vec3{4500, 4500, 0});
+    vp.set_view_height(30000.0);
+    CHECK(drawn(db, vp.draw_context()) == 2);
+}
+
+TEST_CASE("culling: an entity straddling the edge is drawn") {
+    Database db;
+    Viewport vp;
+    vp.set_size(800, 600);
+    vp.set_target(Vec3{0, 0, 0});
+    vp.set_view_height(100.0);
+
+    // Half in, half out. Culling it would lose the visible half, which is the
+    // failure that looks like corrupt geometry rather than a fast redraw.
+    const double half_h = 50.0;
+    db.add(std::make_unique<Line>(Vec3{0, half_h - 5.0, 0}, Vec3{0, half_h + 500.0, 0}));
+    CHECK(drawn(db, vp.draw_context()) == 1);
+}
+
+TEST_CASE("culling: a rotated view is why the clip is in VIEW space") {
+    // The case a world-space box test gets wrong. Turned off axis, the visible
+    // volume is a slab whose world AABB is enormous -- so a world test either
+    // culls nothing or culls things that are plainly on screen.
+    Database db;
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 1, 0}));
+
+    Viewport vp;
+    vp.set_size(800, 600);
+    vp.set_target(Vec3{0, 0, 0});
+    vp.set_view_height(100.0);
+    vp.set_azimuth(0.7);
+
+    // At the target, so it is on screen at every rotation.
+    CHECK(drawn(db, vp.draw_context()) == 1);
+    vp.set_azimuth(2.4);
+    CHECK(drawn(db, vp.draw_context()) == 1);
+    vp.set_azimuth(-1.1);
+    CHECK(drawn(db, vp.draw_context()) == 1);
+}
+
+TEST_CASE("culling: a context with no viewport draws everything") {
+    // The default DrawContext has no clip, which is what the DXF write and the
+    // hit-test probes rely on -- they drive draw() with no viewport at all and
+    // must see every entity.
+    Database db;
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 1, 0}));
+    db.add(std::make_unique<Line>(Vec3{99999, 99999, 0}, Vec3{99999, 99998, 0}));
+
+    CHECK(drawn(db, DrawContext{}) == 2);
+}
+
+TEST_CASE("culling: the skip list is honoured, however large") {
+    Database db;
+    std::vector<Handle> skip;
+    for (int i = 0; i < 50; ++i) {
+        const Handle h = db.add(std::make_unique<Line>(Vec3{0, double(i), 0}, Vec3{5, double(i), 0}));
+        if (i % 2 == 0) skip.push_back(h);
+    }
+
+    Viewport vp;
+    vp.set_size(800, 600);
+    vp.set_target(Vec3{2, 25, 0});
+    vp.set_view_height(200.0);
+
+    CountingRenderer r;
+    draw_database(db, vp.draw_context(), r, skip);
+    CHECK(r.runs == 25);
 }

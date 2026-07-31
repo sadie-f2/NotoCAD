@@ -8,6 +8,34 @@
 #include <numbers>
 
 namespace noto {
+
+bool DrawContext::visible(const BBox& box) const {
+    if (!clip_active) return true;
+    // An entity with no extent -- nothing has one yet, but a future one might --
+    // is drawn rather than guessed about.
+    if (!box.valid()) return true;
+
+    const Vec3 centre = (box.min + box.max) * 0.5;
+    const Vec3 half = (box.max - box.min) * 0.5;
+    const Vec3 d = centre - clip_origin;
+
+    // The exact extent of an axis-aligned box along an arbitrary direction:
+    // its centre's projection, give or take the half-extents weighted by the
+    // magnitudes of the direction's components. Two of these replace projecting
+    // all eight corners.
+    const double cx = dot(d, clip_x);
+    const double rx = half.x * std::abs(clip_x.x) + half.y * std::abs(clip_x.y) +
+                      half.z * std::abs(clip_x.z);
+    if (cx + rx < clip_min_x || cx - rx > clip_max_x) return false;
+
+    const double cy = dot(d, clip_y);
+    const double ry = half.x * std::abs(clip_y.x) + half.y * std::abs(clip_y.y) +
+                      half.z * std::abs(clip_y.z);
+    if (cy + ry < clip_min_y || cy - ry > clip_max_y) return false;
+
+    return true;
+}
+
 namespace {
 
 // One segment per 45 degrees, whatever the tolerance says. A circle three

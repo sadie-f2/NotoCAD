@@ -14,6 +14,7 @@
 // render into a recording sink with no display.
 #pragma once
 
+#include "noto/bbox.hpp"
 #include "noto/vec3.hpp"
 
 #include <cstddef>
@@ -29,6 +30,31 @@ struct DrawContext {
     // Maximum sagitta, in world units, allowed between a chord and the true
     // curve. A viewport sets this from its scale; see Viewport::draw_context().
     double chord_tolerance{0.0};
+
+    // What the viewport can actually see, so an entity outside it is never
+    // flattened at all.
+    //
+    // Held as a VIEW-SPACE rectangle rather than a world box, because an
+    // orthographic view turned off axis has no useful world-space bounds -- the
+    // visible volume is an infinite slab, whose world AABB is everything.
+    // Two axes and two intervals describe it exactly.
+    //
+    // `active` false means no clipping, which is what a headless render wants:
+    // the DXF write and the hit-test probes drive draw() with no viewport and
+    // must see every entity.
+    bool clip_active{false};
+    Vec3 clip_origin{};
+    Vec3 clip_x{};  // unit, screen right
+    Vec3 clip_y{};  // unit, screen up
+    double clip_min_x{0.0};
+    double clip_max_x{0.0};
+    double clip_min_y{0.0};
+    double clip_max_y{0.0};
+
+    // True when any part of `box` could be on screen. Conservative: it may say
+    // yes for something that turns out to be just off, which costs a wasted
+    // draw, where saying no wrongly would lose geometry silently.
+    bool visible(const BBox& box) const;
 };
 
 class Renderer {

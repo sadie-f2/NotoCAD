@@ -21,6 +21,10 @@ void draw_database(const Database& db, const DrawContext& ctx, Renderer& r) {
     for (const Handle h : db.order()) {
         const Entity* e = db.get(h);
         if (!e || !entity_visible(db, *e)) continue;
+        // Off screen: not flattened, not projected, not handed to the backend.
+        // QPainter would have discarded the pixels anyway, but only after all
+        // of that work had been done.
+        if (!ctx.visible(e->bbox())) continue;
         r.begin_entity(e->props());
         e->draw(ctx, r);
     }
@@ -28,10 +32,20 @@ void draw_database(const Database& db, const DrawContext& ctx, Renderer& r) {
 
 void draw_database(const Database& db, const DrawContext& ctx, Renderer& r,
                    const std::vector<Handle>& skip) {
+    // Sorted once rather than searched linearly per entity. `skip` is the set
+    // hidden behind ghosts, so it is non-empty exactly while a selection is
+    // being dragged -- and a linear find made that O(drawing x selection),
+    // which is a billion comparisons a frame for a thousand entities moving in
+    // a million. The one case where responsiveness matters most was the one
+    // that scaled worst.
+    std::vector<Handle> sorted(skip);
+    std::sort(sorted.begin(), sorted.end());
+
     for (const Handle h : db.order()) {
-        if (std::find(skip.begin(), skip.end(), h) != skip.end()) continue;
+        if (std::binary_search(sorted.begin(), sorted.end(), h)) continue;
         const Entity* e = db.get(h);
         if (!e || !entity_visible(db, *e)) continue;
+        if (!ctx.visible(e->bbox())) continue;
         r.begin_entity(e->props());
         e->draw(ctx, r);
     }

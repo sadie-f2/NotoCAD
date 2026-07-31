@@ -584,28 +584,55 @@ overshoots, so its control polygon can be three times the curve -- and the first
 version of this used it and never bit. Worth remembering: the two are not
 interchangeable, however close they look.
 
-### Still to do, and it is the bigger one for a large drawing
+### View culling — now built
 
-**There is no view culling at all.** `draw_database` walks every entity and calls
-`draw()` on it, whatever the viewport is showing. At extents that is honest work;
-zoomed in to a corner of a large drawing it is almost entirely wasted, which is
-the normal working case rather than the stress case.
+Sadie asked the right question: was it painting things outside the viewport? It
+was. `draw_database` walked every entity and called `draw()` whatever the view
+showed, and QPainter discarded the pixels *after* the curve had been flattened
+and every point projected.
 
-The design: an optional view-space clip rectangle on `DrawContext`, and a test of
-each entity's `bbox()` against it before `draw()` is called. It must be
-view-space rather than a world AABB, because an orthographic view rotated off
-axis has no useful world-space bounding box -- the visible volume is an infinite
-slab. Eight corner projections per entity, which is far cheaper than flattening
-a curve that is not on screen.
+`DrawContext` now carries an optional clip, and `draw_database` tests each
+entity's `bbox()` against it. Zoomed into a working view of 200,000 splines:
 
-NOT built here deliberately: it changes what is drawn, and the failure mode is
-entities silently missing. That wants a pair of eyes on a real viewport, and
-this was done while Sadie was away from the machine.
+| | before | after |
+|---|---|---|
+| polylines drawn | 200,000 | 252 |
+| points | 2,200,000 | 4,284 |
+| frame | ~200 ms | 35.7 ms |
 
-Also still open, and now with a number against it: at a million entities even a
-perfectly flattened frame is roughly 2 million points, which is about a second.
-Culling and a spatial index are the answers; `SF_todo`'s open question 5 already
-names the index.
+**The clip is VIEW-SPACE, and that is not fussiness.** An orthographic view
+turned off axis has no useful world-space bounding box: the visible volume is an
+infinite slab, so a world AABB test either culls nothing or culls things plainly
+on screen. Two axes and two intervals describe the region exactly. The test
+itself uses the standard AABB-along-a-direction extent — the centre's projection
+give or take the half-extents weighted by the direction's components — so it is
+two dot products rather than eight corner projections.
+
+**Nothing but `draw_database` consults it.** `Entity::draw` ignores the clip
+entirely, so picking, the hit-test probes and the DXF write are untouched, and a
+default-constructed `DrawContext` has no clip at all. There is a test for that
+last part, because it is what those paths silently depend on.
+
+### Found while doing it: the skip list was quadratic
+
+`draw_database`'s skip overload did a `std::find` over the skip vector for every
+entity in the drawing. `skip` is `flight.suppressed` — the entities hidden behind
+ghosts — so it is non-empty *exactly while a selection is being dragged*. A
+thousand entities moving in a drawing of a million was a billion comparisons a
+frame. Sorted once and binary-searched now. The case where responsiveness matters
+most was the one that scaled worst.
+
+### What remains
+
+The 35.7 ms of the zoomed-in frame is almost entirely the linear scan calling
+`bbox()` on all 200,000 entities to decide what to skip. That is what a spatial
+index fixes, and it is open question 5, which now has a number against it rather
+than a feeling.
+
+At extents a million entities is still roughly 2 million points and about a
+second. Culling cannot help when everything genuinely is on screen; that case
+wants level-of-detail — below some size, stop drawing entities individually and
+draw the fact that something is there.
 
 ## TANGENT to a spline is approximate — known, accepted, not yet worth fixing
 
