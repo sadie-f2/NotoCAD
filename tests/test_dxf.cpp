@@ -618,6 +618,40 @@ TEST_CASE("dxf r2000: every entity record declares its AcDb class") {
     // Guard against the walk silently matching nothing and passing.
     CHECK(checked >= 8);
 
+    // ORDER, not merely presence. Layer, linetype and colour are AcDbEntity's,
+    // so they sit BETWEEN the base marker and the concrete one; emitting them
+    // after the concrete marker puts an AcDbEntity group inside the derived
+    // class. AutoCAD accepted that for a LINE and refused it for a TEXT, so
+    // presence alone is not the property worth asserting.
+    int depth_entity = -1;
+    int depth_concrete = -1;
+    int depth_layer = -1;
+    std::size_t ordered = 0;
+    int idx = 0;
+    auto check_order = [&]() {
+        if (depth_entity < 0) return;
+        CHECK(depth_layer > depth_entity);
+        if (depth_concrete >= 0) CHECK(depth_layer < depth_concrete);
+        ++ordered;
+    };
+    for (const Pair& g : p) {
+        if (g.code == 0) {
+            check_order();
+            depth_entity = depth_concrete = depth_layer = -1;
+            idx = 0;
+        }
+        ++idx;
+        if (g.code == 100 && g.value == "AcDbEntity") {
+            depth_entity = idx;
+        } else if (g.code == 100 && depth_entity >= 0 && depth_concrete < 0) {
+            depth_concrete = idx;
+        } else if (g.code == 8 && depth_layer < 0) {
+            depth_layer = idx;
+        }
+    }
+    check_order();
+    CHECK(ordered >= 8);
+
     // The chains that are more than one marker deep, each of which has to sit
     // at an exact place in the record rather than merely be present.
     auto has = [&](const char* v) {

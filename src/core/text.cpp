@@ -217,10 +217,12 @@ void Text::dxf_write(DxfWriter& w) const {
     if (dxf_requires_handles(w.version())) {
         if (is_justified()) w.point(11, to_ecs.transform_point(align_point_));
         w.write_extrusion(props().normal);
-        if (v_align_ != TextVAlign::Baseline) {
-            w.subclass("AcDbText");
-            w.code(73, static_cast<std::int16_t>(v_align_));
-        }
+        // Both emitted unconditionally, which is what AutoCAD's own writer
+        // does. Omitting them when the justification is the default would make
+        // the record's shape depend on its content, and a reader that expects
+        // the separator would meet the next entity instead.
+        w.subclass("AcDbText");
+        w.code(73, static_cast<std::int16_t>(v_align_));
         return;
     }
 

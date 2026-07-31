@@ -147,7 +147,7 @@ void DxfWriter::write_common_as(const Entity& e, const char* type_name) {
 
     code(0, type_name);
 
-    // R13 and later: a unique handle, an owner, and the subclass chain. The
+    // R13 and later: a unique handle, an owner, and the base subclass. The
     // owner is the model-space block record, whose handle is fixed before any
     // entity is written -- an entity owned by nothing is rejected.
     if (dxf_requires_handles(version_)) {
@@ -155,9 +155,14 @@ void DxfWriter::write_common_as(const Entity& e, const char* type_name) {
         code(5, last_handle_);
         if (!model_space_owner_.empty()) code(330, model_space_owner_);
         subclass("AcDbEntity");
-        if (const char* sc = primary_subclass(type_name)) subclass(sc);
     }
 
+    // THE GROUPS BELOW BELONG TO AcDbEntity, so they go between the two
+    // markers. Layer, linetype and colour are properties every entity has;
+    // emitting them AFTER the concrete class marker puts an AcDbEntity group
+    // inside the derived class and the record is malformed. AutoCAD tolerated
+    // that for a LINE and refused it for a TEXT -- "Class separator for class
+    // AcDbText expected" -- so the leniency is not something to rely on.
     const LayerId lid = props.layer;
     code(8, lid < db_.layers().size() ? db_.layer(lid).name : std::string("0"));
 
@@ -167,6 +172,15 @@ void DxfWriter::write_common_as(const Entity& e, const char* type_name) {
     if (props.color != kColorByLayer) {
         code(62, static_cast<int>(props.color));
     }
+
+    // Now the concrete class, and everything after this point belongs to it.
+    if (dxf_requires_handles(version_)) {
+        if (const char* sc = primary_subclass(type_name)) subclass(sc);
+    }
+
+    // Thickness is the derived class's, not AcDbEntity's -- an AcDbLine has a
+    // thickness, an AcDbEntity does not -- which is why it sits after the
+    // marker rather than with the layer.
     if (props.thickness != 0.0) {
         code(39, props.thickness);
     }
@@ -185,16 +199,20 @@ void DxfWriter::write_subrecord(const char* type_name, const Entity& parent,
         code(5, next_handle());
         if (!owner.empty()) code(330, owner);
         subclass("AcDbEntity");
+    }
+
+    // Layer only: a subordinate record inherits everything else from the
+    // parent, and R12 wrote no more than this. It is an AcDbEntity group, so at
+    // R2000 it sits between the base marker and the concrete one.
+    code(8, layer_name(parent));
+
+    if (dxf_requires_handles(version_)) {
         if (const char* sc = primary_subclass(type_name)) subclass(sc);
         // The concrete vertex kind, after the abstract one. These polylines are
         // all 2D -- ECS coordinates with bulges -- so the header goes out as
         // AcDb2dPolyline and its vertices must agree with it.
         if (std::strcmp(type_name, "VERTEX") == 0) subclass("AcDb2dVertex");
     }
-
-    // Layer only: a subordinate record inherits everything else from the
-    // parent, and R12 wrote no more than this.
-    code(8, layer_name(parent));
 }
 
 std::string DxfWriter::handle_text(Handle h) const { return to_hex(h); }
