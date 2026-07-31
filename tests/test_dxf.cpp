@@ -513,3 +513,47 @@ TEST_CASE("dxf r2000: the sections and tables a later reader expects") {
     CHECK(r12_sections.count("CLASSES") == 0);
     CHECK(r12_sections.count("OBJECTS") == 0);
 }
+
+TEST_CASE("dxf r2000: layers carry a plot style, and every pointer resolves") {
+    // AutoCAD refused the whole file without this: "Error in LAYER Table / Did
+    // not receive PlotStyleName". Group 390 is a HARD POINTER, so the object it
+    // names has to exist -- which is why the OBJECTS section carries a
+    // plot-style dictionary and a placeholder, and why their handles are
+    // reserved before the tables are written.
+    Database db;
+    db.add_layer("WALLS");
+    add_one_of_each(db);
+
+    bool ok = true;
+    const std::vector<Pair> p = parse(dump_as(db, DxfVersion::R2000), &ok);
+    CHECK(ok);
+
+    std::set<std::string> allocated;
+    bool in_header = false;
+    for (std::size_t i = 0; i < p.size(); ++i) {
+        if (p[i].code == 0 && p[i].value == "SECTION" && i + 1 < p.size()) {
+            in_header = (p[i + 1].value == "HEADER");
+        }
+        if (p[i].code == 5 && !in_header) allocated.insert(p[i].value);
+    }
+
+    // One plot style per layer, and each names something that exists.
+    std::size_t plot_styles = 0;
+    for (const Pair& g : p) {
+        if (g.code != 390) continue;
+        ++plot_styles;
+        CHECK(allocated.count(g.value) == 1);
+    }
+    CHECK(plot_styles == db.layers().size());
+
+    // Every reference of every kind resolves. "0" is the document root.
+    for (const Pair& g : p) {
+        if (g.code == 330 || g.code == 340 || g.code == 350) {
+            CHECK(g.value == "0" || allocated.count(g.value) == 1);
+        }
+    }
+
+    // And the objects the pointers land on are actually emitted.
+    CHECK(count_records(p, "ACDBPLACEHOLDER") == 1);
+    CHECK(count_records(p, "ACDBDICTIONARYWDFLT") == 1);
+}

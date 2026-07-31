@@ -157,6 +157,18 @@ private:
     Handle next_handle_{1};
     Handle seed_hint_{0};
     std::string model_space_owner_;
+
+    // The plot-style objects, reserved BEFORE the tables are written.
+    //
+    // R2000 requires group 390 on every LAYER -- a hard pointer to a plot style
+    // name -- and AutoCAD refuses the whole file without it: "Did not receive
+    // PlotStyleName". The pointer has to resolve, so the object has to exist,
+    // and layers are written long before the OBJECTS section that holds it.
+    // So the handles are reserved up front and the objects emitted later
+    // carrying them.
+    std::string root_dict_;
+    std::string plotstyle_dict_;
+    std::string plotstyle_normal_;
 };
 
 // Convenience: write the whole database to a file. Returns false if the file

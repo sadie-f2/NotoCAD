@@ -202,12 +202,6 @@ void DxfWriter::write_header() {
     point(10, ucs.xdir);
     code(9, "$UCSYDIR");
     point(10, ucs.ydir);
-    code(9, "$WORLDUCS");
-    code(70, ucs.is_world() ? 1 : 0);
-    code(9, "$UCSFOLLOW");
-    code(70, static_cast<int>(db_.sysvars().get_int(Sysvar::UcsFollow)));
-    code(9, "$UCSICON");
-    code(70, static_cast<int>(db_.sysvars().get_int(Sysvar::UcsIcon)));
 
     BBox ext = db_.extents();
     if (!ext.valid()) ext = BBox{Vec3{}, Vec3{}};
@@ -257,6 +251,14 @@ void DxfWriter::write_tables() {
         code(62, static_cast<int>(ly.color));
         code(6, ly.linetype < db_.linetypes().size() ? db_.linetype(ly.linetype).name
                                                      : std::string("CONTINUOUS"));
+        if (dxf_requires_handles(version_)) {
+            // Lineweight, then the plot style. AutoCAD refuses the whole file
+            // without 390 -- "Did not receive PlotStyleName" -- and the handle
+            // must resolve to a real object, which is why the placeholder in
+            // the OBJECTS section exists.
+            code(370, -3);  // -3 is "default", R2000's BYLAYER equivalent
+            code(390, plotstyle_normal_);
+        }
     }
     code(0, "ENDTAB");
 
@@ -404,6 +406,13 @@ void DxfWriter::write_entities() {
 }
 
 void DxfWriter::write_document() {
+    // Reserved before anything references them; see the members for why.
+    if (dxf_requires_handles(version_)) {
+        root_dict_ = next_handle();
+        plotstyle_dict_ = next_handle();
+        plotstyle_normal_ = next_handle();
+    }
+
     write_header();
     write_classes();
     write_tables();
@@ -476,16 +485,38 @@ void DxfWriter::write_block_records() {
 }
 
 void DxfWriter::write_objects() {
-    // The named object dictionary. R2000 expects a root dictionary to exist even
-    // when it holds nothing this program uses; layouts and groups hang off it.
     if (!dxf_requires_handles(version_)) return;
 
     begin_section("OBJECTS");
+
+    // The root dictionary, holding the one entry R2000 cannot do without.
     code(0, "DICTIONARY");
-    code(5, next_handle());
+    code(5, root_dict_);
     code(330, "0");
     subclass("AcDbDictionary");
     code(281, 1);
+    code(3, "ACAD_PLOTSTYLENAME");
+    code(350, plotstyle_dict_);
+
+    // A dictionary WITH A DEFAULT: group 340 names the entry to fall back to,
+    // which is what makes an unset plot style resolve rather than dangle.
+    code(0, "ACDBDICTIONARYWDFLT");
+    code(5, plotstyle_dict_);
+    code(330, root_dict_);
+    subclass("AcDbDictionary");
+    code(281, 1);
+    code(3, "Normal");
+    code(350, plotstyle_normal_);
+    subclass("AcDbDictionaryWithDefault");
+    code(340, plotstyle_normal_);
+
+    // The object every layer's group 390 points at. A placeholder is exactly
+    // what AutoCAD writes here: the plot style has no content, it only needs to
+    // be a thing that exists and can be referenced.
+    code(0, "ACDBPLACEHOLDER");
+    code(5, plotstyle_normal_);
+    code(330, plotstyle_dict_);
+
     end_section();
 }
 

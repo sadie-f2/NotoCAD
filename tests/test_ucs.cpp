@@ -551,7 +551,14 @@ TEST_CASE("ucs: a world drawing writes no surprise into the header") {
 
     const std::string text = out.str();
     CHECK(text.find("$UCSORG") != std::string::npos);
-    CHECK(text.find("$WORLDUCS") != std::string::npos);
+
+    // $WORLDUCS is NOT written, and neither are $UCSFOLLOW or $UCSICON.
+    // AutoCAD reports all three as unknown header variables -- they are system
+    // variables that DXF does not carry -- and our own reader never consumed
+    // them, so they were noise in both directions.
+    CHECK(text.find("$WORLDUCS") == std::string::npos);
+    CHECK(text.find("$UCSFOLLOW") == std::string::npos);
+    CHECK(text.find("$UCSICON") == std::string::npos);
 
     // And it reads back as world rather than as a frame that merely looks like
     // one.
