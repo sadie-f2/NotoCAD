@@ -685,6 +685,68 @@ TEST_CASE("dxf r2000: every entity record declares its AcDb class") {
     CHECK(r12_marks == 0);
 }
 
+TEST_CASE("dxf r2000: the extrusion belongs to the class that owns it") {
+    // AutoCAD: "Unexpected DXF group code: 210", reading an ARC. The markers
+    // were right and the extrusion was in the wrong one -- an ARC's centre,
+    // radius AND extrusion are AcDbCircle's, and only the two angles belong to
+    // AcDbArc. Writing 210 after the angles puts it in a class that has no such
+    // group.
+    //
+    // The rule generalises: where a record declares a second class, anything
+    // belonging to the first has to precede the separator. So the assertion is
+    // about position rather than about the ARC specifically.
+    Database db;
+    const Vec3 tilt = normalize(Vec3{0.7071, 0.0, 0.7071});
+    auto arc = std::make_unique<Arc>(Vec3{0, 0, 0}, 6.0, 0.5, 3.0);
+    arc->props().normal = tilt;
+    db.add(std::move(arc));
+
+    bool ok = true;
+    const std::vector<Pair> p = parse(dump_as(db, DxfVersion::R2000), &ok);
+    CHECK(ok);
+
+    // Walk the ARC record: find the second concrete marker and check 210 is
+    // before it, and that it is there at all -- a tilted entity that lost its
+    // extrusion would be silently flat.
+    int second_marker = -1;
+    int extrusion = -1;
+    int concrete = 0;
+    int idx = 0;
+    bool in_arc = false;
+    for (const Pair& g : p) {
+        if (g.code == 0) {
+            in_arc = (g.value == "ARC");
+            concrete = 0;
+            idx = 0;
+        }
+        if (!in_arc) continue;
+        ++idx;
+        if (g.code == 100 && g.value != "AcDbEntity") {
+            ++concrete;
+            if (concrete == 2 && second_marker < 0) second_marker = idx;
+        }
+        if (g.code == 210 && extrusion < 0) extrusion = idx;
+    }
+    CHECK(second_marker > 0);           // AcDbArc is there
+    CHECK(extrusion > 0);               // and so is the extrusion
+    CHECK(extrusion < second_marker);   // and it is on the AcDbCircle side
+
+    // No 210 after a second marker anywhere in the document.
+    int since_second = -1;
+    concrete = 0;
+    for (const Pair& g : p) {
+        if (g.code == 0) {
+            concrete = 0;
+            since_second = -1;
+        }
+        if (g.code == 100 && g.value != "AcDbEntity") {
+            ++concrete;
+            if (concrete == 2) since_second = 1;
+        }
+        if (g.code == 210 && since_second > 0) CHECK(false);
+    }
+}
+
 TEST_CASE("dxf r2000: a polyline's VERTEX and SEQEND get their own handles") {
     // R13 and later require a handle on EVERY record and require it to be
     // unique. VERTEX and SEQEND are not database entities and own none, so they

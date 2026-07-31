@@ -44,11 +44,24 @@ void Arc::dxf_write(DxfWriter& w) const {
     w.write_common(*this);
     w.point(10, world_to_ecs(props().normal).transform_point(center_));
     w.code(40, radius_);
-    // An ARC is an AcDbCircle that then declares itself an AcDbArc: the centre
-    // and radius belong to the circle, the two angles to the arc. write_common
-    // has emitted the first marker; this is the rest of the chain, and it has
-    // to sit exactly here, between the radius and the angles.
-    w.subclass("AcDbArc");
+
+    // An ARC is an AcDbCircle that then declares itself an AcDbArc: the centre,
+    // the radius AND THE EXTRUSION belong to the circle, only the two angles to
+    // the arc. So group 210 has to be written before the second marker --
+    // putting it after the angles reports as "Unexpected DXF group code: 210",
+    // since AcDbArc has no such group.
+    //
+    // R12 has no markers and its readers ask for codes rather than walking them
+    // in order, so its layout is left exactly as it was. That output is
+    // confirmed good in AutoCAD and is not worth disturbing to share a path.
+    if (dxf_requires_handles(w.version())) {
+        w.write_extrusion(props().normal);
+        w.subclass("AcDbArc");
+        w.code(50, start_angle_ * kRadToDeg);
+        w.code(51, end_angle_ * kRadToDeg);
+        return;
+    }
+
     // Angles are already measured in the arbitrary-axis basis, which is the same
     // basis DXF uses, so this is a units conversion and nothing more.
     w.code(50, start_angle_ * kRadToDeg);

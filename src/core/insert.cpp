@@ -286,6 +286,12 @@ void Insert::dxf_write(DxfWriter& w) const {
     if (p.scale.z != 1.0) w.code(43, p.scale.z);
     if (p.rotation != 0.0) w.code(50, p.rotation * 180.0 / std::numbers::pi);
 
+    // The extrusion belongs to AcDbBlockReference, so on a MINSERT it has to be
+    // written BEFORE the second marker -- the same rule that puts an ARC's 210
+    // before AcDbArc. A plain INSERT has only the one class and no such
+    // ordering to get wrong.
+    if (is_array() && dxf_requires_handles(w.version())) w.write_extrusion(p.normal);
+
     if (is_array()) {
         // A MINSERT is a block reference that then declares itself an
         // AcDbMInsertBlock; the row and column counts belong to that part of
@@ -298,7 +304,7 @@ void Insert::dxf_write(DxfWriter& w) const {
         if (row_spacing_ != 0.0) w.code(45, row_spacing_);
     }
 
-    w.write_extrusion(p.normal);
+    if (!is_array() || !dxf_requires_handles(w.version())) w.write_extrusion(p.normal);
 }
 
 // --- placement decomposition ------------------------------------------------
