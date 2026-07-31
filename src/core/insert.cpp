@@ -287,6 +287,11 @@ void Insert::dxf_write(DxfWriter& w) const {
     if (p.rotation != 0.0) w.code(50, p.rotation * 180.0 / std::numbers::pi);
 
     if (is_array()) {
+        // A MINSERT is a block reference that then declares itself an
+        // AcDbMInsertBlock; the row and column counts belong to that part of
+        // the class, not to the reference. A plain INSERT stops at
+        // AcDbBlockReference and never reaches here.
+        w.subclass("AcDbMInsertBlock");
         w.code(70, static_cast<int>(columns_));
         w.code(71, static_cast<int>(rows_));
         if (column_spacing_ != 0.0) w.code(44, column_spacing_);

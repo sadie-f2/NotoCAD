@@ -44,6 +44,11 @@ void Arc::dxf_write(DxfWriter& w) const {
     w.write_common(*this);
     w.point(10, world_to_ecs(props().normal).transform_point(center_));
     w.code(40, radius_);
+    // An ARC is an AcDbCircle that then declares itself an AcDbArc: the centre
+    // and radius belong to the circle, the two angles to the arc. write_common
+    // has emitted the first marker; this is the rest of the chain, and it has
+    // to sit exactly here, between the radius and the angles.
+    w.subclass("AcDbArc");
     // Angles are already measured in the arbitrary-axis basis, which is the same
     // basis DXF uses, so this is a units conversion and nothing more.
     w.code(50, start_angle_ * kRadToDeg);
@@ -56,10 +61,12 @@ void Arc::dxf_write(DxfWriter& w) const {
 // here rather than being how the entity is stored -- see SF_todo.md for why a
 // 20,000-face mesh cannot afford one database entity per vertex.
 //
-// All three records carry the same handle. R12 gives sub-entities their own,
-// but nothing in this program refers to a vertex by handle, and inventing
-// handles at write time that no entity owns would put identifiers in the file
-// that cannot be resolved on the way back in.
+// Handles differ by version, and the difference is not cosmetic. R12 writes
+// NONE at all -- it made them optional, nothing here reads group 5, and giving
+// the subordinate records the parent's is exactly what made AutoCAD call our
+// files corrupt. R13 and later require one on every record and require it to be
+// unique, so each VERTEX and SEQEND takes a fresh handle and names the parent as
+// its owner. `write_subrecord` is where that split lives.
 void Ellipse::dxf_write(DxfWriter& w) const {
     // R2000 can name an ELLIPSE, so it gets the curve itself: centre, the major
     // axis as a VECTOR from it, the ratio and the parameter range. Fifteen
@@ -67,7 +74,6 @@ void Ellipse::dxf_write(DxfWriter& w) const {
     if (dxf_has_modern_entities(w.version())) {
         if (major_length() <= kEps) return;
         w.write_common(*this);
-        w.subclass("AcDbEllipse");
         w.point(10, center_);
         // Group 11 is a vector, not a point: it rotates without translating.
         w.point(11, major_);
@@ -103,6 +109,7 @@ void Ellipse::dxf_write(DxfWriter& w) const {
     const bool closed = is_full();
 
     w.write_common_as(*this, "POLYLINE");
+    const std::string owner = w.last_handle();
     w.code(66, 1);
     Vec3 elevation{0.0, 0.0, 0.0};
     elevation.z = to_ecs.transform_point(point_at(start_param_)).z;
@@ -115,19 +122,18 @@ void Ellipse::dxf_write(DxfWriter& w) const {
     const int count = closed ? segments : segments + 1;
     for (int i = 0; i < count; ++i) {
         const double t = start_param_ + span * (static_cast<double>(i) / segments);
-        w.code(0, "VERTEX");
-        w.code(8, w.layer_name(*this));
+        w.write_subrecord("VERTEX", *this, owner);
         w.point(10, to_ecs.transform_point(point_at(t)));
     }
 
-    w.code(0, "SEQEND");
-    w.code(8, w.layer_name(*this));
+    w.write_subrecord("SEQEND", *this, owner);
 }
 
 void Polyline::dxf_write(DxfWriter& w) const {
     const Mat4 to_ecs = world_to_ecs(props().normal);
 
     w.write_common(*this);
+    const std::string owner = w.last_handle();
     // Group 66 announces that vertices follow. R12 requires it, and a reader
     // that trusts it will stop looking at the first entity if it is missing.
     w.code(66, 1);
@@ -140,8 +146,7 @@ void Polyline::dxf_write(DxfWriter& w) const {
     w.write_extrusion(props().normal);
 
     for (const PolyVertex& v : vertices_) {
-        w.code(0, "VERTEX");
-        w.code(8, w.layer_name(*this));
+        w.write_subrecord("VERTEX", *this, owner);
         w.point(10, to_ecs.transform_point(v.pos));
         // Widths are written per vertex rather than as the header's defaults,
         // because a taper is a property of the segment and the header can only
@@ -152,8 +157,7 @@ void Polyline::dxf_write(DxfWriter& w) const {
         if (v.bulge != 0.0) w.code(42, v.bulge);
     }
 
-    w.code(0, "SEQEND");
-    w.code(8, w.layer_name(*this));
+    w.write_subrecord("SEQEND", *this, owner);
 }
 
 }  // namespace ncad

@@ -204,6 +204,26 @@ void Text::dxf_write(DxfWriter& w) const {
     // for why they are numbered the way they are. Both are omitted when they
     // are the default, which keeps the common case byte-identical to before.
     if (h_align_ != TextHAlign::Left) w.code(72, static_cast<std::int16_t>(h_align_));
+
+    // TEXT declares AcDbText TWICE, and the vertical justification belongs
+    // after the second one. That is genuinely how the format is shaped -- group
+    // 73 sits in a later part of the class than groups 72 and 11 -- and a
+    // reader that meets 73 before the marker rejects the record.
+    //
+    // R12 has no markers at all and its readers ask for codes rather than
+    // walking them in order, so its layout is left exactly as it was: the
+    // output is confirmed good in AutoCAD and is not worth disturbing to share
+    // a code path.
+    if (dxf_requires_handles(w.version())) {
+        if (is_justified()) w.point(11, to_ecs.transform_point(align_point_));
+        w.write_extrusion(props().normal);
+        if (v_align_ != TextVAlign::Baseline) {
+            w.subclass("AcDbText");
+            w.code(73, static_cast<std::int16_t>(v_align_));
+        }
+        return;
+    }
+
     if (v_align_ != TextVAlign::Baseline) w.code(73, static_cast<std::int16_t>(v_align_));
     if (is_justified()) w.point(11, to_ecs.transform_point(align_point_));
     w.write_extrusion(props().normal);

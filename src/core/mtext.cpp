@@ -305,7 +305,6 @@ void MText::dxf_write(DxfWriter& w) const {
     if (dxf_has_modern_entities(w.version())) {
         const Mat4 to_ecs = world_to_ecs(props().normal);
         w.write_common(*this);
-        w.subclass("AcDbMText");
         w.point(10, to_ecs.transform_point(pos_));
         w.write_extrusion(props().normal);
         w.code(40, height_);

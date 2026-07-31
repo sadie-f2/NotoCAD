@@ -407,7 +407,6 @@ void Spline::dxf_write(DxfWriter& w) const {
     // later version is worth offering.
     if (dxf_has_modern_entities(w.version())) {
         w.write_common(*this);
-        w.subclass("AcDbSpline");
         w.write_extrusion(props().normal);
 
         // Bit 8 is planar, which every spline this program makes is.

@@ -117,6 +117,17 @@ public:
     // substitution and losing them would compound the loss.
     void write_common_as(const Entity& e, const char* type_name);
 
+    // A subordinate record of the entity just written -- POLYLINE's VERTEX and
+    // SEQEND. Emits the type, and at R13 and later a fresh handle, the owner,
+    // and the subclass chain; then the layer. `owner` is normally the parent's
+    // last_handle().
+    void write_subrecord(const char* type_name, const Entity& parent, const std::string& owner);
+
+    // The handle write_common_as just issued, so an entity emitting
+    // subordinate records can name itself as their owner. Empty at R12, which
+    // writes no handles at all.
+    const std::string& last_handle() const { return last_handle_; }
+
     // For entities that write more than one record -- POLYLINE emits VERTEX and
     // SEQEND after itself, and each needs the same handle and layer.
     std::string handle_text(Handle h) const;
@@ -163,6 +174,7 @@ private:
     Handle next_handle_{1};
     Handle seed_hint_{0};
     std::string model_space_owner_;
+    std::string last_handle_;
 
     // The plot-style objects, reserved BEFORE the tables are written.
     //

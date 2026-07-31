@@ -7,6 +7,7 @@
 #include "ncad/ecs.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <streambuf>
 #include <ostream>
@@ -98,6 +99,47 @@ void DxfWriter::subclass(const char* name) {
     code(100, name);
 }
 
+namespace {
+
+const char* primary_subclass(const char* type_name) {
+    // The AcDb class a record declares itself to be, after the AcDbEntity every
+    // entity shares. AutoCAD refuses a file whose entity lacks it: "Class
+    // separator for class AcDbLine expected".
+    //
+    // Keyed on the DXF TYPE NAME rather than on our entity enum, and that is
+    // the load-bearing part: an ELLIPSE degrading to R12 goes out under
+    // POLYLINE's name, and it is an AcDb2dPolyline while it is doing so.
+    // Keying on the enum would have labelled that record AcDbEllipse and
+    // produced a file describing an entity that is not there.
+    //
+    // Two of these are only the FIRST marker of a chain -- an ARC is an
+    // AcDbCircle that then declares AcDbArc, and a VERTEX an AcDbVertex that
+    // then declares its concrete kind. The rest of each chain is emitted by the
+    // writer that knows where in the record it belongs.
+    struct Map {
+        const char* type;
+        const char* subclass;
+    };
+    static const Map kMap[] = {
+        {"LINE", "AcDbLine"},         {"CIRCLE", "AcDbCircle"},
+        {"ARC", "AcDbCircle"},        {"POINT", "AcDbPoint"},
+        {"TEXT", "AcDbText"},         {"SOLID", "AcDbTrace"},
+        {"TRACE", "AcDbTrace"},       {"3DFACE", "AcDbFace"},
+        {"POLYLINE", "AcDb2dPolyline"}, {"VERTEX", "AcDbVertex"},
+        {"INSERT", "AcDbBlockReference"}, {"ELLIPSE", "AcDbEllipse"},
+        {"SPLINE", "AcDbSpline"},     {"MTEXT", "AcDbMText"},
+    };
+    for (const Map& m : kMap) {
+        if (std::strcmp(type_name, m.type) == 0) return m.subclass;
+    }
+    // SEQEND declares no class of its own, and a Proxy writes back the groups
+    // it arrived with rather than being rebuilt from one. Both are correct as
+    // nothing.
+    return nullptr;
+}
+
+}  // namespace
+
 void DxfWriter::write_common(const Entity& e) { write_common_as(e, e.type_name()); }
 
 void DxfWriter::write_common_as(const Entity& e, const char* type_name) {
@@ -105,13 +147,15 @@ void DxfWriter::write_common_as(const Entity& e, const char* type_name) {
 
     code(0, type_name);
 
-    // R13 and later: a unique handle, an owner, and the base subclass. The
+    // R13 and later: a unique handle, an owner, and the subclass chain. The
     // owner is the model-space block record, whose handle is fixed before any
     // entity is written -- an entity owned by nothing is rejected.
     if (dxf_requires_handles(version_)) {
-        code(5, next_handle());
+        last_handle_ = next_handle();
+        code(5, last_handle_);
         if (!model_space_owner_.empty()) code(330, model_space_owner_);
         subclass("AcDbEntity");
+        if (const char* sc = primary_subclass(type_name)) subclass(sc);
     }
 
     const LayerId lid = props.layer;
@@ -126,6 +170,31 @@ void DxfWriter::write_common_as(const Entity& e, const char* type_name) {
     if (props.thickness != 0.0) {
         code(39, props.thickness);
     }
+}
+
+void DxfWriter::write_subrecord(const char* type_name, const Entity& parent,
+                                const std::string& owner) {
+    code(0, type_name);
+
+    // A VERTEX or a SEQEND is not a database entity and owns no handle of its
+    // own, but R13 and later require one on EVERY record and require it to be
+    // unique -- giving them the parent's is exactly what made AutoCAD call our
+    // R12 files corrupt. They take a fresh handle here and name the parent as
+    // their owner, which is the relationship the file is meant to express.
+    if (dxf_requires_handles(version_)) {
+        code(5, next_handle());
+        if (!owner.empty()) code(330, owner);
+        subclass("AcDbEntity");
+        if (const char* sc = primary_subclass(type_name)) subclass(sc);
+        // The concrete vertex kind, after the abstract one. These polylines are
+        // all 2D -- ECS coordinates with bulges -- so the header goes out as
+        // AcDb2dPolyline and its vertices must agree with it.
+        if (std::strcmp(type_name, "VERTEX") == 0) subclass("AcDb2dVertex");
+    }
+
+    // Layer only: a subordinate record inherits everything else from the
+    // parent, and R12 wrote no more than this.
+    code(8, layer_name(parent));
 }
 
 std::string DxfWriter::handle_text(Handle h) const { return to_hex(h); }

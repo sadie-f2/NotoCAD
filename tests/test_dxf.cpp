@@ -361,6 +361,20 @@ void add_one_of_each(Database& db) {
     db.add(std::make_unique<Ellipse>(Vec3{20, 0, 0}, Vec3{10, 0, 0}, 0.5));
     db.add(Spline::interpolating({{0, 50, 0}, {10, 60, 0}, {20, 45, 0}, {30, 55, 0}}));
     db.add(std::make_unique<MText>(Vec3{0, 90, 0}, "one\\Ptwo", 2.0, 20.0));
+
+    // A REAL polyline, and its absence here is why AutoCAD found two faults
+    // this suite could not. A POLYLINE is the only entity that writes
+    // subordinate records -- VERTEX and SEQEND -- and those need handles and
+    // subclass markers of their own at R2000. With no polyline in the fixture,
+    // every structural check below walked past the records that were wrong.
+    // It is the same blind spot that hid the R12 handle bug, where the sample
+    // drawing had no polylines either.
+    auto pl = std::make_unique<Polyline>();
+    pl->add({100, 0, 0});
+    pl->add({110, 0, 0});
+    pl->add({120, 10, 0});
+    pl->vertices()[1].bulge = 0.5;  // an arc segment, so the bulge travels too
+    db.add(std::move(pl));
 }
 
 std::size_t count_records(const std::vector<Pair>& p, const char* type) {
@@ -385,17 +399,19 @@ TEST_CASE("dxf r2000: the three degrading entities are written as themselves") {
     CHECK(count_records(p, "ELLIPSE") == 1);
     CHECK(count_records(p, "SPLINE") == 1);
     CHECK(count_records(p, "MTEXT") == 1);
-    // And no tessellation: the curves are not polylines any more.
-    CHECK(count_records(p, "POLYLINE") == 0);
-    CHECK(count_records(p, "VERTEX") == 0);
+    // Exactly ONE polyline: the real one. The curves are not tessellated any
+    // more, so the only VERTEX records are that polyline's three.
+    CHECK(count_records(p, "POLYLINE") == 1);
+    CHECK(count_records(p, "VERTEX") == 3);
 
     // R12 still degrades all three, which is the interchange guarantee.
     const std::vector<Pair> r12 = parse(dump_as(db, DxfVersion::R12), &ok);
     CHECK(count_records(r12, "ELLIPSE") == 0);
     CHECK(count_records(r12, "SPLINE") == 0);
     CHECK(count_records(r12, "MTEXT") == 0);
-    CHECK(count_records(r12, "POLYLINE") == 2);  // the ellipse and the spline
-    CHECK(count_records(r12, "TEXT") == 2);      // the mtext, one per line
+    // The real one, plus the ellipse and the spline standing in as polylines.
+    CHECK(count_records(r12, "POLYLINE") == 3);
+    CHECK(count_records(r12, "TEXT") == 2);  // the mtext, one per line
 }
 
 TEST_CASE("dxf r2000: a round trip through our own writer is LOSSLESS") {
@@ -417,7 +433,10 @@ TEST_CASE("dxf r2000: a round trip through our own writer is LOSSLESS") {
     CHECK(kinds[EntityType::Ellipse] == 1);
     CHECK(kinds[EntityType::Spline] == 1);
     CHECK(kinds[EntityType::MText] == 1);
-    CHECK(kinds[EntityType::Polyline] == 0);  // nothing degraded
+    // One polyline, and it is the one that went in as a polyline. The ellipse
+    // and the spline came back as themselves, so nothing degraded -- which is
+    // what this count means now that the fixture holds a real one.
+    CHECK(kinds[EntityType::Polyline] == 1);
 
     // And the geometry survived, not merely the type.
     for (const Handle h : back.order()) {
@@ -549,6 +568,133 @@ TEST_CASE("dxf r2000: the sections and tables a later reader expects") {
     }
     CHECK(r12_sections.count("CLASSES") == 0);
     CHECK(r12_sections.count("OBJECTS") == 0);
+}
+
+TEST_CASE("dxf r2000: every entity record declares its AcDb class") {
+    // AutoCAD discarded the conformance drawing over this: "Class separator for
+    // class AcDbLine expected". Only ELLIPSE, SPLINE and MTEXT declared a class
+    // -- every R12-era entity emitted AcDbEntity and stopped. The one R2000
+    // file that had been through AutoCAD held nothing but splines, so it never
+    // touched the gap.
+    Database db;
+    add_one_of_each(db);
+    db.add(std::make_unique<Arc>(Vec3{0, 0, 0}, 5.0, 0.0, 1.0));
+    db.add(std::make_unique<Circle>(Vec3{40, 0, 0}, 3.0));
+    db.add(std::make_unique<Text>(Vec3{0, 120, 0}, "gyp", 2.0));
+
+    bool ok = true;
+    const std::vector<Pair> p = parse(dump_as(db, DxfVersion::R2000), &ok);
+    CHECK(ok);
+
+    // Walk records. Anything that declared AcDbEntity is an entity record and
+    // must declare a concrete class too -- except SEQEND, which genuinely has
+    // none.
+    std::size_t checked = 0;
+    std::string current;
+    std::vector<std::string> marks;
+    auto finish = [&]() {
+        if (current.empty()) return;
+        const bool is_entity =
+            std::find(marks.begin(), marks.end(), "AcDbEntity") != marks.end();
+        if (is_entity) {
+            ++checked;
+            if (current == "SEQEND") {
+                CHECK(marks.size() == 1);
+            } else {
+                CHECK(marks.size() >= 2);
+            }
+        }
+        marks.clear();
+    };
+    for (const Pair& g : p) {
+        if (g.code == 0) {
+            finish();
+            current = g.value;
+        } else if (g.code == 100) {
+            marks.push_back(g.value);
+        }
+    }
+    finish();
+    // Guard against the walk silently matching nothing and passing.
+    CHECK(checked >= 8);
+
+    // The chains that are more than one marker deep, each of which has to sit
+    // at an exact place in the record rather than merely be present.
+    auto has = [&](const char* v) {
+        for (const Pair& g : p) {
+            if (g.code == 100 && g.value == v) return true;
+        }
+        return false;
+    };
+    CHECK(has("AcDbLine"));
+    CHECK(has("AcDbCircle"));   // both CIRCLE and ARC start here
+    CHECK(has("AcDbArc"));      // ARC then continues
+    CHECK(has("AcDbText"));
+    CHECK(has("AcDb2dPolyline"));
+    CHECK(has("AcDbVertex"));
+    CHECK(has("AcDb2dVertex"));
+
+    // A degraded entity takes the class of what it was written AS. At R12 there
+    // are no markers at all, so this is checked by the R2000 ellipse being an
+    // AcDbEllipse rather than a polyline -- and the polyline present being the
+    // real one.
+    CHECK(has("AcDbEllipse"));
+
+    // R12 has no subclass markers anywhere, and its output is confirmed good in
+    // a real reader.
+    const std::vector<Pair> r12 = parse(dump_as(db, DxfVersion::R12), &ok);
+    CHECK(ok);
+    std::size_t r12_marks = 0;
+    for (const Pair& g : r12) {
+        if (g.code == 100) ++r12_marks;
+    }
+    CHECK(r12_marks == 0);
+}
+
+TEST_CASE("dxf r2000: a polyline's VERTEX and SEQEND get their own handles") {
+    // R13 and later require a handle on EVERY record and require it to be
+    // unique. VERTEX and SEQEND are not database entities and own none, so they
+    // were emitted with no handle at all -- the mirror of the R12 bug, where
+    // they were emitted carrying the parent's.
+    Database db;
+    auto pl = std::make_unique<Polyline>();
+    pl->add({0, 0, 0});
+    pl->add({10, 0, 0});
+    pl->add({10, 10, 0});
+    db.add(std::move(pl));
+
+    bool ok = true;
+    const std::vector<Pair> p = parse(dump_as(db, DxfVersion::R2000), &ok);
+    CHECK(ok);
+
+    // Every record carries a handle, and no handle is used twice.
+    std::vector<std::string> handles;
+    std::string polyline_handle;
+    std::string current;
+    for (std::size_t i = 0; i < p.size(); ++i) {
+        if (p[i].code == 0) current = p[i].value;
+        if (p[i].code == 5) {
+            handles.push_back(p[i].value);
+            if (current == "POLYLINE") polyline_handle = p[i].value;
+        }
+    }
+    std::vector<std::string> sorted = handles;
+    std::sort(sorted.begin(), sorted.end());
+    CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
+    CHECK(!polyline_handle.empty());
+
+    // And each subordinate record names the polyline as its owner, which is the
+    // relationship the file exists to express.
+    std::size_t owned = 0;
+    current.clear();
+    for (std::size_t i = 0; i + 1 < p.size(); ++i) {
+        if (p[i].code == 0) current = p[i].value;
+        if (p[i].code == 330 && (current == "VERTEX" || current == "SEQEND")) {
+            CHECK(p[i].value == polyline_handle);
+            ++owned;
+        }
+    }
+    CHECK(owned == 4);  // three vertices and the SEQEND
 }
 
 TEST_CASE("dxf r2000: every dash length is followed by an element type") {
