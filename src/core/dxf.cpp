@@ -259,7 +259,25 @@ void DxfWriter::write_tables() {
         double total = 0.0;
         for (const double d : lt.pattern) total += (d < 0.0) ? -d : d;
         code(40, total);
-        for (const double d : lt.pattern) code(49, d);
+        for (const double d : lt.pattern) {
+            code(49, d);
+            // R13 and later want the element TYPE after every dash length, and
+            // AutoCAD rejects the whole drawing without it -- "Missing group
+            // code 49 in complex linetype", which names the group that IS
+            // present rather than the one that is not, because the reader is
+            // still looking for the end of the previous element when it meets
+            // the next 49.
+            //
+            // Zero means a plain dash: no embedded shape and no embedded text,
+            // which is every linetype here. A non-zero 74 would bring 75 and a
+            // style pointer with it, and nothing generates one -- R12's acad.lin
+            // complex linetypes are not loaded and there is no SHX path.
+            //
+            // AC1009 has no 74 at all, so this is version-gated rather than
+            // written always. The R12 output is confirmed good in AutoCAD and
+            // must not acquire a group the revision does not define.
+            if (dxf_requires_handles(version_)) code(74, 0);
+        }
     }
     code(0, "ENDTAB");
 

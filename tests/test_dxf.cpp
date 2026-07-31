@@ -551,6 +551,52 @@ TEST_CASE("dxf r2000: the sections and tables a later reader expects") {
     CHECK(r12_sections.count("OBJECTS") == 0);
 }
 
+TEST_CASE("dxf r2000: every dash length is followed by an element type") {
+    // AutoCAD rejected the conformance drawing over this and discarded it:
+    // "Error in LTYPE Table / Missing group code 49 in complex linetype".
+    //
+    // The message names the group that IS there rather than the one that is
+    // not. R13 and later expect an element TYPE (group 74) after every dash
+    // length, so with the 74s absent the reader is still looking for the end of
+    // the first element when it meets the second 49 -- and reports the 49.
+    //
+    // Zero means a plain dash: no embedded shape, no embedded text. Nothing
+    // here generates anything else, since complex linetypes would need a shape
+    // file and there is no SHX path.
+    Database db;
+    db.add_linetype("DASHED", "Dashed __ __ __", {0.5, -0.25});
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{10, 0, 0}));
+
+    bool ok = true;
+    const std::vector<Pair> p = parse(dump_as(db, DxfVersion::R2000), &ok);
+    CHECK(ok);
+
+    // Every 49 is followed immediately by a 74, and there are as many pairs as
+    // the pattern has elements.
+    std::size_t dashes = 0;
+    std::size_t paired = 0;
+    for (std::size_t i = 0; i < p.size(); ++i) {
+        if (p[i].code != 49) continue;
+        ++dashes;
+        if (i + 1 < p.size() && p[i + 1].code == 74) ++paired;
+    }
+    CHECK(dashes == 2);
+    CHECK(paired == dashes);
+
+    // AC1009 has no group 74 in LTYPE at all, and the R12 output is confirmed
+    // good in a real reader -- so it must not acquire one.
+    const std::vector<Pair> r12 = parse(dump_as(db, DxfVersion::R12), &ok);
+    CHECK(ok);
+    std::size_t r12_dashes = 0;
+    std::size_t r12_74 = 0;
+    for (const Pair& g : r12) {
+        if (g.code == 49) ++r12_dashes;
+        if (g.code == 74) ++r12_74;
+    }
+    CHECK(r12_dashes == 2);
+    CHECK(r12_74 == 0);
+}
+
 TEST_CASE("dxf r2000: layers carry a plot style, and every pointer resolves") {
     // AutoCAD refused the whole file without this: "Error in LAYER Table / Did
     // not receive PlotStyleName". Group 390 is a HARD POINTER, so the object it
