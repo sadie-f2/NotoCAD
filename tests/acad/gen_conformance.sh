@@ -14,7 +14,13 @@
 set -e
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-OUT=${1:-/tmp}
+
+# The NAS share when it is mounted, so the file lands where AutoCAD can open it
+# without a copy step. Two rounds were once spent on a stale copy that had never
+# arrived; not copying at all is the surest fix for that.
+DEFAULT_OUT=/home/sadie/src/nas/ncad
+[ -d "$DEFAULT_OUT" ] || DEFAULT_OUT=/tmp
+OUT=${1:-$DEFAULT_OUT}
 NCAD=$ROOT/build/src/app/ncad
 LSP=$ROOT/tests/acad/r2000_conformance.lsp
 
