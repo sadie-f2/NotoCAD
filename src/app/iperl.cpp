@@ -28,6 +28,42 @@ std::string home_relative(const char* tail) {
     return std::string(home) + tail;
 }
 
+// PATH, for an iperl that was installed rather than cloned. Both spellings are
+// tried in each directory: `iperl.pl` is what the source tree calls it, `iperl`
+// is what an install tends to shorten it to.
+//
+// Readability rather than executability is the test, because the child runs
+// `perl <script>` rather than the script itself -- so an installed copy without
+// its executable bit still works, and requiring +x would reject it for no
+// reason.
+std::string on_path() {
+    const char* path = std::getenv("PATH");
+    if (path == nullptr) return {};
+
+    const std::string spec(path);
+    std::size_t begin = 0;
+    while (begin <= spec.size()) {
+        const std::size_t end = spec.find(':', begin);
+        const std::size_t stop = (end == std::string::npos) ? spec.size() : end;
+        const std::string dir = spec.substr(begin, stop - begin);
+
+        // An empty entry means the working directory by POSIX convention.
+        // Skipped deliberately: picking a script up from wherever ncad happens
+        // to have been started is a surprise, and it is one an attacker can
+        // arrange.
+        if (!dir.empty()) {
+            for (const char* name : {"/iperl.pl", "/iperl"}) {
+                const std::string candidate = dir + name;
+                if (readable_file(candidate)) return candidate;
+            }
+        }
+
+        if (end == std::string::npos) break;
+        begin = end + 1;
+    }
+    return {};
+}
+
 }  // namespace
 
 std::string IperlSession::script_path() {
@@ -37,11 +73,18 @@ std::string IperlSession::script_path() {
         return readable_file(env) ? std::string(env) : std::string{};
     }
 
+    // A checkout in the usual place beats an installed copy, so that working on
+    // iperl means testing the version being worked on rather than whatever was
+    // installed last.
     for (const char* tail : {"/src/iperl/iperl.pl", "/iperl.pl"}) {
         const std::string path = home_relative(tail);
         if (readable_file(path)) return path;
     }
-    return {};
+
+    // Then PATH, which is the only one of the three that finds an iperl the
+    // user installed rather than cloned -- and therefore the one that makes
+    // this work on a machine that is not the author's.
+    return on_path();
 }
 
 IperlSession::~IperlSession() { stop(); }

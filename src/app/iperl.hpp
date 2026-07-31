@@ -56,8 +56,9 @@ public:
     // effect, because there is no cheaper way to find out.
     bool available();
 
-    // Where iperl was found, or empty. NCAD_IPERL overrides; otherwise the
-    // couple of places it usually lives.
+    // Where iperl was found, or empty. In order: NCAD_IPERL, then a checkout in
+    // the usual place, then PATH -- so working on iperl tests the copy being
+    // worked on, and an installed copy still works for everyone else.
     static std::string script_path();
 
 private:

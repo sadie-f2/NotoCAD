@@ -12,10 +12,60 @@
 
 #include "iperl.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <sys/stat.h>
+#include <unistd.h>
 
 using namespace ncad;
+
+namespace {
+
+// Saves HOME and PATH and puts them back, because script_path() reads both and
+// the rest of the suite -- and any iperl check after this one -- would inherit
+// whatever was left behind.
+class ScopedEnv {
+public:
+    ScopedEnv() : home_(get("HOME")), path_(get("PATH")) {}
+    ~ScopedEnv() {
+        put("HOME", home_);
+        put("PATH", path_);
+    }
+
+    ScopedEnv(const ScopedEnv&) = delete;
+    ScopedEnv& operator=(const ScopedEnv&) = delete;
+
+private:
+    static std::string get(const char* name) {
+        const char* v = std::getenv(name);
+        return v == nullptr ? std::string{} : std::string(v);
+    }
+    static void put(const char* name, const std::string& value) {
+        if (value.empty()) {
+            ::unsetenv(name);
+        } else {
+            ::setenv(name, value.c_str(), 1);
+        }
+    }
+
+    std::string home_;
+    std::string path_;
+};
+
+// A directory under /tmp holding one file of the given name, so a PATH entry
+// can be pointed at something real. Returns the directory.
+std::string dir_holding(const std::string& parent, const char* name) {
+    const std::string path = parent + "/" + name;
+    std::FILE* f = std::fopen(path.c_str(), "w");
+    if (f != nullptr) {
+        std::fputs("# a stand-in; script_path only has to find it\n", f);
+        std::fclose(f);
+    }
+    return parent;
+}
+
+}  // namespace
 
 TEST_CASE("iperl: missing is reported, not fatal") {
     // A path that cannot exist, so this exercises the unavailable path on a
@@ -46,6 +96,67 @@ TEST_CASE("iperl: a multi-line expression is refused rather than desynchronising
     CHECK(!session.evaluate("2+2\n3+3", out));
     CHECK(!out.empty());
     ::unsetenv("NCAD_IPERL");
+}
+
+TEST_CASE("iperl: an installed copy is found on PATH") {
+    // The reason this exists: the search was home-relative only, so an iperl
+    // installed the ordinary way was invisible and every machine that was not
+    // the author's had to set NCAD_IPERL by hand.
+    ScopedEnv restore;
+    ::unsetenv("NCAD_IPERL");
+
+    char tmpl[] = "/tmp/ncad_iperl_testXXXXXX";
+    const char* made = ::mkdtemp(tmpl);
+    REQUIRE(made != nullptr);
+    const std::string tmp(made);
+
+    // HOME somewhere with no iperl in it, so the home-relative paths -- which
+    // win on purpose -- cannot answer and PATH is what is being measured.
+    const std::string empty_home = tmp + "/home";
+    REQUIRE(::mkdir(empty_home.c_str(), 0700) == 0);
+    ::setenv("HOME", empty_home.c_str(), 1);
+
+    const std::string bin = tmp + "/bin";
+    REQUIRE(::mkdir(bin.c_str(), 0700) == 0);
+
+    // Nothing on PATH yet, so the search has to come up empty rather than
+    // finding something incidental.
+    ::setenv("PATH", bin.c_str(), 1);
+    CHECK(app::IperlSession::script_path().empty());
+
+    // The source tree's spelling.
+    dir_holding(bin, "iperl.pl");
+    CHECK(app::IperlSession::script_path() == bin + "/iperl.pl");
+
+    // And the spelling an install tends to use, in a directory of its own so
+    // the first one is not what answers.
+    const std::string sbin = tmp + "/sbin";
+    REQUIRE(::mkdir(sbin.c_str(), 0700) == 0);
+    dir_holding(sbin, "iperl");
+    ::setenv("PATH", sbin.c_str(), 1);
+    CHECK(app::IperlSession::script_path() == sbin + "/iperl");
+
+    // A checkout still beats PATH, so working on iperl means testing the copy
+    // being worked on.
+    const std::string home_src = empty_home + "/src";
+    const std::string home_iperl = home_src + "/iperl";
+    REQUIRE(::mkdir(home_src.c_str(), 0700) == 0);
+    REQUIRE(::mkdir(home_iperl.c_str(), 0700) == 0);
+    dir_holding(home_iperl, "iperl.pl");
+    CHECK(app::IperlSession::script_path() == home_iperl + "/iperl.pl");
+
+    // And the override still beats both.
+    ::setenv("NCAD_IPERL", (sbin + "/iperl").c_str(), 1);
+    CHECK(app::IperlSession::script_path() == sbin + "/iperl");
+    ::unsetenv("NCAD_IPERL");
+
+    // An empty PATH entry means the working directory by POSIX convention, and
+    // is skipped rather than honoured -- a script picked up from wherever ncad
+    // was started is a surprise, and one an attacker can arrange.
+    ::setenv("HOME", (tmp + "/nothing").c_str(), 1);
+    ::setenv("PATH", ":", 1);
+    const std::string cwd_iperl = "./iperl.pl";
+    CHECK(app::IperlSession::script_path() != cwd_iperl);
 }
 
 TEST_CASE("iperl: arithmetic, when it is actually installed") {
