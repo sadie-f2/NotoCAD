@@ -513,6 +513,19 @@ TEST_CASE("dxf r2000: the sections and tables a later reader expects") {
     }
     CHECK(dim_marker);
 
+    // And the DIMSTYLE record carries its handle in group 105, not 5. Group 5
+    // is spoken for there by a dimension block name, so emitting 5 leaves the
+    // record unhandled and AutoCAD rejects the NEXT one for reusing a handle it
+    // never saw claimed: "Bad handle 13: already in use".
+    bool dim_105 = false;
+    for (std::size_t i = 0; i + 1 < p.size(); ++i) {
+        if (p[i].code == 0 && p[i].value == "DIMSTYLE" && i + 1 < p.size() &&
+            p[i + 1].code == 105) {
+            dim_105 = true;
+        }
+    }
+    CHECK(dim_105);
+
     // R12 has none of them.
     const std::vector<Pair> r12 = parse(dump_as(db, DxfVersion::R12), &ok);
     std::set<std::string> r12_sections;

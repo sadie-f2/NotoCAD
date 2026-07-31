@@ -324,7 +324,7 @@ void DxfWriter::write_tables() {
         const std::string dim_owner = begin_table("DIMSTYLE", 1);
         subclass("AcDbDimStyleTable");
         code(71, 1);
-        table_record("DIMSTYLE", dim_owner, "AcDbDimStyleTableRecord");
+        table_record("DIMSTYLE", dim_owner, "AcDbDimStyleTableRecord", 105);
         code(2, "STANDARD");
         code(70, 0);
         code(0, "ENDTAB");
@@ -445,10 +445,10 @@ std::string DxfWriter::begin_table(const char* name, int count) {
 }
 
 void DxfWriter::table_record(const char* type, const std::string& owner,
-                             const char* record_subclass) {
+                             const char* record_subclass, int handle_code) {
     code(0, type);
     if (dxf_requires_handles(version_)) {
-        code(5, next_handle());
+        code(handle_code, next_handle());
         code(330, owner);
         subclass("AcDbSymbolTableRecord");
         subclass(record_subclass);

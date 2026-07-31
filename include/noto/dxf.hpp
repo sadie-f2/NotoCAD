@@ -140,7 +140,13 @@ private:
     // are owned by it, which is the structure a reader walks to find them.
     // Returns the table's handle, which its records need as their owner.
     std::string begin_table(const char* name, int count);
-    void table_record(const char* type, const std::string& owner, const char* record_subclass);
+    // `handle_code` is 5 for every table but DIMSTYLE, whose records carry
+    // their handle in group 105 -- group 5 is already spoken for there by a
+    // dimension block name. Getting it wrong makes AutoCAD read the handle as
+    // that name, leave the record unhandled, and then reject the NEXT record
+    // for reusing a handle it never saw claimed.
+    void table_record(const char* type, const std::string& owner, const char* record_subclass,
+                      int handle_code = 5);
 
     // The BLOCK_RECORD table, which R13 and later require and R12 has no
     // concept of. Fills model_space_owner_, which every entity then names as
