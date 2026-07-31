@@ -685,6 +685,87 @@ TEST_CASE("dxf r2000: every entity record declares its AcDb class") {
     CHECK(r12_marks == 0);
 }
 
+TEST_CASE("dxf r2000: an INSERT's shape does not depend on its content") {
+    // AutoCAD refused a MINSERT whose scale and rotation were all defaults --
+    // "Class separator for class AcDbMInsertBlock expected" -- while accepting
+    // plain inserts in the same file with the same groups omitted. The reader
+    // walks AcDbBlockReference's fields in order and will not take the derived
+    // class's separator until it has seen them, so a record going straight from
+    // the insertion point to the separator has no valid reading.
+    //
+    // R12 omits them when they are unity and its readers do not care, so only
+    // the R2000 path changes.
+    BlockDef def;
+    def.name = "SQ";
+    def.entities.push_back(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+
+    Database db;
+    const BlockId id = db.add_block(std::move(def));
+    // Every default: unity scale, no rotation. The case that failed.
+    db.add(std::make_unique<Insert>(db.block(id), Mat4::identity()));
+    auto arr = std::make_unique<Insert>(db.block(id), Mat4::translation({20, 0, 0}));
+    arr->set_array(2, 3, 5.0, 5.0);
+    db.add(std::move(arr));
+
+    bool ok = true;
+    const std::vector<Pair> p = parse(dump_as(db, DxfVersion::R2000), &ok);
+    CHECK(ok);
+
+    // Both records carry the scale and rotation even though every one of them
+    // is the default value.
+    std::size_t inserts = 0;
+    std::size_t with_scale = 0;
+    bool in_insert = false;
+    std::set<int> seen;
+    int marker_at = -1;
+    int idx = 0;
+    int scale_at = -1;
+    auto finish = [&]() {
+        if (!in_insert) return;
+        ++inserts;
+        if (seen.count(41) && seen.count(42) && seen.count(43) && seen.count(50)) ++with_scale;
+        // Where there IS a second marker, the parent's fields precede it.
+        if (marker_at >= 0) CHECK(scale_at >= 0 && scale_at < marker_at);
+        seen.clear();
+        marker_at = -1;
+        scale_at = -1;
+    };
+    int concrete = 0;
+    for (const Pair& g : p) {
+        if (g.code == 0) {
+            finish();
+            in_insert = (g.value == "INSERT");
+            idx = 0;
+            concrete = 0;
+        }
+        if (!in_insert) continue;
+        ++idx;
+        if (g.code == 100 && g.value != "AcDbEntity") {
+            ++concrete;
+            if (concrete == 2) marker_at = idx;
+        }
+        if (g.code == 50 && scale_at < 0) scale_at = idx;
+        seen.insert(g.code);
+    }
+    finish();
+    CHECK(inserts == 2);
+    CHECK(with_scale == 2);
+
+    // R12 still omits what is default, and that output is confirmed good.
+    const std::vector<Pair> r12 = parse(dump_as(db, DxfVersion::R12), &ok);
+    CHECK(ok);
+    // Scoped to INSERT records: 41/42/43 mean other things elsewhere in the
+    // document, and counting them across the whole file measures the header.
+    std::size_t r12_scale_groups = 0;
+    bool r12_in_insert = false;
+    for (const Pair& g : r12) {
+        if (g.code == 0) r12_in_insert = (g.value == "INSERT");
+        if (!r12_in_insert) continue;
+        if (g.code == 41 || g.code == 42 || g.code == 43) ++r12_scale_groups;
+    }
+    CHECK(r12_scale_groups == 0);
+}
+
 TEST_CASE("dxf r2000: the extrusion belongs to the class that owns it") {
     // AutoCAD: "Unexpected DXF group code: 210", reading an ARC. The markers
     // were right and the extrusion was in the wrong one -- an ARC's centre,

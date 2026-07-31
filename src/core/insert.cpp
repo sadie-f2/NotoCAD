@@ -279,12 +279,31 @@ void Insert::dxf_write(DxfWriter& w) const {
     // other ECS entity here.
     w.point(10, world_to_ecs(p.normal).transform_point(p.insertion));
 
-    // Omitted when unity, which is what R12 writes and keeps a plain insert
-    // byte-for-byte minimal.
-    if (p.scale.x != 1.0) w.code(41, p.scale.x);
-    if (p.scale.y != 1.0) w.code(42, p.scale.y);
-    if (p.scale.z != 1.0) w.code(43, p.scale.z);
-    if (p.rotation != 0.0) w.code(50, p.rotation * 180.0 / std::numbers::pi);
+    // R12 omits these when they are unity, which keeps a plain insert
+    // byte-for-byte minimal, and its readers do not care.
+    //
+    // R2000 writes them ALWAYS, and that is not tidiness. AutoCAD refused a
+    // MINSERT whose scale and rotation were all defaults -- "Class separator
+    // for class AcDbMInsertBlock expected" -- while accepting plain inserts in
+    // the same file with the same groups missing. The reader walks
+    // AcDbBlockReference's fields in order and will not accept the derived
+    // class's separator until it has seen them, so a record with nothing
+    // between the insertion point and the separator has no valid reading.
+    //
+    // The general rule, and it is the third time it has bitten: the SHAPE of a
+    // record must not depend on its CONTENT. TEXT's group 73 is here for the
+    // same reason.
+    if (dxf_requires_handles(w.version())) {
+        w.code(41, p.scale.x);
+        w.code(42, p.scale.y);
+        w.code(43, p.scale.z);
+        w.code(50, p.rotation * 180.0 / std::numbers::pi);
+    } else {
+        if (p.scale.x != 1.0) w.code(41, p.scale.x);
+        if (p.scale.y != 1.0) w.code(42, p.scale.y);
+        if (p.scale.z != 1.0) w.code(43, p.scale.z);
+        if (p.rotation != 0.0) w.code(50, p.rotation * 180.0 / std::numbers::pi);
+    }
 
     // The extrusion belongs to AcDbBlockReference, so on a MINSERT it has to be
     // written BEFORE the second marker -- the same rule that puts an ARC's 210
