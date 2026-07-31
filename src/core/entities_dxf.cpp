@@ -6,17 +6,17 @@
 // Kept apart from entities.cpp so the geometry stays free of format concerns.
 // This is also where the world-space internal representation is converted back
 // into the entity coordinate system that R12 actually stores.
-#include "noto/dxf.hpp"
+#include "ncad/dxf.hpp"
 
-#include "noto/render.hpp"
+#include "ncad/render.hpp"
 
 #include <algorithm>
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
 
 #include <numbers>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 constexpr double kRadToDeg = 180.0 / std::numbers::pi;
@@ -156,4 +156,4 @@ void Polyline::dxf_write(DxfWriter& w) const {
     w.code(8, w.layer_name(*this));
 }
 
-}  // namespace noto
+}  // namespace ncad

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/undo.hpp"
+#include "ncad/undo.hpp"
 
-#include "noto/database.hpp"
+#include "ncad/database.hpp"
 
 #include <utility>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 const std::string& empty_name() {
@@ -336,4 +336,4 @@ void UndoJournal::clear() {
     saved_serial_ = 0;
 }
 
-}  // namespace noto
+}  // namespace ncad

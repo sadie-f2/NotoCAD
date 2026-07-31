@@ -20,9 +20,9 @@
 // question is how many significant digits survive, and a fixed number of units
 // means something different at R = 1e3 and R = 1e12.
 
-#include "noto/entities.hpp"
-#include "noto/intersect.hpp"
-#include "noto/vec3.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/intersect.hpp"
+#include "ncad/vec3.hpp"
 #include "test.hpp"
 
 #include <cinttypes>
@@ -31,7 +31,7 @@
 #include <cstdio>
 #include <cstring>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

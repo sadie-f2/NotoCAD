@@ -3,17 +3,17 @@
 
 #include "geom_subrs.hpp"
 
-#include "noto/database.hpp"
-#include "noto/intersect.hpp"
-#include "noto/osnap.hpp"
-#include "noto/osnap_derived.hpp"
+#include "ncad/database.hpp"
+#include "ncad/intersect.hpp"
+#include "ncad/osnap.hpp"
+#include "ncad/osnap_derived.hpp"
 
 #include <cmath>
 #include <numbers>
 #include <string>
 #include <vector>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
@@ -198,4 +198,4 @@ bool subr_osnap(Interp& in, const Value* args, std::size_t, Value& out) {
     return true;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2026, Sadie Forbes
 
-add_library(noto_core STATIC
+add_library(ncad_core STATIC
   mat4.cpp
   ecs.cpp
   entities.cpp
@@ -39,11 +39,11 @@ add_library(noto_core STATIC
   input_text.cpp
 )
 
-target_include_directories(noto_core PUBLIC ${PROJECT_SOURCE_DIR}/include ${NOTO_VERSION_DIR})
+target_include_directories(ncad_core PUBLIC ${PROJECT_SOURCE_DIR}/include ${NCAD_VERSION_DIR})
 # The generated version header. PUBLIC so ncad and the tests can name the build
 # they are, and so the command-count convention can be asserted rather than
 # merely written down.
-add_dependencies(noto_core noto_version)
-target_link_libraries(noto_core PRIVATE noto_flags)
+add_dependencies(ncad_core ncad_version)
+target_link_libraries(ncad_core PRIVATE ncad_flags)
 
-add_library(noto::core ALIAS noto_core)
+add_library(ncad::core ALIAS ncad_core)

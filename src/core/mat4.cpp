@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/mat4.hpp"
+#include "ncad/mat4.hpp"
 
 #include <cmath>
 
-namespace noto {
+namespace ncad {
 
 Mat4 Mat4::identity() {
     Mat4 r;
@@ -154,4 +154,4 @@ bool near_equal(const Mat4& a, const Mat4& b, double eps) {
     return true;
 }
 
-}  // namespace noto
+}  // namespace ncad

@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/pick.hpp"
+#include "ncad/pick.hpp"
 
-#include "noto/database.hpp"
-#include "noto/render.hpp"
-#include "noto/scene.hpp"
+#include "ncad/database.hpp"
+#include "ncad/render.hpp"
+#include "ncad/scene.hpp"
 
 #include <cmath>
 #include <limits>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 constexpr double kInf = std::numeric_limits<double>::infinity();
@@ -291,4 +291,4 @@ std::size_t deselect_by_region(const Database& db, const DrawContext& ctx,
                                const SelectionRegion& r, bool crossing, SelectionSet& out) {
     return apply_region(db, ctx, r, crossing, out, false);
 }
-}  // namespace noto
+}  // namespace ncad

@@ -35,7 +35,7 @@
 
 #include <string>
 
-namespace noto::app {
+namespace ncad::app {
 
 class IperlSession {
 public:
@@ -56,7 +56,7 @@ public:
     // effect, because there is no cheaper way to find out.
     bool available();
 
-    // Where iperl was found, or empty. NOTO_IPERL overrides; otherwise the
+    // Where iperl was found, or empty. NCAD_IPERL overrides; otherwise the
     // couple of places it usually lives.
     static std::string script_path();
 
@@ -74,4 +74,4 @@ private:
     std::string why_unavailable_;
 };
 
-}  // namespace noto::app
+}  // namespace ncad::app

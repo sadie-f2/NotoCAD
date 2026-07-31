@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/input_text.hpp"
+#include "ncad/input_text.hpp"
 
-#include "noto/osnap.hpp"
+#include "ncad/osnap.hpp"
 
 #include <cmath>
 #include <cstdlib>
 #include <string>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 bool is_alpha(char c) {
@@ -327,4 +327,4 @@ bool TextInputSource::next_value(const Prompt& prompt, InputValue& out) {
     return true;
 }
 
-}  // namespace noto
+}  // namespace ncad

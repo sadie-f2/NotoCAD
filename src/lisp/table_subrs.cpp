@@ -3,14 +3,14 @@
 
 #include "table_subrs.hpp"
 
-#include "noto/blocks.hpp"
-#include "noto/database.hpp"
-#include "noto/tables.hpp"
+#include "ncad/blocks.hpp"
+#include "ncad/database.hpp"
+#include "ncad/tables.hpp"
 
 #include <string>
 #include <vector>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 Value pair_int(Context& ctx, std::int32_t code, std::int32_t v) {
@@ -204,4 +204,4 @@ bool subr_tblnext(Interp& in, const Value* args, std::size_t n, Value& out) {
     return true;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

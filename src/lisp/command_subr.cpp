@@ -15,15 +15,15 @@
 // has to be sitting somewhere. It sits in the CommandEngine.
 #include "command_subr.hpp"
 
-#include "noto/command.hpp"
-#include "noto/commands.hpp"
-#include "noto/input_text.hpp"
-#include "noto/lisp/command_input.hpp"
+#include "ncad/command.hpp"
+#include "ncad/commands.hpp"
+#include "ncad/input_text.hpp"
+#include "ncad/lisp/command_input.hpp"
 
 #include <string>
 #include <vector>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 // Feeds already-evaluated LISP values to a command. Converting from Value to
@@ -150,4 +150,4 @@ bool subr_command(Interp& in, const Value* args, std::size_t argc, Value& out) {
     return true;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

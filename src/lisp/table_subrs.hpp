@@ -17,9 +17,9 @@
 // empty table" are different answers and a script can act on the difference.
 #pragma once
 
-#include "noto/lisp/eval.hpp"
+#include "ncad/lisp/eval.hpp"
 
-namespace noto::lisp {
+namespace ncad::lisp {
 
 // (tblsearch "LAYER" "WALLS" [setnext]) -> alist, or nil if there is no such
 // entry. A non-nil third argument makes the next (tblnext ...) continue from
@@ -30,4 +30,4 @@ bool subr_tblsearch(Interp& in, const Value* args, std::size_t n, Value& out);
 // A non-nil second argument restarts from the first entry.
 bool subr_tblnext(Interp& in, const Value* args, std::size_t n, Value& out);
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

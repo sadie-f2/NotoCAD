@@ -5,17 +5,17 @@
 
 #include "iperl.hpp"
 
-#include "noto/commands.hpp"
-#include "noto/input_text.hpp"
-#include "noto/lisp/command_input.hpp"
-#include "noto/lisp/reader.hpp"
-#include "noto/lisp/value.hpp"
+#include "ncad/commands.hpp"
+#include "ncad/input_text.hpp"
+#include "ncad/lisp/command_input.hpp"
+#include "ncad/lisp/reader.hpp"
+#include "ncad/lisp/value.hpp"
 
 #include <iostream>
 #include <string>
 #include <vector>
 
-namespace noto::app {
+namespace ncad::app {
 namespace {
 
 constexpr const char* kCommandPrompt = "Command: ";
@@ -448,4 +448,4 @@ int run_command_prompt(lisp::Context& ctx, lisp::Interp& in, CommandEngine& engi
     return 0;
 }
 
-}  // namespace noto::app
+}  // namespace ncad::app

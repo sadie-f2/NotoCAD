@@ -3,16 +3,16 @@
 
 #include "test.hpp"
 
-#include "noto/commands.hpp"
-#include "noto/database.hpp"
-#include "noto/entities.hpp"
-#include "noto/view_control.hpp"
+#include "ncad/commands.hpp"
+#include "ncad/database.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/view_control.hpp"
 
 #include <memory>
 #include <string>
 #include <vector>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

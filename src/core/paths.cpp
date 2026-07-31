@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/paths.hpp"
+#include "ncad/paths.hpp"
 
 #include <cstdlib>
 #include <filesystem>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 char lower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
@@ -91,4 +91,4 @@ std::string path_filename(const std::string& path) {
     return std::filesystem::path(path).filename().string();
 }
 
-}  // namespace noto
+}  // namespace ncad

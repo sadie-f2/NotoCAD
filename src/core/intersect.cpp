@@ -9,16 +9,16 @@
 // primitives. That is what makes polylines fall out for free rather than
 // needing a fourth case, and it is why a bulged polyline segment meets a circle
 // by exactly the arithmetic a standalone ARC would use.
-#include "noto/intersect.hpp"
+#include "ncad/intersect.hpp"
 
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <numbers>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
@@ -597,4 +597,4 @@ bool curve_point_at(const Entity& e, double t, Vec3* out) {
     return true;
 }
 
-}  // namespace noto
+}  // namespace ncad

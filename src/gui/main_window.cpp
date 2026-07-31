@@ -15,7 +15,7 @@
 #include <QCloseEvent>
 #include <QSplitter>
 
-namespace noto {
+namespace ncad {
 
 // The GUI half of PromptOutput. `ncad` has StreamOutput; this is the only
 // difference between the two front ends.
@@ -201,4 +201,4 @@ void MainWindow::add_zoom_shortcut(const QKeySequence& keys, int delta) {
     });
 }
 
-}  // namespace noto
+}  // namespace ncad

@@ -3,15 +3,15 @@
 
 #include "test.hpp"
 
-#include "noto/command.hpp"
-#include "noto/commands.hpp"
-#include "noto/database.hpp"
-#include "noto/input_text.hpp"
-#include "noto/osnap.hpp"
+#include "ncad/command.hpp"
+#include "ncad/commands.hpp"
+#include "ncad/database.hpp"
+#include "ncad/input_text.hpp"
+#include "ncad/osnap.hpp"
 
 #include <string>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

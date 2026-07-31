@@ -3,13 +3,13 @@
 
 #include "sample_drawing.hpp"
 
-#include "noto/database.hpp"
-#include "noto/entities.hpp"
+#include "ncad/database.hpp"
+#include "ncad/entities.hpp"
 
 #include <memory>
 #include <numbers>
 
-using namespace noto;
+using namespace ncad;
 
 void build_sample_drawing(Database& db) {
     constexpr double pi = std::numbers::pi;

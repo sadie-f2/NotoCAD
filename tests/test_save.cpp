@@ -9,25 +9,25 @@
 
 #include "test.hpp"
 
-#include "noto/command.hpp"
-#include "noto/commands.hpp"
-#include "noto/database.hpp"
-#include "noto/entities.hpp"
-#include "noto/paths.hpp"
-#include "noto/sysvar.hpp"
+#include "ncad/command.hpp"
+#include "ncad/commands.hpp"
+#include "ncad/database.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/paths.hpp"
+#include "ncad/sysvar.hpp"
 
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <string>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 
 std::string temp_dir() {
     const std::filesystem::path p =
-        std::filesystem::temp_directory_path() / "noto_save_tests";
+        std::filesystem::temp_directory_path() / "ncad_save_tests";
     std::error_code ec;
     std::filesystem::create_directories(p, ec);
     return p.string();

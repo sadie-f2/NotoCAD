@@ -9,9 +9,9 @@
 // and the viewport turns clicks into points. This class is wiring.
 #pragma once
 
-#include "noto/command.hpp"
-#include "noto/database.hpp"
-#include "noto/lisp/eval.hpp"
+#include "ncad/command.hpp"
+#include "ncad/database.hpp"
+#include "ncad/lisp/eval.hpp"
 #include "prompt.hpp"
 
 #include <QKeySequence>
@@ -19,7 +19,7 @@
 
 #include <memory>
 
-namespace noto {
+namespace ncad {
 
 class CommandLineWidget;
 class ViewportWidget;
@@ -71,4 +71,4 @@ private:
     std::unique_ptr<app::PromptSession> session_;
 };
 
-}  // namespace noto
+}  // namespace ncad

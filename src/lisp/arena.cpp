@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/lisp/arena.hpp"
+#include "ncad/lisp/arena.hpp"
 
 #include <algorithm>
 #include <cstring>
 #include <new>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 
 void Arena::add_block(std::size_t min_size) {
     // Oversized requests get their own exactly-sized block rather than forcing
@@ -62,4 +62,4 @@ std::size_t Arena::bytes_reserved() const {
     return total;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

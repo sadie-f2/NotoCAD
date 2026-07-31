@@ -960,7 +960,7 @@ source tree rather than to the binary, which is why the verbatim notice lives in
 `third_party/hershey/HERSHEY-NOTICE.txt` rather than only in a comment. Nothing here
 is copyleft, so unlike DWG and Qt it needs no compile-time module boundary.
 
-**What was built.** `include/noto/font.hpp` and `src/core/font_hershey.cpp`: Roman
+**What was built.** `include/ncad/font.hpp` and `src/core/font_hershey.cpp`: Roman
 Simplex embedded as `.jhf` text and parsed on first use, so the core keeps no runtime
 data path and the tests need no fixtures. Glyphs arrive with the baseline at y = 0 and
 the cap height at y = 1, so `Text::height()` means cap height exactly as R12 says.

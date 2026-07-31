@@ -20,20 +20,20 @@ endif()
 
 set(CMAKE_AUTOMOC ON)
 
-add_library(noto_gui STATIC
+add_library(ncad_gui_lib STATIC
   qpainter_renderer.cpp
   viewport_widget.cpp
   command_line_widget.cpp
   main_window.cpp
 )
 
-target_include_directories(noto_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${NOTO_VERSION_DIR})
-add_dependencies(noto_gui noto_version)
-# noto_app carries PromptSession: the GUI command line and the ncad terminal
+target_include_directories(ncad_gui_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${NCAD_VERSION_DIR})
+add_dependencies(ncad_gui_lib ncad_version)
+# ncad_app carries PromptSession: the GUI command line and the ncad terminal
 # prompt run the same code, which is the only way they stay consistent.
-target_link_libraries(noto_gui PUBLIC noto_core noto_app noto_sample Qt6::Widgets)
-target_link_libraries(noto_gui PRIVATE noto_flags)
+target_link_libraries(ncad_gui_lib PUBLIC ncad_core ncad_app ncad_sample Qt6::Widgets)
+target_link_libraries(ncad_gui_lib PRIVATE ncad_flags)
 
-# Libraries are noto_*, commands are ncad*.
+# The library is ncad_gui_lib to avoid colliding with the ncad_gui executable.
 add_executable(ncad_gui main.cpp)
-target_link_libraries(ncad_gui PRIVATE noto_gui noto_flags)
+target_link_libraries(ncad_gui PRIVATE ncad_gui_lib ncad_flags)

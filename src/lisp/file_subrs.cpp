@@ -11,12 +11,12 @@
 // name can stay.
 #include "file_subrs.hpp"
 
-#include "noto/database.hpp"
-#include "noto/dxf.hpp"
+#include "ncad/database.hpp"
+#include "ncad/dxf.hpp"
 
 #include <string>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 
 // (dxfout "path") -> T on success, nil if the file could not be written.
 //
@@ -44,4 +44,4 @@ bool subr_quit(Interp& in, const Value*, std::size_t, Value& out) {
     return true;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

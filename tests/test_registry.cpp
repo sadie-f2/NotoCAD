@@ -16,15 +16,15 @@
 
 #include "test.hpp"
 
-#include "noto/about.hpp"
-#include "noto/commands.hpp"
-#include "noto/version.hpp"
-#include "noto/database.hpp"
+#include "ncad/about.hpp"
+#include "ncad/commands.hpp"
+#include "ncad/version.hpp"
+#include "ncad/database.hpp"
 
 #include <set>
 #include <string>
 
-using namespace noto;
+using namespace ncad;
 
 TEST_CASE("registry: every advertised name constructs") {
     for (const std::string& name : command_names()) {
@@ -97,7 +97,7 @@ TEST_CASE("registry: the version's patch number IS the command count") {
     // a comment is one nobody remembers to honour. Raise BOTH numbers when a
     // command is added: the literal above, and project(VERSION) in the root
     // CMakeLists.
-    const std::string v = kNotoVersion;
+    const std::string v = kNcadVersion;
     const std::size_t last_dot = v.rfind('.');
     REQUIRE(last_dot != std::string::npos);
 
@@ -109,8 +109,8 @@ TEST_CASE("about: names every licence this build actually carries") {
     const std::string s = about_text();
 
     // The version and the build stamp, so a bug report can say which binary.
-    CHECK(s.find(kNotoVersion) != std::string::npos);
-    CHECK(s.find(kNotoGitHash) != std::string::npos);
+    CHECK(s.find(kNcadVersion) != std::string::npos);
+    CHECK(s.find(kNcadGitHash) != std::string::npos);
 
     // The Hershey acknowledgements are a LICENCE CONDITION, not a courtesy:
     // they must travel with the font data, and that data is compiled in here.
@@ -123,7 +123,7 @@ TEST_CASE("about: names every licence this build actually carries") {
 
     // And it must be honest about what is NOT linked. A default build carries
     // no GPL code, and saying otherwise either way would be the failure.
-#ifdef NOTO_WITH_DWG
+#ifdef NCAD_WITH_DWG
     CHECK(s.find("CONVEYED UNDER GPLv3") != std::string::npos);
 #else
     CHECK(s.find("links no GPL code") != std::string::npos);

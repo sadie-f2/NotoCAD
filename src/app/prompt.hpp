@@ -13,14 +13,14 @@
 // to, and nothing more.
 #pragma once
 
-#include "noto/command.hpp"
-#include "noto/lisp/eval.hpp"
+#include "ncad/command.hpp"
+#include "ncad/lisp/eval.hpp"
 
 #include <iosfwd>
 #include <string>
 #include <vector>
 
-namespace noto::app {
+namespace ncad::app {
 
 // Splits a typed line into responses. Whitespace separates them -- at a command
 // prompt, space acts as Enter, as R12 has it -- except that a parenthesised
@@ -103,4 +103,4 @@ private:
 int run_command_prompt(lisp::Context& ctx, lisp::Interp& in, CommandEngine& engine,
                        bool interactive);
 
-}  // namespace noto::app
+}  // namespace ncad::app

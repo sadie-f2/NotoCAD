@@ -197,10 +197,10 @@ helps locally and remotely.
 A nice target, not a necessary one. The port is close to free:
 
 - No CMakeLists anywhere has a platform conditional, and `AppleClang` is already in
-  the `noto_flags` generator expression.
+  the `ncad_flags` generator expression.
 - The entire POSIX surface is two files: `iperl.cpp` (`fork`/`pipe`/`dup2`/`execlp`/
   `SIGPIPE`) and `main.cpp:54` (`isatty`). All portable. macOS ships perl, and
-  `NOTO_IPERL` already overrides the script path.
+  `NCAD_IPERL` already overrides the script path.
 - Homebrew Qt6 is shared, so the static-Qt guard in `src/gui/CMakeLists.txt` passes.
 
 Two real hazards. **HiDPI is the one that bites silently:** `pick.hpp` measures in

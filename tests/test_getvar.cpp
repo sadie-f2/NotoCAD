@@ -3,15 +3,15 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/lisp/eval.hpp"
-#include "noto/sysvar.hpp"
+#include "ncad/database.hpp"
+#include "ncad/lisp/eval.hpp"
+#include "ncad/sysvar.hpp"
 
 #include <sstream>
 #include <string>
 
-using namespace noto;
-using namespace noto::lisp;
+using namespace ncad;
+using namespace ncad::lisp;
 
 namespace {
 

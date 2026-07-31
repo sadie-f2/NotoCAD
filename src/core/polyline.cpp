@@ -15,15 +15,15 @@
 // those. Storing bulge rather than a centre is what the format does and is also
 // what survives editing: dragging a vertex keeps the arc's relationship to its
 // neighbours rather than referring to a centre that may no longer make sense.
-#include "noto/entities.hpp"
+#include "ncad/entities.hpp"
 
-#include "noto/dxf.hpp"
-#include "noto/ecs.hpp"
-#include "noto/render.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/render.hpp"
 
 #include <cmath>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 constexpr double kBulgeEps = 1e-12;
@@ -60,7 +60,7 @@ bool Polyline::segment_arc(std::size_t i, Vec3* centre, double* radius, double* 
 
     const Basis b = arbitrary_axis(props().normal);
     const Vec3 chord = p1 - p0;
-    const double chord_len = noto::length(chord);
+    const double chord_len = ncad::length(chord);
     if (chord_len < kBulgeEps) return false;  // coincident vertices: no arc
 
     const double included = 4.0 * std::atan(bulge);
@@ -107,7 +107,7 @@ double Polyline::length() const {
         if (segment_arc(i, &c, &r, &a0, &a1)) {
             total += r * std::abs(4.0 * std::atan(vertices_[i].bulge));
         } else {
-            total += noto::length(vertices_[(i + 1) % vertices_.size()].pos - vertices_[i].pos);
+            total += ncad::length(vertices_[(i + 1) % vertices_.size()].pos - vertices_[i].pos);
         }
     }
     return total;
@@ -144,7 +144,7 @@ void Polyline::transform(const Mat4& m) {
     // Widths are lengths, so they scale. Uniform scale is assumed for the same
     // reason the circular entities assume it -- R12 cannot represent the
     // non-uniform result -- and the factor is taken from the same basis vector.
-    const double scale = noto::length(tx);
+    const double scale = ncad::length(tx);
     if (scale != 1.0) {
         for (PolyVertex& v : vertices_) {
             v.start_width *= scale;
@@ -253,4 +253,4 @@ void Polyline::draw(const DrawContext& ctx, Renderer& r) const {
     r.polyline(pts.data(), pts.size(), closed_);
 }
 
-}  // namespace noto
+}  // namespace ncad

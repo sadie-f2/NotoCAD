@@ -3,18 +3,18 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
-#include "noto/highlight.hpp"
-#include "noto/render.hpp"
-#include "noto/scene.hpp"
+#include "ncad/database.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/highlight.hpp"
+#include "ncad/render.hpp"
+#include "ncad/scene.hpp"
 
 #include <cmath>
 #include <numbers>
 #include <vector>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

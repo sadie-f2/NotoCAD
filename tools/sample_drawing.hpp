@@ -12,10 +12,10 @@
 // Deliberately not in the core: it is demonstration content, not kernel.
 #pragma once
 
-namespace noto {
+namespace ncad {
 class Database;
 }
 
 // Fills `db` with entities on tilted planes -- the cases the arbitrary axis
 // algorithm gets wrong if it is wrong at all.
-void build_sample_drawing(noto::Database& db);
+void build_sample_drawing(ncad::Database& db);

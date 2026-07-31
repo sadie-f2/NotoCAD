@@ -3,12 +3,12 @@
 
 #include "test.hpp"
 
-#include "noto/command.hpp"
-#include "noto/commands.hpp"
-#include "noto/database.hpp"
-#include "noto/entities.hpp"
-#include "noto/input_text.hpp"
-#include "noto/lisp/eval.hpp"
+#include "ncad/command.hpp"
+#include "ncad/commands.hpp"
+#include "ncad/database.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/input_text.hpp"
+#include "ncad/lisp/eval.hpp"
 
 #include <cstdio>
 #include <fstream>
@@ -16,8 +16,8 @@
 #include <string>
 #include <vector>
 
-using namespace noto;
-using namespace noto::lisp;
+using namespace ncad;
+using namespace ncad::lisp;
 
 namespace {
 
@@ -452,7 +452,7 @@ TEST_CASE("DXFOUT: writes from the command prompt, not only from LISP") {
     f.run("LINE 0,0 10,0\n\n");
     CHECK(f.db.size() == 1);
 
-    const std::string path = "noto_test_cmd_dxfout.dxf";
+    const std::string path = "ncad_test_cmd_dxfout.dxf";
     std::remove(path.c_str());
 
     TextInputSource src(tokenize_script(path + "\n"));
@@ -474,7 +474,7 @@ TEST_CASE("DXFOUT: supplies the extension when it is left off") {
     ScriptFixture f;
     f.run("CIRCLE 0,0 1\n");
 
-    const std::string stem = "noto_test_cmd_extension";
+    const std::string stem = "ncad_test_cmd_extension";
     std::remove((stem + ".dxf").c_str());
 
     TextInputSource src(tokenize_script(stem + "\n"));

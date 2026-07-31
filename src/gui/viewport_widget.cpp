@@ -3,13 +3,13 @@
 
 #include "viewport_widget.hpp"
 
-#include "noto/dash.hpp"
-#include "noto/database.hpp"
-#include "noto/highlight.hpp"
-#include "noto/pick.hpp"
-#include "noto/scene.hpp"
-#include "noto/version.hpp"
-#include "noto/sysvar.hpp"
+#include "ncad/dash.hpp"
+#include "ncad/database.hpp"
+#include "ncad/highlight.hpp"
+#include "ncad/pick.hpp"
+#include "ncad/scene.hpp"
+#include "ncad/version.hpp"
+#include "ncad/sysvar.hpp"
 #include "qpainter_renderer.hpp"
 
 #include <QKeyEvent>
@@ -19,7 +19,7 @@
 
 #include <cmath>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // R12 on a CRT: light geometry on a near-black field.
@@ -629,8 +629,8 @@ void ViewportWidget::draw_nameplate(QPainter& painter) const {
     // version rather than as the first half of a longer token.
     const QString lines[] = {
         QStringLiteral("NotoCAD \u00A9"),
-        QStringLiteral("Ver:") + QString::fromLatin1(kNotoVersion),
-        QString::fromLatin1(kNotoGitHash),
+        QStringLiteral("Ver:") + QString::fromLatin1(kNcadVersion),
+        QString::fromLatin1(kNcadGitHash),
     };
 
     // Sized to a share of the viewport rather than to a point size, so it holds
@@ -823,4 +823,4 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event) {
     QWidget::keyPressEvent(event);
 }
 
-}  // namespace noto
+}  // namespace ncad

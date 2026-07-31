@@ -8,11 +8,11 @@
 // right-handed, and the current UCS arrives through system variables that
 // AutoLISP can write, so that assumption has to be enforced somewhere rather
 // than hoped for.
-#include "noto/tables.hpp"
+#include "ncad/tables.hpp"
 
 #include <cmath>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 constexpr double kUcsEps = 1e-12;
@@ -81,4 +81,4 @@ Mat4 Ucs::from_world() const {
     return Mat4::from_basis(n.origin, n.xdir, n.ydir, z);
 }
 
-}  // namespace noto
+}  // namespace ncad

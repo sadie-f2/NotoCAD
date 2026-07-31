@@ -19,7 +19,7 @@
 #include <QScrollBar>
 #include <QVBoxLayout>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // The command line is styled to match the viewport rather than the desktop
@@ -220,4 +220,4 @@ void CommandLineWidget::set_font_points(int points) {
     input_->setFont(f);
 }
 
-}  // namespace noto
+}  // namespace ncad

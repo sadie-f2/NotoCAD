@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/entities.hpp"
+#include "ncad/entities.hpp"
 
-#include "noto/ecs.hpp"
+#include "ncad/ecs.hpp"
 
 #include <cmath>
 #include <cstddef>
 #include <numbers>
 #include <string_view>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
@@ -482,4 +482,4 @@ void Arc::osnap_points(std::vector<OsnapPoint>& out) const {
     }
 }
 
-}  // namespace noto
+}  // namespace ncad

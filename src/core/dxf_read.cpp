@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/dxf_read.hpp"
+#include "ncad/dxf_read.hpp"
 
-#include "noto/database.hpp"
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
+#include "ncad/database.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -14,7 +14,7 @@
 #include <sstream>
 #include <vector>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 constexpr double kDegToRad = std::numbers::pi / 180.0;
@@ -837,4 +837,4 @@ DxfReadResult read_dxf_file(Database& db, const std::string& path) {
     return read_dxf_text(db, buffer.str());
 }
 
-}  // namespace noto
+}  // namespace ncad

@@ -10,13 +10,13 @@
 // The contract every implementation keeps: grips() and stretch() must agree on
 // indices, stretch() ignores indices it does not recognise, and stretching
 // every Stretch grip of an entity at once is the same as translating it.
-#include "noto/entities.hpp"
+#include "ncad/entities.hpp"
 
-#include "noto/ecs.hpp"
+#include "ncad/ecs.hpp"
 
 #include <cmath>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // True if `indices` names `want`. Linear, over a handful of entries -- an
@@ -227,4 +227,4 @@ void Arc::stretch(const Vec3& delta, const GripIndex* indices, std::size_t count
     }
 }
 
-}  // namespace noto
+}  // namespace ncad

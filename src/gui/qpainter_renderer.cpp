@@ -3,12 +3,12 @@
 
 #include "qpainter_renderer.hpp"
 
-#include "noto/database.hpp"
+#include "ncad/database.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // The first nine ACI slots, which are the ones R12 users actually set by hand
@@ -168,4 +168,4 @@ void QPainterRenderer::polyline(const Vec3* pts, std::size_t count, bool closed)
     }
 }
 
-}  // namespace noto
+}  // namespace ncad

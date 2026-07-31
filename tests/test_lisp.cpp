@@ -3,16 +3,16 @@
 
 #include "test.hpp"
 
-#include "noto/lisp/arena.hpp"
-#include "noto/lisp/reader.hpp"
-#include "noto/lisp/value.hpp"
+#include "ncad/lisp/arena.hpp"
+#include "ncad/lisp/reader.hpp"
+#include "ncad/lisp/value.hpp"
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
-using namespace noto;
-using namespace noto::lisp;
+using namespace ncad;
+using namespace ncad::lisp;
 
 namespace {
 

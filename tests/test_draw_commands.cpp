@@ -10,18 +10,18 @@
 
 #include "test.hpp"
 
-#include "noto/command.hpp"
-#include "noto/commands.hpp"
-#include "noto/database.hpp"
-#include "noto/dxf.hpp"
-#include "noto/dxf_read.hpp"
-#include "noto/entities.hpp"
+#include "ncad/command.hpp"
+#include "ncad/commands.hpp"
+#include "ncad/database.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/dxf_read.hpp"
+#include "ncad/entities.hpp"
 
 #include <cmath>
 #include <numbers>
 #include <sstream>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

@@ -22,11 +22,11 @@
 // changing anything here.
 #include "prompt.hpp"
 
-#include "noto/command.hpp"
-#include "noto/database.hpp"
-#include "noto/lisp/eval.hpp"
-#include "noto/lisp/reader.hpp"
-#include "noto/lisp/value.hpp"
+#include "ncad/command.hpp"
+#include "ncad/database.hpp"
+#include "ncad/lisp/eval.hpp"
+#include "ncad/lisp/reader.hpp"
+#include "ncad/lisp/value.hpp"
 
 #include <cstdio>
 #include <fstream>
@@ -37,7 +37,7 @@
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
-#define NOTO_HAVE_ISATTY 1
+#define NCAD_HAVE_ISATTY 1
 #endif
 
 namespace {
@@ -50,7 +50,7 @@ constexpr const char* kPrompt = "_$ ";
 constexpr const char* kContinuation = "   ";
 
 bool stdin_is_tty() {
-#ifdef NOTO_HAVE_ISATTY
+#ifdef NCAD_HAVE_ISATTY
     return isatty(fileno(stdin)) != 0;
 #else
     return false;
@@ -76,16 +76,16 @@ void print_usage() {
 
 // Evaluates every form in `source`. Returns false if evaluation failed, having
 // reported why on stderr.
-bool eval_source(noto::lisp::Interp& in, const std::string& source, const std::string& origin) {
+bool eval_source(ncad::lisp::Interp& in, const std::string& source, const std::string& origin) {
     in.clear_error();
-    noto::lisp::Value result;
+    ncad::lisp::Value result;
     if (in.eval_string(source, result)) return true;
 
     std::cerr << origin << ": " << in.error().message() << "\n";
     return false;
 }
 
-bool load_file(noto::lisp::Interp& in, const std::string& path) {
+bool load_file(ncad::lisp::Interp& in, const std::string& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
         std::cerr << "ncad: cannot open " << path << "\n";
@@ -99,7 +99,7 @@ bool load_file(noto::lisp::Interp& in, const std::string& path) {
 // The loop. Accumulates lines until the reader agrees it has a complete form,
 // then evaluates and prints. An error aborts the current input and returns to
 // the prompt with the interpreter intact.
-int repl(noto::lisp::Context& ctx, noto::lisp::Interp& in, bool interactive) {
+int repl(ncad::lisp::Context& ctx, ncad::lisp::Interp& in, bool interactive) {
     std::string pending;
     std::string line;
 
@@ -114,22 +114,22 @@ int repl(noto::lisp::Context& ctx, noto::lisp::Interp& in, bool interactive) {
 
         // Parse what we have. Incomplete input is not an error; it is a request
         // for the next line.
-        noto::lisp::Reader reader(ctx, pending);
-        std::vector<noto::lisp::Value> forms;
+        ncad::lisp::Reader reader(ctx, pending);
+        std::vector<ncad::lisp::Value> forms;
         if (!reader.read_all(forms)) {
-            const noto::lisp::ReadError& err = reader.error();
-            if (err.status == noto::lisp::ReadStatus::UnexpectedEof) continue;
+            const ncad::lisp::ReadError& err = reader.error();
+            if (err.status == ncad::lisp::ReadStatus::UnexpectedEof) continue;
 
             std::cerr << "; read error, line " << err.line << ", column " << err.column << ": "
-                      << noto::lisp::read_status_message(err.status) << "\n";
+                      << ncad::lisp::read_status_message(err.status) << "\n";
             pending.clear();
             continue;
         }
         pending.clear();
 
-        for (const noto::lisp::Value& form : forms) {
+        for (const ncad::lisp::Value& form : forms) {
             in.clear_error();
-            noto::lisp::Value result;
+            ncad::lisp::Value result;
             if (!in.eval(form, result)) {
                 // Each form typed at the REPL is a top-level action of its own,
                 // so the script's *error* handler gets its chance here just as
@@ -139,9 +139,9 @@ int repl(noto::lisp::Context& ctx, noto::lisp::Interp& in, bool interactive) {
                 std::cerr << "; error: " << in.error().message() << "\n";
                 break;
             }
-            // Printed even when not interactive, so `noto < script.lsp` behaves
+            // Printed even when not interactive, so `ncad < script.lsp` behaves
             // like a transcript rather than swallowing everything.
-            std::cout << noto::lisp::prin1(result) << "\n";
+            std::cout << ncad::lisp::prin1(result) << "\n";
             if (in.quit_requested()) return 0;
         }
     }
@@ -192,10 +192,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    noto::Database db;
-    noto::CommandEngine engine(db);
-    noto::lisp::Context ctx;
-    noto::lisp::Interp in(ctx);
+    ncad::Database db;
+    ncad::CommandEngine engine(db);
+    ncad::lisp::Context ctx;
+    ncad::lisp::Interp in(ctx);
     in.set_database(&db);
     in.set_command_engine(&engine);
 
@@ -219,5 +219,5 @@ int main(int argc, char** argv) {
                                 : " -- type ? for commands, ( for AutoLISP, QUIT to exit.\n");
     }
     if (lisp_mode) return repl(ctx, in, interactive);
-    return noto::app::run_command_prompt(ctx, in, engine, interactive);
+    return ncad::app::run_command_prompt(ctx, in, engine, interactive);
 }

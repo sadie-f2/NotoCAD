@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/dash.hpp"
+#include "ncad/dash.hpp"
 
-#include "noto/database.hpp"
+#include "ncad/database.hpp"
 
 #include <cmath>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // A dot is a zero-length pattern element. Something has to be drawn or it is
@@ -106,4 +106,4 @@ void DashRenderer::polyline(const Vec3* pts, std::size_t count, bool closed) {
     flush();
 }
 
-}  // namespace noto
+}  // namespace ncad

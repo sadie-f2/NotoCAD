@@ -2,17 +2,17 @@
 // Copyright (c) 2026, Sadie Forbes
 
 // TEXT: the entity, drawn with the bundled Hershey stroke font.
-#include "noto/dxf.hpp"
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
-#include "noto/font.hpp"
-#include "noto/render.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/font.hpp"
+#include "ncad/render.hpp"
 
 #include <cmath>
 #include <numbers>
 #include <vector>
 
-namespace noto {
+namespace ncad {
 
 double Text::text_width() const {
     return StrokeFont::romans().width(value_) * height_ * width_factor_;
@@ -209,4 +209,4 @@ void Text::dxf_write(DxfWriter& w) const {
     w.write_extrusion(props().normal);
 }
 
-}  // namespace noto
+}  // namespace ncad

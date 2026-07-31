@@ -3,13 +3,13 @@
 
 #include "test.hpp"
 
-#include "noto/entities.hpp"
-#include "noto/osnap_derived.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/osnap_derived.hpp"
 
 #include <cmath>
 #include <numbers>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

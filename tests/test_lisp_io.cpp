@@ -10,10 +10,10 @@
 
 #include "test.hpp"
 
-#include "noto/command.hpp"
-#include "noto/database.hpp"
-#include "noto/entities.hpp"
-#include "noto/lisp/eval.hpp"
+#include "ncad/command.hpp"
+#include "ncad/database.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/lisp/eval.hpp"
 
 #include <cstdio>
 #include <filesystem>
@@ -21,13 +21,13 @@
 #include <sstream>
 #include <string>
 
-using namespace noto;
-using namespace noto::lisp;
+using namespace ncad;
+using namespace ncad::lisp;
 
 namespace {
 
 std::string temp_dir() {
-    const std::filesystem::path p = std::filesystem::temp_directory_path() / "noto_lisp_io";
+    const std::filesystem::path p = std::filesystem::temp_directory_path() / "ncad_lisp_io";
     std::error_code ec;
     std::filesystem::create_directories(p, ec);
     return p.string();

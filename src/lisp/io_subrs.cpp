@@ -3,12 +3,12 @@
 
 #include "io_subrs.hpp"
 
-#include "noto/paths.hpp"
+#include "ncad/paths.hpp"
 
 #include <cstdio>
 #include <string>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 bool arg_string(Interp& in, const char* who, const Value& v, std::string& out) {
@@ -191,4 +191,4 @@ bool subr_findfile(Interp& in, const Value* args, std::size_t, Value& out) {
     return true;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

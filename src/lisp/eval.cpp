@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/lisp/eval.hpp"
+#include "ncad/lisp/eval.hpp"
 
-#include "noto/database.hpp"
+#include "ncad/database.hpp"
 
-#include "noto/lisp/reader.hpp"
+#include "ncad/lisp/reader.hpp"
 
 #include <iostream>
 #include <string>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 struct SpecialDef {
@@ -578,4 +578,4 @@ const SelectionSet* Interp::selection_set(std::int32_t index) const {
     return &ssets_[static_cast<std::size_t>(index)];
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

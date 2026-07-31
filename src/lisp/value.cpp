@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/lisp/value.hpp"
+#include "ncad/lisp/value.hpp"
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 char upcase(char c) {
@@ -232,4 +232,4 @@ std::string princ(const Value& v) {
     return out;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

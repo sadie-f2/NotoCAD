@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/lisp/reader.hpp"
+#include "ncad/lisp/reader.hpp"
 
 #include <cstdlib>
 #include <cerrno>
 #include <climits>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 bool is_space(char c) {
@@ -253,4 +253,4 @@ Value read_one(Context& ctx, std::string_view source, ReadError* err) {
     return ok ? v : make_nil();
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/ecs.hpp"
+#include "ncad/ecs.hpp"
 
 #include <cmath>
 
-namespace noto {
+namespace ncad {
 
 Basis arbitrary_axis(const Vec3& normal) {
     const Vec3 az = normalize(normal);
@@ -37,4 +37,4 @@ Mat4 ecs_to_world(const Vec3& normal) {
     return r;
 }
 
-}  // namespace noto
+}  // namespace ncad

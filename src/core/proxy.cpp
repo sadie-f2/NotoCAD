@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/dxf.hpp"
-#include "noto/entities.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/entities.hpp"
 
-namespace noto {
+namespace ncad {
 
 EntityPtr Proxy::clone() const {
     auto copy = std::make_unique<Proxy>();
@@ -40,4 +40,4 @@ void Proxy::dxf_write(DxfWriter& w) const {
     for (const DxfGroup& g : groups_) w.code(g.code, g.value);
 }
 
-}  // namespace noto
+}  // namespace ncad

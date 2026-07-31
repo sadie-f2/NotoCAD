@@ -5,11 +5,11 @@
 // builtins.cpp can reference them. Not an installed header.
 #pragma once
 
-#include "noto/lisp/eval.hpp"
+#include "ncad/lisp/eval.hpp"
 
-namespace noto::lisp {
+namespace ncad::lisp {
 
 bool subr_dxfout(Interp& in, const Value* args, std::size_t argc, Value& out);
 bool subr_quit(Interp& in, const Value* args, std::size_t argc, Value& out);
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

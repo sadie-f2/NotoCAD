@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/command.hpp"
+#include "ncad/command.hpp"
 
-namespace noto {
+namespace ncad {
 
 // --- Prompt -----------------------------------------------------------------
 
@@ -344,4 +344,4 @@ bool CommandEngine::preview(const InputValue& tentative, InFlight& out) {
     return command_->preview(ctx_, tentative, out);
 }
 
-}  // namespace noto
+}  // namespace ncad

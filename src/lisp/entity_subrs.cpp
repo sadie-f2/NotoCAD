@@ -25,15 +25,15 @@
 // face twenty thousand of a mesh build is not a diagnosis.
 #include "entity_subrs.hpp"
 
-#include "noto/database.hpp"
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
+#include "ncad/database.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
 
 #include <cmath>
 #include <string>
 #include <vector>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 // --- alist reading ----------------------------------------------------------
@@ -615,4 +615,4 @@ bool subr_entnext(Interp& in, const Value* a, std::size_t argc, Value& out) {
     return true;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

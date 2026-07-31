@@ -3,14 +3,14 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
+#include "ncad/database.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
 
 #include <algorithm>
 #include <numbers>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

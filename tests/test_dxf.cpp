@@ -3,13 +3,13 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/dxf.hpp"
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
+#include "ncad/database.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
 
-#include "noto/dxf_read.hpp"
-#include "noto/sysvar.hpp"
+#include "ncad/dxf_read.hpp"
+#include "ncad/sysvar.hpp"
 
 #include <algorithm>
 #include <map>
@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

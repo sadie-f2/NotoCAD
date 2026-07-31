@@ -3,18 +3,18 @@
 
 #include "test.hpp"
 
-#include "noto/dash.hpp"
-#include "noto/sysvar.hpp"
-#include "noto/database.hpp"
-#include "noto/entities.hpp"
-#include "noto/pick.hpp"
-#include "noto/scene.hpp"
-#include "noto/viewport.hpp"
+#include "ncad/dash.hpp"
+#include "ncad/sysvar.hpp"
+#include "ncad/database.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/pick.hpp"
+#include "ncad/scene.hpp"
+#include "ncad/viewport.hpp"
 
 #include <cmath>
 #include <memory>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

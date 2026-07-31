@@ -13,16 +13,16 @@
 // project's licensing care makes an extra library a decision rather than a
 // convenience.
 
-#include "noto/entities.hpp"
+#include "ncad/entities.hpp"
 
-#include "noto/dxf.hpp"
-#include "noto/ecs.hpp"
-#include "noto/render.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/render.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // A control point in homogeneous form, which is what makes a rational curve
@@ -458,4 +458,4 @@ void Spline::dxf_write(DxfWriter& w) const {
     w.code(8, w.layer_name(*this));
 }
 
-}  // namespace noto
+}  // namespace ncad

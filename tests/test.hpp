@@ -61,14 +61,14 @@ inline int run_all() {
 }  // namespace nototest
 
 // Two levels so __LINE__ expands to its value before being pasted.
-#define NOTO_CAT_(a, b) a##b
-#define NOTO_CAT(a, b) NOTO_CAT_(a, b)
+#define NCAD_CAT_(a, b) a##b
+#define NCAD_CAT(a, b) NCAD_CAT_(a, b)
 
 #define TEST_CASE(name)                                                     \
-    static void NOTO_CAT(noto_test_fn_, __LINE__)();                        \
-    static ::nototest::Registrar NOTO_CAT(noto_test_reg_, __LINE__)(        \
-        name, &NOTO_CAT(noto_test_fn_, __LINE__));                          \
-    static void NOTO_CAT(noto_test_fn_, __LINE__)()
+    static void NCAD_CAT(ncad_test_fn_, __LINE__)();                        \
+    static ::nototest::Registrar NCAD_CAT(ncad_test_reg_, __LINE__)(        \
+        name, &NCAD_CAT(ncad_test_fn_, __LINE__));                          \
+    static void NCAD_CAT(ncad_test_fn_, __LINE__)()
 
 #define CHECK(expr)                                                         \
     do {                                                                    \
@@ -102,7 +102,7 @@ inline int run_all() {
 
 #define CHECK_VEC(v, ex, ey, ez, eps)                                       \
     do {                                                                    \
-        const ::noto::Vec3 v_ = (v);                                        \
+        const ::ncad::Vec3 v_ = (v);                                        \
         CHECK_NEAR(v_.x, (ex), (eps));                                      \
         CHECK_NEAR(v_.y, (ey), (eps));                                      \
         CHECK_NEAR(v_.z, (ez), (eps));                                      \

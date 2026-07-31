@@ -7,11 +7,11 @@
 
 #include "test.hpp"
 
-#include "noto/font.hpp"
+#include "ncad/font.hpp"
 
 #include <string>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

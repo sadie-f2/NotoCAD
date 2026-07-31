@@ -3,17 +3,17 @@
 
 #include "test.hpp"
 
-#include "noto/command.hpp"
-#include "noto/lisp/command_input.hpp"
-#include "noto/lisp/eval.hpp"
-#include "noto/lisp/reader.hpp"
+#include "ncad/command.hpp"
+#include "ncad/lisp/command_input.hpp"
+#include "ncad/lisp/eval.hpp"
+#include "ncad/lisp/reader.hpp"
 #include "prompt.hpp"
 
 #include <string>
 #include <vector>
 
-using namespace noto;
-using namespace noto::app;
+using namespace ncad;
+using namespace ncad::app;
 
 namespace {
 

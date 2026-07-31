@@ -11,12 +11,12 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/dxf.hpp"
-#include "noto/dxf_read.hpp"
-#include "noto/entities.hpp"
-#include "noto/font.hpp"
-#include "noto/render.hpp"
+#include "ncad/database.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/dxf_read.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/font.hpp"
+#include "ncad/render.hpp"
 
 #include <cmath>
 #include <memory>
@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

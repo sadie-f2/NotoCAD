@@ -3,14 +3,14 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/entities.hpp"
-#include "noto/osnap_search.hpp"
-#include "noto/viewport.hpp"
+#include "ncad/database.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/osnap_search.hpp"
+#include "ncad/viewport.hpp"
 
 #include <memory>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

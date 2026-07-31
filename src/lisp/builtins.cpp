@@ -6,8 +6,8 @@
 // R12 arithmetic is type-sensitive: an operation on integers yields an integer,
 // and one real argument makes the whole result real. (/ 7 2) is 3, not 3.5.
 // That is not a rounding artifact to be smoothed over -- LISP files depend on it.
-#include "noto/lisp/eval.hpp"
-#include "noto/lisp/reader.hpp"
+#include "ncad/lisp/eval.hpp"
+#include "ncad/lisp/reader.hpp"
 
 #include "entity_subrs.hpp"
 #include "command_subr.hpp"
@@ -28,7 +28,7 @@
 #include <string_view>
 #include <vector>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 // --- argument helpers -------------------------------------------------------
@@ -922,4 +922,4 @@ const SubrDef* subr_table(std::size_t& count) {
     return kSubrs;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

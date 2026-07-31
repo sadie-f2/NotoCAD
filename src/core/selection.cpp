@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/selection.hpp"
+#include "ncad/selection.hpp"
 
 #include <algorithm>
 
-namespace noto {
+namespace ncad {
 
 bool SelectionRegion::contains(const Vec3& p) const {
     const Vec3 d = p - origin;
@@ -44,4 +44,4 @@ void SelectionSet::set_region(const SelectionRegion& r) {
     has_region_ = true;
 }
 
-}  // namespace noto
+}  // namespace ncad

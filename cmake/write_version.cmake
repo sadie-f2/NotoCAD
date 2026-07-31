@@ -6,12 +6,12 @@
 # committed, and a version stamp that lies is worse than none.
 execute_process(
   COMMAND git -C "${SRC}" rev-parse --short HEAD
-  OUTPUT_VARIABLE NOTO_GIT_HASH
+  OUTPUT_VARIABLE NCAD_GIT_HASH
   OUTPUT_STRIP_TRAILING_WHITESPACE
   ERROR_QUIET)
 
-if(NOT NOTO_GIT_HASH)
-  set(NOTO_GIT_HASH "unknown")
+if(NOT NCAD_GIT_HASH)
+  set(NCAD_GIT_HASH "unknown")
 endif()
 
 # configure_file only rewrites when the content changes, so this does not force

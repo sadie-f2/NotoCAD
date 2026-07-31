@@ -121,9 +121,9 @@ ctest --test-dir build          # unit suite plus CLI smoke tests
 ./build/src/app/ncad            # the application
 ```
 
-Options: `NOTO_BUILD_GUI` (off), `NOTO_WITH_DWG` (off), `NOTO_BUILD_TESTS` (on).
+Options: `NCAD_BUILD_GUI` (off), `NCAD_WITH_DWG` (off), `NCAD_BUILD_TESTS` (on).
 
-`-DNOTO_BUILD_GUI=ON` adds `./build/src/gui/ncad_gui`, the Qt shell: the same
+`-DNCAD_BUILD_GUI=ON` adds `./build/src/gui/ncad_gui`, the Qt shell: the same
 drawing, engine and interpreter as `ncad`, with a viewport. Middle-drag pans,
 shift+middle orbits, the wheel zooms about the cursor, Home is extents and
 Ctrl+Home is plan. Typing anywhere goes to the command line, and a left click
@@ -135,10 +135,10 @@ Sanitizer build, worth running after any arena or interpreter work:
 ```sh
 cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
       -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
-cmake --build build-asan && ./build-asan/tests/noto_tests
+cmake --build build-asan && ./build-asan/tests/ncad_tests
 ```
 
-`./build/tools/noto_gen_sample out.dxf` emits a drawing containing entities on
+`./build/tools/ncad_gen_sample out.dxf` emits a drawing containing entities on
 tilted planes. Opening it in another CAD application is the real correctness
 gate for the DXF and ECS code — headless tests only prove self-consistency.
 
@@ -148,7 +148,7 @@ gate for the DXF and ECS code — headless tests only prove self-consistency.
 small, text, and fully documented.
 
 **DWG is optional and import-only**, via [LibreDWG][libredwg], enabled with
-`-DNOTO_WITH_DWG=ON`. It is off by default. DWG export is not planned, and
+`-DNCAD_WITH_DWG=ON`. It is off by default. DWG export is not planned, and
 LibreDWG types do not appear in core headers — conversion happens at the
 boundary through LibreDWG's own structs.
 
@@ -161,7 +161,7 @@ The license applies to all content in this repository, including documentation.
 
 One exception applies to *binaries*, not to the source:
 
-> LibreDWG is licensed under the GPLv3. A binary built with `-DNOTO_WITH_DWG=ON`
+> LibreDWG is licensed under the GPLv3. A binary built with `-DNCAD_WITH_DWG=ON`
 > links it, and so that binary must be conveyed under the GPLv3. This does not
 > affect the NotoCAD source, which remains BSD-3-Clause, and it does not affect
 > the default build, which links no GPL code.

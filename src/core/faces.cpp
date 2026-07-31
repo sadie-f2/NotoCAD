@@ -2,12 +2,12 @@
 // Copyright (c) 2026, Sadie Forbes
 
 // POINT, SOLID and 3DFACE.
-#include "noto/dxf.hpp"
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
-#include "noto/render.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/render.hpp"
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // A point has no size of its own, so its marker is sized from the flattening
@@ -174,4 +174,4 @@ void Face::dxf_write(DxfWriter& w) const {
     if (edge_flags_ != 0) w.code(70, static_cast<int>(edge_flags_));
 }
 
-}  // namespace noto
+}  // namespace ncad

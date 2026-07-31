@@ -7,18 +7,18 @@
 // it on demand. That is the whole design decision -- stripping the inline codes
 // at read time is cheaper and destroys the entity, so a file opened and saved
 // would lose its formatting for good.
-#include "noto/dxf.hpp"
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
-#include "noto/font.hpp"
-#include "noto/render.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/font.hpp"
+#include "ncad/render.hpp"
 
 #include <cmath>
 #include <cstddef>
 #include <numbers>
 #include <vector>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // AutoCAD's default line spacing is "3-on-5": five units of leading for three
@@ -382,4 +382,4 @@ void MText::dxf_write(DxfWriter& w) const {
     }
 }
 
-}  // namespace noto
+}  // namespace ncad

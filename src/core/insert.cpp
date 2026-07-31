@@ -8,16 +8,16 @@
 // definition under an accumulated transform and is depth-guarded, because a DXF
 // is data from elsewhere and may claim a cycle that cannot occur in a drawing
 // this program built.
-#include "noto/entities.hpp"
+#include "ncad/entities.hpp"
 
-#include "noto/dxf.hpp"
-#include "noto/ecs.hpp"
-#include "noto/render.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/render.hpp"
 
 #include <cmath>
 #include <numbers>
 
-namespace noto {
+namespace ncad {
 
 BlockDef BlockDef::clone() const {
     BlockDef copy;
@@ -351,4 +351,4 @@ Mat4 compose_placement(const InsertPlacement& p, const Vec3& base) {
     return Mat4::translation(p.insertion - linear.transform_point(base)) * linear;
 }
 
-}  // namespace noto
+}  // namespace ncad

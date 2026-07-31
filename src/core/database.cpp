@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/database.hpp"
+#include "ncad/database.hpp"
 
-#include "noto/entities.hpp"
+#include "ncad/entities.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace noto {
+namespace ncad {
 
 double Linetype::pattern_length() const {
     double total = 0.0;
@@ -408,4 +408,4 @@ LinetypeId Database::find_linetype(const std::string& name) const {
     return kInvalidLinetype;
 }
 
-}  // namespace noto
+}  // namespace ncad

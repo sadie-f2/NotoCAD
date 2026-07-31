@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/about.hpp"
+#include "ncad/about.hpp"
 
-#include "noto/commands.hpp"
-#include "noto/version.hpp"
+#include "ncad/commands.hpp"
+#include "ncad/version.hpp"
 
-namespace noto {
+namespace ncad {
 
 std::string about_text() {
     std::string s;
 
     s += "NotoCAD ";
-    s += kNotoVersion;
+    s += kNcadVersion;
     s += "  (";
-    s += kNotoGitHash;
+    s += kNcadGitHash;
     s += ")\n";
     s += "A command-line-first CAD tool modelled on AutoCAD R12.\n";
     s += "Copyright (c) 2026, Sadie Forbes.\n";
@@ -67,7 +67,7 @@ std::string about_text() {
     s += "aborts the build if it finds a static Qt.\n";
     s += "\n";
 
-#ifdef NOTO_WITH_DWG
+#ifdef NCAD_WITH_DWG
     // Reached only in a build that actually links LibreDWG. The CMake option
     // exists but currently defines nothing, so this is the branch that goes
     // live when DWG import is wired rather than a claim made in advance.
@@ -96,4 +96,4 @@ std::string about_text() {
     return s;
 }
 
-}  // namespace noto
+}  // namespace ncad

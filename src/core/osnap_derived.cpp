@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/osnap_derived.hpp"
+#include "ncad/osnap_derived.hpp"
 
-#include "noto/ecs.hpp"
-#include "noto/intersect.hpp"
-#include "noto/entities.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/intersect.hpp"
+#include "ncad/entities.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <numbers>
 #include <vector>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // Dispatch without RTTI, as the whole kernel does: the type enum is the tag,
@@ -718,4 +718,4 @@ int intersect_entities(const Entity& a, const Entity& b, Vec3 out[kMaxIntersecti
     return count;
 }
 
-}  // namespace noto
+}  // namespace ncad

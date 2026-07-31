@@ -19,15 +19,15 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/entities.hpp"
-#include "noto/ecs.hpp"
-#include "noto/intersect.hpp"
+#include "ncad/database.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/intersect.hpp"
 
 #include <cmath>
 #include <numbers>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

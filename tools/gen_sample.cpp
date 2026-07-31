@@ -11,12 +11,12 @@
 // The drawing itself lives in sample_drawing.cpp, shared with the viewer.
 #include "sample_drawing.hpp"
 
-#include "noto/database.hpp"
-#include "noto/dxf.hpp"
+#include "ncad/database.hpp"
+#include "ncad/dxf.hpp"
 
 #include <cstdio>
 
-using namespace noto;
+using namespace ncad;
 
 int main(int argc, char** argv) {
     const char* path = (argc > 1) ? argv[1] : "notocad_sample.dxf";

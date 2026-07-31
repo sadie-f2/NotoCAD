@@ -19,7 +19,7 @@ class QPlainTextEdit;
 
 class QKeyEvent;
 
-namespace noto {
+namespace ncad {
 
 class CommandLineWidget : public QWidget {
     Q_OBJECT
@@ -86,4 +86,4 @@ private:
     qsizetype recall_pos_{0};  // qsizetype, not int: it indexes recall_
 };
 
-}  // namespace noto
+}  // namespace ncad

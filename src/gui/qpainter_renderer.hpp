@@ -12,14 +12,14 @@
 // path. Entities emit world-space polylines; projection to pixels happens here.
 #pragma once
 
-#include "noto/render.hpp"
-#include "noto/viewport.hpp"
+#include "ncad/render.hpp"
+#include "ncad/viewport.hpp"
 
 #include <QColor>
 #include <QPainter>
 #include <QPolygonF>
 
-namespace noto {
+namespace ncad {
 
 class Database;
 
@@ -47,4 +47,4 @@ private:
     QPolygonF scratch_;  // reused across entities to keep paintEvent allocation-free
 };
 
-}  // namespace noto
+}  // namespace ncad

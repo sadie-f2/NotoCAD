@@ -6,14 +6,14 @@
 // translation unit. Not an installed header.
 #pragma once
 
-#include "noto/lisp/eval.hpp"
+#include "ncad/lisp/eval.hpp"
 
-namespace noto {
+namespace ncad {
 class Database;
 class Entity;
-}  // namespace noto
+}  // namespace ncad
 
-namespace noto::lisp {
+namespace ncad::lisp {
 
 bool subr_entmake(Interp& in, const Value* args, std::size_t argc, Value& out);
 bool subr_entget(Interp& in, const Value* args, std::size_t argc, Value& out);
@@ -28,4 +28,4 @@ bool subr_entnext(Interp& in, const Value* args, std::size_t argc, Value& out);
 // on the other.
 Value entity_to_alist(Context& ctx, const Database& db, const Entity& ent);
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

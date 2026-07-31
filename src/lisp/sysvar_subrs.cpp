@@ -16,12 +16,12 @@
 // for reasons nobody can see.
 #include "sysvar_subrs.hpp"
 
-#include "noto/database.hpp"
-#include "noto/sysvar.hpp"
+#include "ncad/database.hpp"
+#include "ncad/sysvar.hpp"
 
 #include <string>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 Sysvars* require_sysvars(Interp& in, const char* who) {
@@ -153,4 +153,4 @@ bool subr_setvar(Interp& in, const Value* a, std::size_t, Value& out) {
     return true;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

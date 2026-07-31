@@ -24,7 +24,7 @@ The restraint rules are enforced by the build (`-fno-rtti`, warnings-as-noise-fr
 **File formats: DXF-first, DWG optional.** Native R12 DXF read/write lives in-tree —
 the format is small, text, and fully documented, and it is the actual interchange
 path for this project's workflow. LibreDWG is an *optional* compile-time module
-(`-DNOTO_WITH_DWG=ON`) for DWG **import** only. This keeps GPLv3 out of the core and
+(`-DNCAD_WITH_DWG=ON`) for DWG **import** only. This keeps GPLv3 out of the core and
 avoids depending on LibreDWG's weaker R12 write path. DWG export is not planned.
 
 Consequence: there is no `serialize_dwg` slot on entities. DWG I/O converts at the
@@ -37,7 +37,7 @@ licensed subject matter.
 
 Incorporating GPLv3 code makes the *distributed binary* GPLv3, not the project. That
 is why DWG is a compile-time option rather than a dependency: the default build links
-no GPL code and stays BSD-3, and only a `NOTO_WITH_DWG=ON` binary must be conveyed
+no GPL code and stays BSD-3, and only a `NCAD_WITH_DWG=ON` binary must be conveyed
 under GPLv3. Permissive source flows into GPLv3 cleanly, so nothing is lost. This is
 the wall FreeCAD and LibreCAD hit from the other side, being GPLv2.
 
@@ -60,7 +60,7 @@ finds a static Qt — the licensing decision is enforced, not just documented.
 **Phase order.** Each phase is usable on its own, and the risk climbs steeply at
 the end:
 
-1. *(done)* Command state machine — `include/noto/command.hpp`.
+1. *(done)* Command state machine — `include/ncad/command.hpp`.
 2. *(done)* Read-only viewer: `draw()` on the entity vtable (`render.hpp`,
    `scene.hpp`), viewport/camera (`viewport.hpp`), pan/zoom/orbit. The second
    independent check on the geometry after AutoCAD 2026, and it earned its
@@ -118,7 +118,7 @@ MIRROR, ARRAY, ROTATE, ROTATE3D, ALIGN and block insertion all route through it.
 POLYLINE, TEXT and SOLID as 2D coordinates in their own entity coordinate system plus
 an extrusion vector (DXF group 210). Without the Arbitrary Axis Algorithm in the
 kernel from day one, any such entity not parallel to world XY serialises wrong, osnaps
-land in the wrong space, and UCS has nowhere to live. See `include/noto/ecs.hpp`.
+land in the wrong space, and UCS has nowhere to live. See `include/ncad/ecs.hpp`.
 
 **Commands are resumable state machines.** Keyboard, script files, and AutoLISP
 `(command ...)` are three implementations of one abstract input source. Every prompt
@@ -228,10 +228,10 @@ turned out to answer most of what dimensions were wanted for.
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build
-./build/tests/noto_tests        # or: ctest --test-dir build
+./build/tests/ncad_tests        # or: ctest --test-dir build
 ```
 
-Options: `NOTO_BUILD_GUI` (off), `NOTO_WITH_DWG` (off), `NOTO_BUILD_TESTS` (on).
+Options: `NCAD_BUILD_GUI` (off), `NCAD_WITH_DWG` (off), `NCAD_BUILD_TESTS` (on).
 
 Tests use a minimal in-tree harness (`tests/test.hpp`) with doctest-compatible macro
 names, so it can be swapped for doctest or Catch2 without touching test bodies.
@@ -241,16 +241,16 @@ Sanitizer build, worth running after any arena or interpreter work:
 ```sh
 cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
       -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
-cmake --build build-asan && ./build-asan/tests/noto_tests
+cmake --build build-asan && ./build-asan/tests/ncad_tests
 ```
 
-`./build/tools/noto_gen_sample out.dxf` emits a drawing containing entities on
+`./build/tools/ncad_gen_sample out.dxf` emits a drawing containing entities on
 tilted planes. Opening it in another CAD application is the real correctness gate
 for the DXF and ECS code — headless tests only prove self-consistency.
 
 `ABOUT` prints the version, the build's git hash and the licence of every
 component the binary actually carries — conditioned on the build, so a
-`NOTO_WITH_DWG=ON` binary says it must be conveyed under GPLv3 and a default one
+`NCAD_WITH_DWG=ON` binary says it must be conveyed under GPLv3 and a default one
 says it links no GPL code. The Hershey acknowledgements are there because that
 licence requires them to travel with the font data, and the data is compiled in;
 a test asserts they are present, so falling out of compliance fails the suite.
@@ -259,22 +259,23 @@ The version's patch number is the command count — 0.0.54 means 54 commands —
 and `tests/test_registry.cpp` asserts the two agree. Adding a command means
 raising the literal there and `project(VERSION)` in the root CMakeLists.
 
-`cmake -B build -DNOTO_BUILD_GUI=ON` adds `./build/src/gui/ncad_gui`, the Qt
+`cmake -B build -DNCAD_BUILD_GUI=ON` adds `./build/src/gui/ncad_gui`, the Qt
 shell: the same drawing, engine and interpreter as `ncad`, with a viewport.
 Middle-drag pans, shift+middle orbits, wheel zooms about the cursor, Home is
 extents and Ctrl+Home is plan. Typing anywhere goes to the command line, and a
 left click answers a point prompt. Rendering the same database two ways is a
 correctness check worth having — the two disagreeing is a real signal.
 
-Executables are `ncad*`; libraries are `noto_*`.
+Executables are `ncad*`; libraries are `ncad_*`, except `ncad_gui_lib`, which is
+suffixed `_lib` to avoid colliding with the `ncad_gui` executable.
 
 ## Layout
 
 ```
-include/noto/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, dxf,
+include/ncad/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, dxf,
                      command, commands, font, input_text, osnap_derived,
                      osnap_search, pick, render, scene, sysvar, viewport
-include/noto/lisp/   arena, value, reader, eval
+include/ncad/lisp/   arena, value, reader, eval
 src/core/            geometry kernel, entities, database, DXF writer, commands
 src/lisp/            interpreter: arena, values, reader, eval, builtins, subrs
 src/app/             ncad: the R12 command prompt, and PromptSession, which the

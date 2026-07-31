@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/osnap_search.hpp"
+#include "ncad/osnap_search.hpp"
 
-#include "noto/database.hpp"
-#include "noto/osnap_derived.hpp"
-#include "noto/scene.hpp"
+#include "ncad/database.hpp"
+#include "ncad/osnap_derived.hpp"
+#include "ncad/scene.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 struct Candidate {
@@ -245,4 +245,4 @@ OsnapHit osnap_search(const Database& db, const Viewport& vp, const ScreenPoint&
     return candidates.empty() ? OsnapHit{} : candidates.front();
 }
 
-}  // namespace noto
+}  // namespace ncad

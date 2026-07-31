@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/lisp/command_input.hpp"
+#include "ncad/lisp/command_input.hpp"
 
-#include "noto/input_text.hpp"
+#include "ncad/input_text.hpp"
 
 #include <string>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 // A LISP point is a list of two or three numbers.
@@ -94,4 +94,4 @@ bool value_to_input(const Prompt& prompt, const Value& v, InputValue& out, std::
     return false;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

@@ -5,7 +5,7 @@
 
 #include <cstddef>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 char fold(char c, bool on) {
@@ -136,4 +136,4 @@ bool wildcard_match(std::string_view text, std::string_view pattern, bool fold_c
     return false;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

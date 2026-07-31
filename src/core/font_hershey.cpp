@@ -18,11 +18,11 @@
 // headless tests need no fixtures, and a drawing cannot fail to render because
 // a font went missing.
 
-#include "noto/font.hpp"
+#include "ncad/font.hpp"
 
 #include <cstddef>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // The .jhf coordinate system, MEASURED from the data rather than assumed:
@@ -243,4 +243,4 @@ const StrokeFont& StrokeFont::romans() {
     return font;
 }
 
-}  // namespace noto
+}  // namespace ncad

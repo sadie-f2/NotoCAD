@@ -3,14 +3,14 @@
 
 #include "test.hpp"
 
-#include "noto/lisp/eval.hpp"
-#include "noto/lisp/value.hpp"
+#include "ncad/lisp/eval.hpp"
+#include "ncad/lisp/value.hpp"
 
 #include <sstream>
 #include <string>
 
-using namespace noto;
-using namespace noto::lisp;
+using namespace ncad;
+using namespace ncad::lisp;
 
 namespace {
 

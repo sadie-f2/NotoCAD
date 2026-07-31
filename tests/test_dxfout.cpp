@@ -3,23 +3,23 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/lisp/eval.hpp"
+#include "ncad/database.hpp"
+#include "ncad/lisp/eval.hpp"
 
 #include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <string>
 
-using namespace noto;
-using namespace noto::lisp;
+using namespace ncad;
+using namespace ncad::lisp;
 
 namespace {
 
 // Writes into the build directory rather than a fixed path, so a parallel run
 // cannot have two cases fighting over one file.
 std::string temp_path(const char* name) {
-    return std::string("noto_test_") + name + ".dxf";
+    return std::string("ncad_test_") + name + ".dxf";
 }
 
 struct Fixture {

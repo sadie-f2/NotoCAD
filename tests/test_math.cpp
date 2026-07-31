@@ -3,13 +3,13 @@
 
 #include "test.hpp"
 
-#include "noto/ecs.hpp"
-#include "noto/mat4.hpp"
-#include "noto/vec3.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/mat4.hpp"
+#include "ncad/vec3.hpp"
 
 #include <numbers>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 constexpr double kPi = std::numbers::pi;

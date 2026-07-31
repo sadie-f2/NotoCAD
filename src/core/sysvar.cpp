@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/sysvar.hpp"
+#include "ncad/sysvar.hpp"
 
-#include "noto/undo.hpp"
+#include "ncad/undo.hpp"
 
 #include <cstddef>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // R12 defaults. The ranges are R12's own limits, and rejecting rather than
@@ -306,4 +306,4 @@ const char* sysvar_set_status_message(Sysvars::SetStatus s) {
     return "unknown error";
 }
 
-}  // namespace noto
+}  // namespace ncad

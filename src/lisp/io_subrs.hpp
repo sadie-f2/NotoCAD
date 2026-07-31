@@ -18,9 +18,9 @@
 // means the file it named.
 #pragma once
 
-#include "noto/lisp/eval.hpp"
+#include "ncad/lisp/eval.hpp"
 
-namespace noto::lisp {
+namespace ncad::lisp {
 
 // (open "path" "r"|"w"|"a") -> file descriptor, or nil if it could not be
 // opened. A missing file is a condition a script tests for, not an error.
@@ -48,4 +48,4 @@ bool subr_write_char(Interp& in, const Value* args, std::size_t n, Value& out);
 // to open: a script asks this before deciding whether to read.
 bool subr_findfile(Interp& in, const Value* args, std::size_t n, Value& out);
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

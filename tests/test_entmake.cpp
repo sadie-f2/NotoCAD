@@ -3,17 +3,17 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
-#include "noto/lisp/eval.hpp"
+#include "ncad/database.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/lisp/eval.hpp"
 
 #include <cmath>
 #include <sstream>
 #include <string>
 
-using namespace noto;
-using namespace noto::lisp;
+using namespace ncad;
+using namespace ncad::lisp;
 
 namespace {
 

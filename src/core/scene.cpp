@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/scene.hpp"
+#include "ncad/scene.hpp"
 
-#include "noto/database.hpp"
-#include "noto/entity.hpp"
+#include "ncad/database.hpp"
+#include "ncad/entity.hpp"
 
 #include <algorithm>
 
-namespace noto {
+namespace ncad {
 
 bool entity_visible(const Database& db, const Entity& e) {
     const LayerId id = e.props().layer;
@@ -69,4 +69,4 @@ void draw_entities(const std::vector<EntityPtr>& entities, const DrawContext& ct
     }
 }
 
-}  // namespace noto
+}  // namespace ncad

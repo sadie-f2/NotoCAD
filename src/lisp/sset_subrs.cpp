@@ -16,16 +16,16 @@
 #include "entity_subrs.hpp"
 #include "wildcard.hpp"
 
-#include "noto/command.hpp"
-#include "noto/database.hpp"
-#include "noto/pick.hpp"
-#include "noto/render.hpp"
-#include "noto/scene.hpp"
-#include "noto/selection.hpp"
+#include "ncad/command.hpp"
+#include "ncad/database.hpp"
+#include "ncad/pick.hpp"
+#include "ncad/render.hpp"
+#include "ncad/scene.hpp"
+#include "ncad/selection.hpp"
 
 #include <string>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 namespace {
 
 Database* require_db(Interp& in, const char* who) {
@@ -360,4 +360,4 @@ bool subr_ssmemb(Interp& in, const Value* a, std::size_t, Value& out) {
     return true;
 }
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

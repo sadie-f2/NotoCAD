@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/viewport.hpp"
+#include "ncad/viewport.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <numbers>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
@@ -215,4 +215,4 @@ void Viewport::orbit_pixels(double dx, double dy) {
     set_elevation(elevation_ + dy * kOrbitRadiansPerPixel);
 }
 
-}  // namespace noto
+}  // namespace ncad

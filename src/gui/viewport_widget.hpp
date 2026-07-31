@@ -16,10 +16,10 @@
 // headless test; what is left here is routing.
 #pragma once
 
-#include "noto/command.hpp"
-#include "noto/osnap_search.hpp"
-#include "noto/view_control.hpp"
-#include "noto/viewport.hpp"
+#include "ncad/command.hpp"
+#include "ncad/osnap_search.hpp"
+#include "ncad/view_control.hpp"
+#include "ncad/viewport.hpp"
 
 #include <QColor>
 #include <QPoint>
@@ -28,7 +28,7 @@
 
 #include <vector>
 
-namespace noto {
+namespace ncad {
 
 class Database;
 
@@ -184,4 +184,4 @@ private:
     std::vector<Viewport> view_stack_;
 };
 
-}  // namespace noto
+}  // namespace ncad

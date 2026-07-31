@@ -15,12 +15,12 @@
 #include <cstdlib>
 #include <string>
 
-using namespace noto;
+using namespace ncad;
 
 TEST_CASE("iperl: missing is reported, not fatal") {
     // A path that cannot exist, so this exercises the unavailable path on a
     // machine that does have perl and iperl installed.
-    ::setenv("NOTO_IPERL", "/nonexistent/definitely/not/iperl.pl", 1);
+    ::setenv("NCAD_IPERL", "/nonexistent/definitely/not/iperl.pl", 1);
     CHECK(app::IperlSession::script_path().empty());
 
     app::IperlSession session;
@@ -31,25 +31,25 @@ TEST_CASE("iperl: missing is reported, not fatal") {
     // The message has to say what to do about it, since the answer is almost
     // always "it is not installed" rather than "it is broken".
     CHECK(!out.empty());
-    CHECK(out.find("NOTO_IPERL") != std::string::npos);
+    CHECK(out.find("NCAD_IPERL") != std::string::npos);
 
-    ::unsetenv("NOTO_IPERL");
+    ::unsetenv("NCAD_IPERL");
 }
 
 TEST_CASE("iperl: a multi-line expression is refused rather than desynchronising") {
     // One expression per line is the protocol, so an embedded newline would be
     // read as two requests and every reply after it would answer the wrong
     // question for the rest of the session. Worth refusing loudly.
-    ::setenv("NOTO_IPERL", "/nonexistent/not/here.pl", 1);
+    ::setenv("NCAD_IPERL", "/nonexistent/not/here.pl", 1);
     app::IperlSession session;
     std::string out;
     CHECK(!session.evaluate("2+2\n3+3", out));
     CHECK(!out.empty());
-    ::unsetenv("NOTO_IPERL");
+    ::unsetenv("NCAD_IPERL");
 }
 
 TEST_CASE("iperl: arithmetic, when it is actually installed") {
-    ::unsetenv("NOTO_IPERL");
+    ::unsetenv("NCAD_IPERL");
     app::IperlSession session;
     if (!session.available()) {
         std::printf("       (iperl not installed here; skipping the live checks)\n");

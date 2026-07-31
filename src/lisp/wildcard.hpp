@@ -24,7 +24,7 @@
 
 #include <string_view>
 
-namespace noto::lisp {
+namespace ncad::lisp {
 
 // True when `text` matches `pattern`.
 //
@@ -34,4 +34,4 @@ namespace noto::lisp {
 // WALLS. One implementation with a flag rather than two that drift.
 bool wildcard_match(std::string_view text, std::string_view pattern, bool fold_case);
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

@@ -9,7 +9,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-namespace noto::app {
+namespace ncad::app {
 namespace {
 
 // End of transmission. iperl writes it after every response, followed by one
@@ -33,7 +33,7 @@ std::string home_relative(const char* tail) {
 std::string IperlSession::script_path() {
     // The override comes first so a different iperl -- or none -- can be chosen
     // without touching the search below.
-    if (const char* env = std::getenv("NOTO_IPERL"); env != nullptr && *env != '\0') {
+    if (const char* env = std::getenv("NCAD_IPERL"); env != nullptr && *env != '\0') {
         return readable_file(env) ? std::string(env) : std::string{};
     }
 
@@ -53,7 +53,7 @@ bool IperlSession::start() {
 
     const std::string script = script_path();
     if (script.empty()) {
-        why_unavailable_ = "iperl not found (set NOTO_IPERL to its path)";
+        why_unavailable_ = "iperl not found (set NCAD_IPERL to its path)";
         return false;
     }
 
@@ -192,4 +192,4 @@ bool IperlSession::evaluate(const std::string& expr, std::string& out) {
     return status == '0';
 }
 
-}  // namespace noto::app
+}  // namespace ncad::app

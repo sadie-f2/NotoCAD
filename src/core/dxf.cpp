@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/dxf.hpp"
+#include "ncad/dxf.hpp"
 
-#include "noto/database.hpp"
-#include "noto/ecs.hpp"
+#include "ncad/database.hpp"
+#include "ncad/ecs.hpp"
 
 #include <cstdio>
 #include <fstream>
 #include <streambuf>
 #include <ostream>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 // DXF is CRLF-terminated. Streams are opened in binary mode so this is exact
@@ -584,4 +584,4 @@ bool write_dxf_file(const Database& db, const std::string& path, DxfVersion vers
     return out.good();
 }
 
-}  // namespace noto
+}  // namespace ncad

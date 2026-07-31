@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/commands.hpp"
+#include "ncad/commands.hpp"
 
-#include "noto/curve_edit.hpp"
-#include "noto/about.hpp"
-#include "noto/paths.hpp"
-#include "noto/intersect.hpp"
-#include "noto/osnap_derived.hpp"
-#include "noto/pick.hpp"
-#include "noto/scene.hpp"
+#include "ncad/curve_edit.hpp"
+#include "ncad/about.hpp"
+#include "ncad/paths.hpp"
+#include "ncad/intersect.hpp"
+#include "ncad/osnap_derived.hpp"
+#include "ncad/pick.hpp"
+#include "ncad/scene.hpp"
 
-#include "noto/dxf.hpp"
-#include "noto/dxf_read.hpp"
-#include "noto/entities.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/dxf_read.hpp"
+#include "ncad/entities.hpp"
 
 #include <memory>
 #include <cmath>
@@ -21,7 +21,7 @@
 #include <numbers>
 #include <string>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 std::string upcase(std::string_view s) {
@@ -5804,4 +5804,4 @@ CommandMatch resolve_command_name(std::string_view typed) {
     return resolve_in(typed, command_names(), command_aliases());
 }
 
-}  // namespace noto
+}  // namespace ncad

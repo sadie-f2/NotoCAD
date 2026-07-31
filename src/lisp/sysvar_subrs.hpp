@@ -6,11 +6,11 @@
 // Not an installed header.
 #pragma once
 
-#include "noto/lisp/eval.hpp"
+#include "ncad/lisp/eval.hpp"
 
-namespace noto::lisp {
+namespace ncad::lisp {
 
 bool subr_getvar(Interp& in, const Value* args, std::size_t argc, Value& out);
 bool subr_setvar(Interp& in, const Value* args, std::size_t argc, Value& out);
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

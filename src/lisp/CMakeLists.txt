@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2026, Sadie Forbes
 
-add_library(noto_lisp STATIC
+add_library(ncad_lisp STATIC
   arena.cpp
   value.cpp
   reader.cpp
@@ -19,8 +19,8 @@ add_library(noto_lisp STATIC
   command_input.cpp
 )
 
-target_include_directories(noto_lisp PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(noto_lisp PUBLIC noto_core)
-target_link_libraries(noto_lisp PRIVATE noto_flags)
+target_include_directories(ncad_lisp PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(ncad_lisp PUBLIC ncad_core)
+target_link_libraries(ncad_lisp PRIVATE ncad_flags)
 
-add_library(noto::lisp ALIAS noto_lisp)
+add_library(ncad::lisp ALIAS ncad_lisp)

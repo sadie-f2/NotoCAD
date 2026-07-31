@@ -8,17 +8,17 @@
 // a different bulge from the one it was cut out of. Getting that wrong is
 // invisible on a straight polyline and obvious on a curved one, which is the
 // worst combination, so it is tested directly.
-#include "noto/curve_edit.hpp"
+#include "ncad/curve_edit.hpp"
 
-#include "noto/ecs.hpp"
-#include "noto/entities.hpp"
-#include "noto/intersect.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/intersect.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <numbers>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
@@ -370,4 +370,4 @@ std::size_t break_curve(const Entity& e, double t0, double t1, std::vector<Entit
     return out.size() - before;
 }
 
-}  // namespace noto
+}  // namespace ncad

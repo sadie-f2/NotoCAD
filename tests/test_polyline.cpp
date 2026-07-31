@@ -3,15 +3,15 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/entities.hpp"
-#include "noto/render.hpp"
+#include "ncad/database.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/render.hpp"
 
 #include <cmath>
 #include <memory>
 #include <numbers>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

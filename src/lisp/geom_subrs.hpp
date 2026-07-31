@@ -17,9 +17,9 @@
 // common case, the two agree exactly.
 #pragma once
 
-#include "noto/lisp/eval.hpp"
+#include "ncad/lisp/eval.hpp"
 
-namespace noto::lisp {
+namespace ncad::lisp {
 
 // (polar pt angle distance) -> point, in the world XY plane. Z is carried
 // through from `pt` rather than zeroed, so a script working at a height stays
@@ -50,4 +50,4 @@ bool subr_inters(Interp& in, const Value* args, std::size_t n, Value& out);
 // does not depend on where someone happened to have scrolled to.
 bool subr_osnap(Interp& in, const Value* args, std::size_t n, Value& out);
 
-}  // namespace noto::lisp
+}  // namespace ncad::lisp

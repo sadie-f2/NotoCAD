@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
-#include "noto/render.hpp"
+#include "ncad/render.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <numbers>
 
-namespace noto {
+namespace ncad {
 
 bool DrawContext::visible(const BBox& box) const {
     if (!clip_active) return true;
@@ -72,4 +72,4 @@ int arc_segment_count(double radius, double sweep, double chord_tolerance) {
     return static_cast<int>(n);
 }
 
-}  // namespace noto
+}  // namespace ncad

@@ -8,16 +8,16 @@
 // Every entity emits world-space polylines. Curves are flattened here rather
 // than by the backend -- see render.hpp for why.
 
-#include "noto/entities.hpp"
+#include "ncad/entities.hpp"
 
-#include "noto/ecs.hpp"
-#include "noto/render.hpp"
+#include "ncad/ecs.hpp"
+#include "ncad/render.hpp"
 
 #include <cmath>
 #include <numbers>
 #include <vector>
 
-namespace noto {
+namespace ncad {
 namespace {
 
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
@@ -93,4 +93,4 @@ void Arc::draw(const DrawContext& ctx, Renderer& r) const {
     r.polyline(pts.data(), pts.size(), false);
 }
 
-}  // namespace noto
+}  // namespace ncad

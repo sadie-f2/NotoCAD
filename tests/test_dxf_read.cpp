@@ -3,16 +3,16 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/dxf.hpp"
-#include "noto/dxf_read.hpp"
-#include "noto/entities.hpp"
+#include "ncad/database.hpp"
+#include "ncad/dxf.hpp"
+#include "ncad/dxf_read.hpp"
+#include "ncad/entities.hpp"
 
 #include <memory>
 #include <sstream>
 #include <string>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

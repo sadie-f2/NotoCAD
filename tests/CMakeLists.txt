@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2026, Sadie Forbes
 
-add_executable(noto_tests
+add_executable(ncad_tests
   test_main.cpp
   test_math.cpp
   test_entities.cpp
@@ -61,10 +61,10 @@ add_executable(noto_tests
   test_iperl.cpp
 )
 
-target_include_directories(noto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/app)
-target_link_libraries(noto_tests PRIVATE noto_core noto_lisp noto_app noto_flags)
+target_include_directories(ncad_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/app)
+target_link_libraries(ncad_tests PRIVATE ncad_core ncad_lisp ncad_app ncad_flags)
 
-add_test(NAME noto_tests COMMAND noto_tests)
+add_test(NAME ncad_tests COMMAND ncad_tests)
 
 # Smoke tests for the application binary itself. The unit suite exercises the
 # library; these prove the wiring in main.cpp works and the exit codes are right.

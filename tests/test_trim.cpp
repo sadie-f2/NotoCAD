@@ -21,18 +21,18 @@
 
 #include "test.hpp"
 
-#include "noto/command.hpp"
-#include "noto/commands.hpp"
-#include "noto/curve_edit.hpp"
-#include "noto/database.hpp"
-#include "noto/entities.hpp"
-#include "noto/intersect.hpp"
+#include "ncad/command.hpp"
+#include "ncad/commands.hpp"
+#include "ncad/curve_edit.hpp"
+#include "ncad/database.hpp"
+#include "ncad/entities.hpp"
+#include "ncad/intersect.hpp"
 
 #include <cmath>
 #include <memory>
 #include <numbers>
 
-using namespace noto;
+using namespace ncad;
 
 namespace {
 

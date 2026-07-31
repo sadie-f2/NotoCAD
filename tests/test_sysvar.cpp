@@ -3,12 +3,12 @@
 
 #include "test.hpp"
 
-#include "noto/database.hpp"
-#include "noto/osnap.hpp"
-#include "noto/commands.hpp"
-#include "noto/sysvar.hpp"
+#include "ncad/database.hpp"
+#include "ncad/osnap.hpp"
+#include "ncad/commands.hpp"
+#include "ncad/sysvar.hpp"
 
-using namespace noto;
+using namespace ncad;
 
 using SetStatus = Sysvars::SetStatus;
 
