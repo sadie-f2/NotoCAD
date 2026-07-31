@@ -305,37 +305,30 @@ void Insert::dxf_write(DxfWriter& w) const {
         if (p.rotation != 0.0) w.code(50, p.rotation * 180.0 / std::numbers::pi);
     }
 
-    // The extrusion belongs to AcDbBlockReference, so on a MINSERT it has to be
-    // written BEFORE the second marker -- the same rule that puts an ARC's 210
-    // before AcDbArc. A plain INSERT has only the one class and no such
-    // ordering to get wrong.
+    // THE ARRAY FIELDS ARE AcDbBlockReference'S, and the AcDbMInsertBlock
+    // separator comes after ALL of them, at the end of the record.
     //
-    // And it is written even when it is the default 0,0,1, which
-    // write_extrusion would otherwise omit. It is the LAST of
-    // AcDbBlockReference's fields, so leaving it out is what puts the separator
-    // where the reader is still expecting the parent class -- the same
-    // shape-follows-content fault as the scale factors below, one group
-    // further along. A plain INSERT is unaffected: nothing follows it that
-    // could be misread.
-    if (is_array() && dxf_requires_handles(w.version())) {
-        w.code(210, p.normal.x);
-        w.code(220, p.normal.y);
-        w.code(230, p.normal.z);
-    }
-
+    // That is not where the class hierarchy suggests, and two attempts putting
+    // it before the array fields were both refused with "Class separator for
+    // class AcDbMInsertBlock expected" -- adding the scale, then the extrusion,
+    // on the theory that the parent class was unfinished. It was not: the
+    // published group list for INSERT puts 70, 71, 44, 45 AND 210 under
+    // AcDbBlockReference, so the reader consumes all of them as the parent's
+    // and only then wants the separator. AcDbMInsertBlock contributes no groups
+    // of its own; its marker is a terminator here rather than a heading.
+    //
+    // Recorded at this length because the natural reading of a subclass chain
+    // is the wrong one, and the next person will make the same two attempts.
     if (is_array()) {
-        // A MINSERT is a block reference that then declares itself an
-        // AcDbMInsertBlock; the row and column counts belong to that part of
-        // the class, not to the reference. A plain INSERT stops at
-        // AcDbBlockReference and never reaches here.
-        w.subclass("AcDbMInsertBlock");
         w.code(70, static_cast<int>(columns_));
         w.code(71, static_cast<int>(rows_));
         if (column_spacing_ != 0.0) w.code(44, column_spacing_);
         if (row_spacing_ != 0.0) w.code(45, row_spacing_);
     }
 
-    if (!is_array() || !dxf_requires_handles(w.version())) w.write_extrusion(p.normal);
+    w.write_extrusion(p.normal);
+
+    if (is_array()) w.subclass("AcDbMInsertBlock");
 }
 
 // --- placement decomposition ------------------------------------------------

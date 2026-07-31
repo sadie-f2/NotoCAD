@@ -751,21 +751,20 @@ TEST_CASE("dxf r2000: an INSERT's shape does not depend on its content") {
     CHECK(inserts == 2);
     CHECK(with_scale == 2);
 
-    // The array record carries its extrusion even at the default 0,0,1: it is
-    // the LAST of AcDbBlockReference's fields, so omitting it leaves the
-    // separator where the reader still expects the parent class. A plain
-    // INSERT has nothing after it to be misread and keeps the omission.
-    bool array_has_210 = false;
-    bool plain_has_210 = false;
+    // On a MINSERT the AcDbMInsertBlock separator is the LAST group in the
+    // record: the array fields 70/71/44/45 belong to AcDbBlockReference, not to
+    // the class named after them, so everything precedes the marker and nothing
+    // follows it. Two earlier attempts put it before the array fields, which is
+    // what the class chain suggests and is not what the reader accepts.
+    bool checked_array = false;
     bool is_array_rec = false;
-    bool saw_210 = false;
+    std::string last_group;
+    int last_code = -1;
     auto flush = [&]() {
-        if (is_array_rec) {
-            array_has_210 = array_has_210 || saw_210;
-        } else if (saw_210) {
-            plain_has_210 = true;
-        }
-        saw_210 = false;
+        if (!is_array_rec) return;
+        checked_array = true;
+        CHECK(last_code == 100);
+        CHECK(last_group == "AcDbMInsertBlock");
         is_array_rec = false;
     };
     in_insert = false;
@@ -773,14 +772,18 @@ TEST_CASE("dxf r2000: an INSERT's shape does not depend on its content") {
         if (g.code == 0) {
             if (in_insert) flush();
             in_insert = (g.value == "INSERT");
+            last_code = -1;
+            last_group.clear();
         }
         if (!in_insert) continue;
         if (g.code == 70) is_array_rec = true;
-        if (g.code == 210) saw_210 = true;
+        if (g.code != 0) {
+            last_code = g.code;
+            last_group = g.value;
+        }
     }
     if (in_insert) flush();
-    CHECK(array_has_210);
-    CHECK(!plain_has_210);
+    CHECK(checked_array);
 
     // R12 still omits what is default, and that output is confirmed good.
     const std::vector<Pair> r12 = parse(dump_as(db, DxfVersion::R12), &ok);
