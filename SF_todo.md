@@ -867,18 +867,104 @@ it `save_in_drawing` means OPEN resets it, so choosing R2000 and then opening
 something silently reverts to R12 — which it did, once, before the flag was
 corrected.
 
-#### Not done
+#### CONFIRMED IN AUTOCAD, and the six faults it took to get there
 
-R2000 output has **not been opened in AutoCAD**. Structure is verified by tests —
-handles unique, seed clearing, every owner resolving, sections and tables present
-— and by a lossless round trip through our own reader. That is not the same as a
-real reader accepting it, and the R12 handle bug is the standing proof that
-structural self-checks miss things.
+`tests/acad/r2000_conformance.lsp` — 43 entities, one of every type we can
+make, opened in AutoCAD 2026 and listed clean. MTEXT, both ELLIPSEs and both
+SPLINEs arrive as themselves; the 3D spline reports **Non-Planar**, the bulge
+lands on its segment's starting vertex with the right centre and radius, the
+SOLID's bowtie corner order survives, and all three TEXT justifications come
+back as start/center/end point.
+
+**The arbitrary axis algorithm agrees with AutoCAD's to four decimals.** A
+circle with extrusion (0, 0.4472, 0.8944) gives Ax = (-1,0,0) and
+Ay = (0,-0.8944,0.4472), so ECS (98,26) is world (-98, -23.2544, 11.6272).
+AutoCAD lists -98.0000, -23.2551, 11.6276. That is the second independent
+check `CLAUDE.md` asks for, on the piece it calls foundational.
+
+Every one of the six rejections was **structure, not geometry** — the same
+pattern as the first five. In order, and each pinned by a test:
+
+| AutoCAD said | It was |
+|---|---|
+| `Missing group code 49 in complex linetype` | Every LTYPE dash length needs a group 74 element type after it. The message names the group that IS there. |
+| `Class separator for class AcDbLine expected` | Only ELLIPSE, SPLINE and MTEXT declared a subclass. Every R12-era entity stopped at AcDbEntity. |
+| `Class separator for class AcDbText expected` | The markers were present and mis-ordered: layer, linetype and colour are AcDbEntity's and must precede the concrete marker. AutoCAD tolerated this for a LINE and refused it for a TEXT. |
+| `Unexpected DXF group code: 210` | An ARC's extrusion is AcDbCircle's; only the angles are AcDbArc's. |
+| `Class separator for class AcDbMInsertBlock expected` ×3 | Unsolved. See below. |
+
+Two rules fell out that are worth more than the individual fixes:
+
+- **The shape of a record must not depend on its content.** An optional group
+  omitted immediately before a class separator leaves the reader inside the
+  parent class. TEXT's group 73 and an INSERT's scale and rotation are written
+  unconditionally at R2000 for this reason.
+- **Presence is not the property; position is.** A reader being lenient about
+  one entity says nothing about the next.
+
+And the blind spot that let all of it through: `add_one_of_each()` in
+`tests/test_dxf.cpp` **had no polyline**. POLYLINE is the only entity that
+writes subordinate records, so every structural check walked straight past the
+VERTEX and SEQEND records — which at R2000 had no handles at all. Exactly the
+blind spot that hid the R12 handle bug, where `gen_sample` had no polylines
+either. It has one now.
+
+#### Still not done: MINSERT
+
+AutoCAD refuses it with `Class separator for class AcDbMInsertBlock expected`,
+and has refused **all three placements** of that separator: before the array
+fields; before them with every parent field written out first; and after them at
+the end of the record. Each attempt was reasoning rather than evidence and none
+produced any.
+
+It is held out of the conformance drawing by `*cf-minsert*` — not abandoned, but
+refusing to let one unsolved record hide the state of the other forty-two, which
+is precisely what it was doing. **What it needs is a MINSERT written by AutoCAD
+itself as R2000, to match byte for byte.** Guessing has now cost three rounds.
 
 **Wanted eventually, not now:** Sadie's: modern AutoCAD offers a range of write
 formats and still lists R12 in 2026, so being able to emit AC1015 or later is
 warranted — but nothing needs it yet, and AC1009 remains the interchange
 guarantee.
+
+## A point from LISP is WORLD; a point typed at the prompt is UCS
+
+Found by the conformance drawing rather than by the DXF: station 9 sets a
+rotated UCS and draws at (0,0), and the geometry came back at the **world**
+origin. The UCS command worked; the points bypassed it.
+
+`src/app/prompt.cpp:154` fetches `db_->current_ucs().to_world()` and hands it to
+the point parser, so anything typed is interpreted in the current UCS.
+`src/lisp/command_input.cpp:82` calls `InputValue::of_point(p)` with no
+conversion at all. So `(command "LINE" '(0 0 0))` and typing `0,0` at the same
+prompt mean different points whenever a UCS is active.
+
+**AutoCAD interprets `(command ...)` points in the current UCS**, so this is a
+divergence rather than a choice — but it collides with one that WAS chosen.
+`features.md` records `polar`, `distance` and `angle` as deliberately
+world-coordinate, on the reasoning that the geometry layer has no UCS in it and
+doing them in UCS would make `(command "LINE" (polar p a d))` silently mix two
+frames. That argument assumed command points were world too. They are not, in
+AutoCAD, and the mixing it warns about is what we have: `polar` returns world,
+the prompt reads UCS.
+
+Three ways out, and it needs deciding rather than drifting:
+
+1. **Convert at the LISP boundary** — `command_input.cpp` applies
+   `current_ucs().to_world()` like the terminal does. Matches AutoCAD, and makes
+   `(polar)` the odd one out, which is what `trans` exists to resolve.
+2. **Leave it world and say so.** Defensible for a tool whose stated purpose is
+   generating geometry from analysis data, where there is no UCS and world is
+   what the data is in. But it silently breaks any classic script that sets a
+   UCS.
+3. **`trans`, and make the caller choose.** AutoLISP's own answer, and the
+   honest one, but it does not decide what the DEFAULT is — which is the actual
+   question here.
+
+Note that this is the same trap `CLAUDE.md` already records for tests — "a test
+calling `InputValue::of_point()` bypasses UCS conversion". It is not only tests.
+Station 9 of the conformance drawing is a standing regression test for whichever
+answer is chosen.
 
 What makes it worth recording rather than assuming: the entity set has begun to
 outgrow AC1009. `Ellipse` is held exactly in the database and degrades to a
