@@ -526,6 +526,21 @@ TEST_CASE("dxf r2000: the sections and tables a later reader expects") {
     }
     CHECK(dim_105);
 
+    // R2000 requires the LTYPE table to carry ByLayer and ByBlock by name --
+    // "Missing Default entry ByLayer in SymbolTable:LTYPE" and the file is
+    // refused. They are not linetypes a drawing owns but the two values an
+    // entity's linetype may take instead of naming one, so they are synthesised
+    // rather than stored, and R12 wants neither.
+    bool by_layer = false;
+    bool by_block = false;
+    for (const Pair& g : p) {
+        if (g.code != 2) continue;
+        if (g.value == "ByLayer") by_layer = true;
+        if (g.value == "ByBlock") by_block = true;
+    }
+    CHECK(by_layer);
+    CHECK(by_block);
+
     // R12 has none of them.
     const std::vector<Pair> r12 = parse(dump_as(db, DxfVersion::R12), &ok);
     std::set<std::string> r12_sections;

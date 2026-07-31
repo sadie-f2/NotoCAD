@@ -228,7 +228,27 @@ void DxfWriter::write_tables() {
     begin_section("TABLES");
 
     // LTYPE must precede LAYER, since layers reference linetypes by name.
-    const std::string lt_owner = begin_table("LTYPE", static_cast<int>(db_.linetypes().size()));
+    // R2000 requires the two special entries to be present by name -- "Missing
+    // Default entry ByLayer in SymbolTable:LTYPE" and the whole file is
+    // refused. They are not linetypes a drawing owns; they are the two values
+    // an entity's linetype can take INSTEAD of naming one, so the database has
+    // no reason to hold them and they are synthesised here.
+    const int extra_linetypes = dxf_requires_handles(version_) ? 2 : 0;
+    const std::string lt_owner =
+        begin_table("LTYPE", static_cast<int>(db_.linetypes().size()) + extra_linetypes);
+
+    if (dxf_requires_handles(version_)) {
+        for (const char* name : {"ByBlock", "ByLayer"}) {
+            table_record("LTYPE", lt_owner, "AcDbLinetypeTableRecord");
+            code(2, name);
+            code(70, 0);
+            code(3, "");
+            code(72, 65);
+            code(73, 0);
+            code(40, 0.0);
+        }
+    }
+
     for (const Linetype& lt : db_.linetypes()) {
         table_record("LTYPE", lt_owner, "AcDbLinetypeTableRecord");
         code(2, lt.name);
