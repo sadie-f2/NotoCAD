@@ -927,6 +927,37 @@ formats and still lists R12 in 2026, so being able to emit AC1015 or later is
 warranted — but nothing needs it yet, and AC1009 remains the interchange
 guarantee.
 
+## DXF is very large for arrays of arrays of splines
+
+Reported from use, and not urgent — that drawing exists to push at what the
+engine and the viewport will stand, so it is the extreme case by construction
+rather than a workload to optimise for. Recorded so the measurement starts from
+a question rather than a feeling.
+
+**Wanted: a comparison first, not an optimisation.** The same geometry written
+by AutoCAD, at R12 and at R2000, beside ours. Without that there is no way to
+tell an inefficiency from the format's own cost, and three plausible culprits
+have very different answers:
+
+- **A spline degrading at R12 is a tessellation**, bounded below by
+  `arc_segment_count` at a thousandth of the major axis and clamped to [8, 512].
+  A million of them is a million polylines of up to 512 vertices, and that is
+  the format working as designed rather than a defect. R2000 writes the curve
+  itself and should be dramatically smaller — the one-of-everything drawing went
+  8,397 bytes to 4,525 for exactly this reason.
+- **An ARRAY is N independent entities**, not a reference. R12 has no associative
+  array, so this is honest; but a MINSERT *is* a reference, and an array of
+  arrays could in principle be one MINSERT of a block. That is a real
+  representation question rather than a writer one, and it is the same
+  mechanism the mesh work in phase 13 will want.
+- **`dxf_real` writes full round-trip precision** — up to 17 significant digits
+  per ordinate, three ordinates per point. Shortening it would be lossy and is
+  the wrong lever; it is listed only so it is ruled out deliberately rather than
+  reached for first.
+
+Measure before touching any of it. The likely finding is that R2000 plus MINSERT
+is the whole answer and the writer needs nothing.
+
 ## A point from LISP is WORLD; a point typed at the prompt is UCS
 
 Found by the conformance drawing rather than by the DXF: station 9 sets a
@@ -947,6 +978,21 @@ doing them in UCS would make `(command "LINE" (polar p a d))` silently mix two
 frames. That argument assumed command points were world too. They are not, in
 AutoCAD, and the mixing it warns about is what we have: `polar` returns world,
 the prompt reads UCS.
+
+**DEFERRED, leaning toward option 1.** Sadie's call: the designer convenience
+at the UI does not extend to the API, that split is AutoLISP's own and is
+coherent — commands are the user-facing layer where a UCS is a convenience, the
+database is storage where world is canonical. So align with AutoLISP when it is
+picked up, and punt to the community if one forms around the project. Nothing
+is blocked on it; station 9 of the conformance drawing is the standing test.
+
+One correction to the reasoning below, since it changes what the work is:
+**`polar`, `distance` and `angle` are frame-AGNOSTIC.** They are trigonometry on
+three numbers and return whatever frame they were given. `features.md` records
+them as "world-coordinate rather than UCS" to avoid
+`(command "LINE" (polar p a d))` mixing frames — but that mixing comes from
+where `p` came from, not from `polar`. So converting at the LISP boundary needs
+no change to any of them, and option 1 is smaller than it looks.
 
 Three ways out, and it needs deciding rather than drifting:
 

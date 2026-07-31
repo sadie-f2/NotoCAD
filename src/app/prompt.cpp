@@ -77,6 +77,41 @@ IperlSession& iperl() {
     return session;
 }
 
+// Splits on commas that are NOT inside parentheses or a quoted string, so a
+// point can carry a calculator expression per coordinate while an expression
+// that legitimately contains commas stays in one piece. `=$pi,=$pi,1` is three
+// components; `=join(",",3,4)` is one.
+std::vector<std::string> split_top_level_commas(const std::string& s) {
+    std::vector<std::string> parts;
+    std::size_t start = 0;
+    int depth = 0;
+    bool in_string = false;
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        const char c = s[i];
+        if (in_string) {
+            if (c == '\\' && i + 1 < s.size()) {
+                ++i;
+            } else if (c == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+        } else if (c == '(' || c == '[' || c == '{') {
+            ++depth;
+        } else if (c == ')' || c == ']' || c == '}') {
+            if (depth > 0) --depth;
+        } else if (c == ',' && depth == 0) {
+            parts.push_back(s.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    parts.push_back(s.substr(start));
+    return parts;
+}
+
+
 bool PromptLineSource::from_lisp(const Prompt& prompt, const std::string& source,
                                  InputValue& out) {
     in_.clear_error();
@@ -103,6 +138,37 @@ bool PromptLineSource::next_value(const Prompt& prompt, InputValue& out) {
     // free rather than reimplementing them.
     if (token.size() > 1 && token[0] == '!') {
         return from_lisp(prompt, token.substr(1), out);
+    }
+
+    // A point may carry an expression PER COORDINATE: `=$pi,=$pi,1`. Each
+    // component is evaluated on its own and the results are rejoined, so the
+    // ordinary point parser sees `3.14159...,3.14159...,1` and nothing below
+    // this needs to know a calculator was involved.
+    //
+    // The split ignores commas inside parentheses and strings, which is what
+    // keeps `=join(",",3,4)` a single expression rather than three broken ones.
+    // A component without a leading `=` is passed through as typed, so two of
+    // the three coordinates can be plain numbers.
+    if (token.find(',') != std::string::npos && token.find('=') != std::string::npos) {
+        const std::vector<std::string> parts = split_top_level_commas(token);
+        if (parts.size() > 1) {
+            std::string joined;
+            for (std::size_t k = 0; k < parts.size(); ++k) {
+                const std::string& part = parts[k];
+                if (k != 0) joined += ",";
+                if (part.size() > 1 && part[0] == '=') {
+                    std::string text;
+                    if (!iperl().evaluate(part.substr(1), text)) {
+                        error_ = text;
+                        return false;
+                    }
+                    joined += text;
+                } else {
+                    joined += part;
+                }
+            }
+            token = joined;
+        }
     }
 
     // =expr -- iperl. The result comes back as text and goes through the same
@@ -246,7 +312,31 @@ std::vector<std::string> split_prompt_line(const std::string& line, bool whole_l
 
         const std::size_t start = i;
         while (i < line.size() && line[i] != ' ' && line[i] != '\t' && line[i] != '\r') ++i;
-        tokens.push_back(line.substr(start, i - start));
+        std::string token = line.substr(start, i - start);
+
+        // A COMMA JOINS ACROSS SPACES, so `1, 1, 1` is one point and not three
+        // answers. Whitespace otherwise separates answers -- R12's space-is-
+        // Enter, and what makes `CIRCLE 0,0 5` a centre and a radius -- but a
+        // token ending in a comma cannot be a complete answer to anything, and
+        // neither can one that begins with a comma follow a complete one. So
+        // gluing them is unambiguous: no valid line changes meaning, and the
+        // spacing a person naturally types stops being an error.
+        //
+        // Same licence as the parenthesised case above, which already keeps a
+        // thing whole across spaces because splitting it could not be right.
+        while (i < line.size()) {
+            std::size_t j = i;
+            while (j < line.size() && (line[j] == ' ' || line[j] == '\t' || line[j] == '\r')) ++j;
+            const bool trailing = !token.empty() && token.back() == ',';
+            const bool leading = j < line.size() && line[j] == ',';
+            if (!trailing && !leading) break;
+            if (j >= line.size()) break;  // a trailing comma at end of line stays as typed
+            const std::size_t next = j;
+            while (j < line.size() && line[j] != ' ' && line[j] != '\t' && line[j] != '\r') ++j;
+            token += line.substr(next, j - next);
+            i = j;
+        }
+        tokens.push_back(token);
     }
     return tokens;
 }

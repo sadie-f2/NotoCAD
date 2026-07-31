@@ -39,6 +39,38 @@ TEST_CASE("prompt line: whitespace separates answers") {
     CHECK(split_prompt_line("CIRCLE 0,0 5 ; a comment", false).size() == 3);
 }
 
+TEST_CASE("prompt line: a comma joins across spaces") {
+    // Reported from use: `1,1,1` was a point and `1, 1, 1` was three answers,
+    // the first of which -- "1," -- cannot be a point and reported as one.
+    //
+    // Whitespace still separates answers, because space-is-Enter is R12's and
+    // is what makes `CIRCLE 0,0 5` a centre and a radius. But a token ending in
+    // a comma cannot be a complete answer to anything, and neither can one
+    // beginning with a comma follow one, so gluing them changes the meaning of
+    // no valid line.
+    auto tokens = split_prompt_line("1, 1, 1", false);
+    CHECK(tokens.size() == 1);
+    CHECK(tokens[0] == "1,1,1");
+
+    // A space before the comma as well.
+    tokens = split_prompt_line("1 , 1 , 1", false);
+    CHECK(tokens.size() == 1);
+    CHECK(tokens[0] == "1,1,1");
+
+    // And the whole command on one line, still split where it should be.
+    tokens = split_prompt_line("LINE 0, 0 10, 10", false);
+    CHECK(tokens.size() == 3);
+    CHECK(tokens[0] == "LINE");
+    CHECK(tokens[1] == "0,0");
+    CHECK(tokens[2] == "10,10");
+
+    // What must NOT change: an ordinary pair is still one token, and two
+    // separate answers are still two.
+    tokens = split_prompt_line("CIRCLE 0,0 5", false);
+    CHECK(tokens.size() == 3);
+    CHECK(tokens[2] == "5");
+}
+
 TEST_CASE("prompt line: a parenthesised expression stays whole") {
     // Splitting on spaces inside an expression would break every LISP answer
     // that takes more than one argument.
