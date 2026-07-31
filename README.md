@@ -43,6 +43,11 @@ for weeks:
 - A full round trip: an AutoCAD-written R12 DXF opened in NotoCAD, saved out,
   and reopened in AutoCAD — 19 block definitions, 1,643 nested INSERTs, 4
   polylines and 1,408 vertices preserved exactly.
+- **R2000 output** (`SETVAR DXFVERSION R2000`): a drawing of 200 splines opens in
+  AutoCAD 2026 and lists them as real `SPLINE` entities — order 4, planar,
+  non-rational, parametric range intact. R12 degrades them to polylines and
+  cannot recover; R2000 does not. Only that one drawing has been through a real
+  reader so far.
 
 The vaguer claim that "emitted DXF opens in AutoCAD" was true and useless: the
 sample drawing it was tested on contains **no polylines at all**, so it never
