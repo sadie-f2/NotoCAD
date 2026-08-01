@@ -200,6 +200,15 @@ bool build_entity(Interp& in, Database& db, const Value& alist, EntityPtr& out,
         if (found && !parse_real(in, 71, v71, degree_real)) return false;
         int degree = static_cast<int>(degree_real);
         if (degree < 1) return group_error(in, 71, "degree must be at least 1");
+        // Reported rather than clamped: a script asking for degree 30 and
+        // silently receiving 15 gets a different curve than it wrote, which is
+        // worse than being told no. `interpolating` clamps as well, because
+        // the bound protects its stack scratch and must hold for every caller
+        // rather than only this one.
+        if (degree > kMaxSplineDegree) {
+            const std::string what = "degree is at most " + std::to_string(kMaxSplineDegree);
+            return group_error(in, 71, what.c_str());
+        }
 
         const Mat4 to_world = ecs_to_world(normal);
 

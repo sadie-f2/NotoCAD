@@ -261,7 +261,17 @@ EntityPtr Spline::interpolating(const std::vector<Vec3>& through, int degree, co
     // Degree drops rather than failing when there are too few points: two
     // points are a straight line whatever degree was asked for, and refusing
     // would make the command reject its own first two picks.
-    const int p = std::clamp(degree, 1, static_cast<int>(through.size()) - 1);
+    //
+    // AND IT IS BOUNDED BY kMaxSplineDegree, which is not decoration: the
+    // evaluator's scratch is `left[kMaxSplineDegree + 1]` on the stack, and
+    // basis_functions writes one entry per degree. Without this, degree 30
+    // over 40 points overflowed that array from inside this function --
+    // before the curve was ever drawn, and before valid() had a chance to
+    // reject it. valid() does check the bound, but it runs too late to help.
+    // Found by ASan while chasing an unrelated GCC warning; reachable from
+    // AutoLISP, since entmake takes the degree from group 71.
+    const int p = std::clamp(degree, 1,
+                             std::min(static_cast<int>(through.size()) - 1, kMaxSplineDegree));
     const std::size_t n = through.size();
     const std::size_t pp = static_cast<std::size_t>(p);
 
@@ -276,14 +286,29 @@ EntityPtr Spline::interpolating(const std::vector<Vec3>& through, int degree, co
     }
     if (total <= 0.0) return nullptr;  // every point identical
 
-    for (std::size_t i = 1; i < n - 1; ++i) {
+    // `i + 1 < n` rather than `i < n - 1`, and back() rather than [n - 1]:
+    // both say the same thing without a subtraction on an unsigned that would
+    // wrap if n were 0. It cannot be, since the guard above returns for fewer
+    // than two points -- this is for the reader, not for the compiler.
+    for (std::size_t i = 1; i + 1 < n; ++i) {
         u[i] = u[i - 1] + std::sqrt(length(through[i] - through[i - 1])) / total;
     }
-    u[n - 1] = 1.0;
+    u.back() = 1.0;
 
     // Averaged knots, which is what keeps the interpolation system banded and
     // non-singular -- the Schoenberg-Whitney condition, satisfied by
     // construction rather than checked afterwards.
+    //
+    // KNOWN GCC FALSE POSITIVE on the line below, and it is recorded so nobody
+    // re-investigates it: -Wstringop-overflow reports a memset bound near 2^64
+    // for this vector. The suspect quantity is `n`, which is a vector::size()
+    // and which GCC's range analysis treats as reaching SIZE_MAX; `pp` is
+    // bounded by kMaxSplineDegree and bounding it further does not silence it.
+    // Verified clean under ASan and UBSan across every point count from 0 to 6
+    // against every degree from -3 to 8, plus the degenerate cases. Chasing it
+    // WAS worth doing -- it turned up a real stack overflow in the degree bound
+    // above -- but the warning itself is bogus and the code should not be
+    // contorted to satisfy it.
     std::vector<double> knots(n + pp + 1, 0.0);
     for (std::size_t i = 0; i <= pp; ++i) knots[i] = 0.0;
     for (std::size_t i = n; i < n + pp + 1; ++i) knots[i] = 1.0;

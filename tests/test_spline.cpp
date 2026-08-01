@@ -406,3 +406,31 @@ TEST_CASE("spline: the degree is bounded, and a wilder one is not valid") {
     // end of a stack buffer.
     CHECK_VEC(too_wild.point_at(0.5), 0.0, 0.0, 0.0, 1e-12);
 }
+
+TEST_CASE("spline: interpolating clamps the degree before it can overflow") {
+    // The test above proves valid() REJECTS an over-degree spline and that
+    // point_at is safe on one. It did not cover the path that builds one:
+    // interpolating() clamped the degree to the point count and not to
+    // kMaxSplineDegree, so asking for degree 30 over 40 points wrote past
+    // basis_functions' stack scratch INSIDE interpolating, before valid() had
+    // anything to reject. ASan called it a stack-buffer-overflow; it is
+    // reachable from AutoLISP, since entmake takes the degree from group 71.
+    std::vector<Vec3> through;
+    for (int i = 0; i < kMaxSplineDegree * 3; ++i) {
+        through.push_back(Vec3{double(i), (i % 3) ? 5.0 : -5.0, 0.0});
+    }
+
+    // Far past the bound, and with more than enough points that the old
+    // clamp -- to size - 1 -- would have let it through.
+    EntityPtr e = Spline::interpolating(through, kMaxSplineDegree * 2, Vec3{0, 0, 1});
+    REQUIRE(e != nullptr);
+    const Spline& s = static_cast<const Spline&>(*e);
+    CHECK(s.degree() <= kMaxSplineDegree);
+    // Clamped rather than mangled: what comes back is a usable curve.
+    CHECK(s.valid());
+
+    // The ordinary case is untouched -- a degree below the bound is honoured.
+    EntityPtr ok = Spline::interpolating(through, 3, Vec3{0, 0, 1});
+    REQUIRE(ok != nullptr);
+    CHECK(static_cast<const Spline&>(*ok).degree() == 3);
+}
