@@ -6,6 +6,7 @@
 #include "ncad/dash.hpp"
 #include "ncad/database.hpp"
 #include "ncad/highlight.hpp"
+#include "ncad/host.hpp"
 #include "ncad/pick.hpp"
 #include "ncad/scene.hpp"
 #include "ncad/version.hpp"
@@ -40,6 +41,12 @@ constexpr double kNameplateMarginPx = 8.0;
 constexpr int kNameplateProbePx = 20;
 constexpr int kNameplateMinPx = 6;
 constexpr int kNameplateMaxPx = 48;
+
+// The host line sits above the plate at a fraction of its size. Smaller because
+// it is an orientation aid, not part of the nameplate proper -- and because
+// keeping it OUT of the width calculation is what stops a long hostname from
+// shrinking the whole block to fit a tenth of the viewport.
+constexpr double kHostLineScale = 0.75;
 
 // AutoCAD's axis colours, which are near enough universal now: X red, Y green,
 // Z blue. Dimmed from full saturation because full red on the dark background
@@ -658,6 +665,25 @@ void ViewportWidget::draw_nameplate(QPainter& painter) const {
     double y = kNameplateMarginPx + fm.ascent();
 
     painter.setPen(kNameplate);
+
+    // Which machine this is, above the plate and in a smaller face. With several
+    // hosts running the same build over X11 at once, the window itself is the
+    // only thing that can say -- see host.hpp.
+    {
+        const QString host = QString::fromStdString(host_name()) +
+                             QStringLiteral(" · ") + QString::fromLatin1(host_platform());
+        QFont host_font = font;
+        host_font.setPixelSize(std::max(kNameplateMinPx,
+                                        static_cast<int>(font.pixelSize() * kHostLineScale)));
+        painter.setFont(host_font);
+        const QFontMetricsF host_fm(host_font);
+        painter.drawText(QPointF(right - host_fm.horizontalAdvance(host),
+                                 kNameplateMarginPx + host_fm.ascent()),
+                         host);
+        y += host_fm.height();
+        painter.setFont(font);
+    }
+
     for (const QString& line : lines) {
         // Right-aligned, so the block stays anchored to the corner rather than
         // ragged against it.

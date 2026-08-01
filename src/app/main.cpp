@@ -27,6 +27,7 @@
 #include "ncad/lisp/eval.hpp"
 #include "ncad/lisp/reader.hpp"
 #include "ncad/lisp/value.hpp"
+#include "ncad/version.hpp"
 
 #include <cstdio>
 #include <fstream>
@@ -42,7 +43,10 @@
 
 namespace {
 
-constexpr const char* kVersion = "0.0.1";
+// The generated header, not a literal: ABOUT already printed the real version
+// while the banner and --help still said 0.0.1, because a second copy of a
+// number is a copy that goes stale.
+constexpr const char* kVersion = ncad::kNcadVersion;
 
 // AutoCAD's AutoLISP prompt, and the continuation used while a form is still
 // open.

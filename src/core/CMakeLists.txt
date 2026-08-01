@@ -35,6 +35,7 @@ add_library(ncad_core STATIC
   command.cpp
   commands.cpp
   about.cpp
+  host.cpp
   paths.cpp
   input_text.cpp
 )
