@@ -1,124 +1,150 @@
-# Handoff — session ending 2026-07-31
+# Handoff — session ending 2026-07-31 (Linux → macOS)
 
 Session-scoped and disposable. `CLAUDE.md` holds settled rules, `SF_todo.md` the
 roadmap and the reasoning, `features.md` capabilities not yet built, and
 `SF_strategy.md` the long horizon. **This file is only the bridge.** Delete or
 rewrite it rather than letting it rot.
 
+**Written for a macOS instance to pick up**, because this one can design but
+cannot compile for that platform. The port is phase 15 and has never been
+attempted.
+
 ## Where things stand
 
-- On **`main`**, HEAD `dfd88a8`. **1012 tests, 0 failed.** Clean under
-  ASan+UBSan. `ncad_gui` links.
-- **Version 0.1.58** — the patch number is the command count, and
-  `tests/test_registry.cpp` asserts the two agree. Adding a command means raising
-  the literal there *and* `project(VERSION)` in the root CMakeLists.
-- Six commits unpushed at the time of writing; push before switching machines.
-- Still outstanding from weeks back: **`ncad`'s calculator depends on an
-  uncommitted `--pipe` patch in `~/src/iperl`.** It works on this machine and
-  silently degrades everywhere else. Smallest item on any list, highest
-  embarrassment if a release ships with it.
+- On **`main`**. **1019 tests, 0 failed.** Version **0.1.58** — the patch number
+  is the command count, and no commands were added this session.
+- **R2000 (AC1015) output is CONFIRMED IN AUTOCAD 2026** for 43 of the 44
+  entities in the conformance drawing. That was the session's main work.
+- **MINSERT is the one unsolved record.** Held out of the drawing by
+  `*cf-minsert*`. See below.
+- The `noto` namespace, headers and library targets are now **`ncad`**
+  throughout. `include/ncad/`, `ncad_core`, `ncad_lisp`, `ncad_app`,
+  `ncad_gui_lib` — the GUI library carries the `_lib` suffix because
+  `ncad_gui` is the executable.
 
-## The AC1015 writer — built and VERIFIED IN AUTOCAD
+## FIRST: push, or the Mac sees none of this
 
-`SETVAR DXFVERSION R2000`, then any of SAVE / SAVEAS / QSAVE / DXFOUT. DXFOUT
-names the revision it wrote in its reply.
+At the time of writing there are **15 unpushed commits**, which is normal for
+this project but blocking here — a fresh clone would predate the rename, the
+R2000 fixes and the conformance drawing. Push before starting the Mac instance.
 
-Confirmed by Sadie in AutoCAD 2026: a spline written at R2000 lists as a real
-`SPLINE`, order 4, planar, non-rational, with its parametric range intact. The
-curve goes out as itself and comes back as itself — which is the whole reason
-the revision exists, and it makes the ellipse-becomes-a-polyline problem go away.
+## What happened this session
 
-**Measured:** a drawing holding one of everything is 8,397 bytes at R12 and
-4,525 at R2000. But **R2000 is not always smaller** — handles, owner pointers
-and subclass markers are pure overhead when a drawing holds nothing they enable.
-`Drawing8.dxf` went 387K at R12 to 449K at R2000. R2000 pays when the drawing
-contains entities R12 cannot name, and costs when it does not.
+**The `noto` → `ncad` rename.** Namespace, header directory, every CMake target,
+the `NCAD_*` options, `NCAD_IPERL`. Verified with a from-scratch configure and
+build, headless and with `NCAD_BUILD_GUI=ON`.
 
-### The five rejections, and what each turned out to be
+**iperl is no longer machine-specific.** The `--pipe` patch is committed in
+`~/src/iperl` (it was uncommitted for weeks), and `script_path()` now searches
+`NCAD_IPERL`, then `~/src/iperl/iperl.pl` and `~/iperl.pl`, then **PATH**. A
+checkout still beats an installed copy so that working on iperl tests the copy
+being worked on.
 
-Every one was AC1015 boilerplate. **Not one was geometry** — the entities
-themselves were right from the first attempt. Each is pinned by a test, because
-every one of them reads like an inconsistency somebody would tidy away.
+**The R2000 conformance drawing.** `tests/acad/r2000_conformance.lsp` builds ten
+labelled stations holding one of every entity type reachable;
+`tests/acad/gen_conformance.sh` writes it to the NAS share under a
+serial-numbered name and prints the md5. Six faults came out of it, every one
+structure rather than geometry, and each is pinned by a test in
+`tests/test_dxf.cpp`. `SF_todo.md` has the table.
 
-| AutoCAD said | It was |
-|---|---|
-| *(nothing — "corrupt")* | Duplicate handles. VERTEX and SEQEND carried the parent's. **Also affected R12**, see below. |
-| `Did not receive PlotStyleName` | R2000 needs group 390 on every LAYER, a **hard** pointer — so the object must exist. Hence the plot-style chain in OBJECTS. |
-| `Class separator for class AcDbDimStyleTable expected` | DIMSTYLE's table **header** needs a second subclass marker and a count in group 71. No other table does. |
-| `Bad handle 13: already in use` | DIMSTYLE **records** carry their handle in group **105**, not 5 — group 5 is taken there by a dimension block name. |
-| `Missing Default entry ByLayer in SymbolTable:LTYPE` | R2000 requires `ByLayer` and `ByBlock` LTYPE entries. They are synthesised at write time; the database has no reason to own them. |
+**Two rules worth carrying**, both learned the expensive way:
 
-### Two structural things worth not rediscovering
+- **The shape of a record must not depend on its content.** An optional group
+  omitted immediately before a class separator leaves the reader inside the
+  parent class. TEXT's group 73 and an INSERT's scale and rotation are written
+  unconditionally at R2000 because of this.
+- **Presence is not the property; position is.** AutoCAD accepted a misplaced
+  subclass marker on a LINE and refused the identical mistake on a TEXT.
 
-**Handle ordering drove the writer's shape.** `$HANDSEED` must clear every handle
-issued and it lives in the HEADER, which is written first — so the document is
-written **twice**, once to a null sink to count and then for real. Two passes
-rather than buffering, because a gigabyte drawing should not need a second
-gigabyte to save. Similarly the plot-style handles are **reserved at the top of
-`write_document`** because layers reference them long before OBJECTS is written.
+**Point input fixes.** `1, 1, 1` is now one point rather than three answers — a
+comma joins across spaces, which changes the meaning of no valid line because a
+token ending in a comma cannot be a complete answer. And `=` is now
+**per-coordinate**, so `=$pi,=$pi,1` works while `=join(",",3,4)` stays one
+expression.
 
-**`DXFVERSION` is deliberately not saved in the drawing.** It says how to *write*
-a file, not anything about its contents. As a drawing variable, OPEN resets it —
-so choosing R2000 and then opening something silently reverted to R12. It did
-exactly that once.
+## macOS: what to actually do
 
-### What needs testing next, and Sadie expects a lot of it
+Nothing has ever been built on macOS. The core is POSIX and standard C++20, so
+the expectation is that it mostly works and the interesting output is the list of
+what does not.
 
-Only **one** R2000 file has been through AutoCAD, containing splines on four
-layers. Untested through a real reader: MTEXT, ELLIPSE, blocks and nested
-INSERTs, TEXT, tilted planes, polylines with bulges, and anything with a
-non-CONTINUOUS linetype. The R12 path is much better exercised.
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build
+./build/tests/ncad_tests
+```
 
-The cheap way to do this is the **LISP conformance drawing** discussed and not
-yet written: one script in `tests/acad/` emitting one of every entity, so each
-iteration is one command and the target is fixed between attempts rather than
-redrawn. `tests/acad/t2_chain.lsp` is the precedent.
+Then the GUI, which is the part with a real dependency:
 
-## R12 writes no handles at all, on purpose
+```sh
+brew install qt ninja
+cmake -S . -B build-gui -G Ninja -DNCAD_BUILD_GUI=ON \
+      -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+cmake --build build-gui
+```
 
-This fixed AutoCAD rejecting our R12 files. VERTEX and SEQEND are not database
-entities and have none of their own, so they were emitted carrying the parent's —
-a degraded ellipse wrote eighteen records all claiming handle 6. R12 makes
-handles optional, `$HANDLING` defaults to 0, and **nothing reads group 5**:
-`dxf_read` ignores it and assigns fresh handles on load.
+**Qt must be dynamically linked.** `src/gui/CMakeLists.txt` aborts the configure
+if it finds a static Qt, on purpose: the BSD-3 core must not acquire LGPLv3
+relinking obligations. Homebrew's Qt is shared, so this should pass — if it
+fires, that is the guard working, not a bug to route around.
 
-**R13 and later require handles**, which is why the R2000 path allocates them
-properly. Do not "restore" them to R12.
+### Known risk points, in the order I would check them
 
-Verified end to end: an AutoCAD-written R12 DXF opened in NotoCAD, saved, and
-reopened in AutoCAD — 19 block definitions, 1,643 nested INSERTs, 4
-POLYLINE/SEQEND pairs and 1,408 VERTEX records identical on both sides.
+1. **`std::numbers`** (`<numbers>`) is used in the geometry and DXF code. Needs a
+   recent libc++; Xcode 14 or newer. The most likely hard failure.
+2. **`tests/test_save.cpp:205`** writes to `/proc/definitely/not/writable.dxf` to
+   prove an unwritable path leaves the drawing dirty. macOS has no `/proc`, so it
+   should still fail to open and the test should still pass — but for a different
+   reason than intended. If it passes, it passes by luck; consider a path that is
+   unwritable on both.
+3. **`-Wconversion` is on** and warnings are meant to stay quiet. AppleClang
+   warns in places GCC does not, so expect noise that is real rather than
+   spurious.
+4. **iperl** shells out via `execlp("perl", ...)`. macOS ships perl, and the PATH
+   lookup added this session should find an installed `iperl`/`iperl.pl`. If it
+   is absent the calculator degrades politely and three tests skip — that is by
+   design, not a failure.
+5. **`tests/acad/gen_conformance.sh`** already falls back from `md5sum` to
+   `md5 -q`, so it should run as-is. It falls back to `/tmp` when the NAS share
+   is not mounted.
+6. `sys/stat.h`, `sys/wait.h`, `unistd.h`, `fork`/`pipe`/`waitpid`,
+   `mkdtemp`, `SIGPIPE` — all POSIX and all expected to be fine.
 
-## Rendering — 2.5x, and where the next win is
+There is **no** Linux-specific API in the core: no inotify, no epoll, no
+`/proc` outside that one test path.
 
-Found by Sadie arraying a spline into a million copies and taking three gdb
-samples of the wedged process. All three landed in `Spline::draw`.
+### codegraph across platforms
 
-- **`basis_functions` allocated three vectors per call**, `point_at` a fourth.
-  Four heap operations per evaluated point of every spline in every frame. Now
-  stack arrays, bounded by `kMaxSplineDegree`.
-- **`Viewport::project` recomputed `basis()` per point.** Now cached against the
-  two angles it derives from — the cache **validates itself** rather than being
-  invalidated by mutators, because the one setter that forgot would render the
-  whole drawing through a stale basis.
-- **`segment_count` had a floor and no ceiling**, so a curve three pixels long
-  still emitted sixteen segments. Now bounded by on-screen size — and that bound
-  had to be sized by the **bounding box**, not the control polygon, which is an
-  over-estimate that made the first version never bite.
-- **View culling** added: `draw_database` skipped nothing before. Zoomed into
-  200,000 splines, 200,000 polylines became 252 and the frame went ~200ms to
-  35.7ms. The clip is **view-space**, because a rotated orthographic view has no
-  useful world AABB.
-- **The skip list was quadratic** — a `std::find` per entity over
-  `flight.suppressed`, which is non-empty exactly while dragging a selection.
+The database is **gitignored** — `.codegraph/.gitignore` ignores everything but
+itself — so the Mac will not receive it through git and will want
+`codegraph init` regardless.
 
-**Next:** the remaining 35.7ms is almost entirely the linear `bbox()` scan
-deciding what to skip. That is the spatial index, open question 5, which now has
-a number against it. At extents a million entities is still ~2M points and about
-a second; culling cannot help there, and that case wants level-of-detail.
+If the cross-platform read is worth testing deliberately, the `.db` has to be
+copied by hand through the NAS share. One encouraging data point measured here:
+**no absolute `/home/sadie` paths are interned in the database**, so a copy is
+not obviously doomed. Check `codegraph status` reports the expected file count
+before trusting it, and re-index if anything looks thin.
 
-AutoCAD chokes on comparable drawings too, which suggests the gap left is
-architectural rather than anything unusual.
+## Open, and needing Sadie rather than code
+
+**MINSERT at R2000.** AutoCAD refuses it with `Class separator for class
+AcDbMInsertBlock expected`, and has refused **all three** placements of that
+separator: before the array fields; before them with every parent field written
+out first; and after them at the end of the record. Each attempt was reasoning
+rather than evidence and produced none. **What it needs is a MINSERT saved as
+R2000 by AutoCAD itself**, to match byte for byte. Then flip `*cf-minsert*` to
+`T`. Guessing has cost three rounds; stop guessing.
+
+**A point from LISP is world; the same point typed is UCS.** Deferred, leaning
+toward matching AutoLISP — the UI convenience does not extend to the API, and
+that split is AutoLISP's own and coherent. Station 9 of the conformance drawing
+is the standing test. Note the correction recorded in `SF_todo.md`: `polar`,
+`distance` and `angle` are frame-agnostic, so this is a smaller job than the
+section originally implied.
+
+**SPLINE group 74.** Omitting the fit points would make the curve exact in every
+reader *and* cut about 36% of each record, at the cost of forgetting which points
+the user picked. A decision for when SPLINE editing is on the table.
 
 ## Traps
 
@@ -127,39 +153,29 @@ Carried forward and still true:
 - **`Mat4::from_basis(origin, ax, ay, az)` builds world-TO-basis** — axes in the
   rows.
 - **A positive bulge arcs BELOW a left-to-right chord.** `test_polyline.cpp:116`.
-- **A test calling `InputValue::of_point()` bypasses UCS conversion.**
-- **`ncad_gui` cannot be launched from here** (X11 over SSH). Verify GUI work by
-  reasoning and headless tests, and say in the commit that you did not see it.
+- **A test calling `InputValue::of_point()` bypasses UCS conversion** — and so
+  does the LISP path, which is the open question above.
+- **`ncad_gui` cannot be launched from the Linux box** (X11 over SSH). It may
+  well be launchable on the Mac, which would be the first time anyone has seen
+  the viewport outside a forwarded session.
 - **Commit straight to `main`.** No branches.
 
 New this session:
 
-- **`gen_sample`'s drawing contains no polylines**, which is why "verified in
-  AutoCAD" hid the handle bug for weeks. The README now says which drawing was
-  tested and what was in it; keep it that specific.
-- **A LISP `defun` stores into the FUNCTION cell**, not the value cell. A value
-  lookup finds nothing, which is why `*error*` silently never ran.
-- **The `--lisp` REPL evaluates forms directly**, not through `eval_string`, so
-  anything hooked into the latter needs wiring there too.
-- **Grouping costs nothing in the undo journal.** It stores clones per *change*;
-  a group is only a marker. Per-change undo would not save memory.
-
-## What is next
-
-In the order I would take it:
-
-1. **The iperl dependency** — the only thing already broken for other people.
-2. **R2000 conformance testing**, via the LISP drawing above.
-3. **INT on ellipse and spline**, and therefore TRIM/BREAK/EXTEND on them —
-   `decompose()` has no case for either, so those commands silently ignore them.
-4. **The spatial index.**
-5. **Tab completion** in the Qt command line, GUI-only by decision — asked for
-   with the file operations and the one piece not delivered.
-
-Two decisions waiting on Sadie, no work attached:
-
-- **Whether TANGENT deserves an exception** to discrete-beats-continuous in the
-  snap ranking. With CEN and QUA running, a deferred tangent can never win.
-- **Whether to remove the deferred tangent on SPLINE.** AutoCAD does not offer
-  it, Sadie finds ours chaotic there, and `SF_todo.md` records why it is inherent
-  to the curve rather than a bug.
+- **Everything we know about AC1015 is what AutoCAD 2026 demands**, not what the
+  format requires. There is no R2000-era reference here. Matching a current
+  AutoCAD is right — it is the reader files must satisfy — but it licenses no
+  claim of spec conformance, and another reader could be strict in a direction
+  we have not seen.
+- **`add_one_of_each()` in `tests/test_dxf.cpp` had no polyline**, so every
+  structural R2000 test walked past the VERTEX and SEQEND records, which had no
+  handles at all. The same blind spot that hid the R12 handle bug, where
+  `gen_sample` had no polylines either. It has one now — keep it that way.
+- **`load` does not exist** in this AutoLISP. A positional argument to `ncad` is
+  a LISP file: `ncad script.lsp -e "(conform)" -i`.
+- **`entmake` cannot make MTEXT** despite what `features.md` implies. The
+  conformance script writes a DXF fragment and reads it back, first, because
+  DXFIN clears the entities while leaving the tables.
+- **`LAYER Color <n>` takes its own name list.** `"Color" "1" "Ltype" "DASHED"`
+  reads `Ltype` as a layer name and fails one argument later with
+  `LAYER: unknown option`, pointing at the wrong place entirely.
