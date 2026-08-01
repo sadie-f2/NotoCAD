@@ -41,7 +41,7 @@ std::string trim(const std::string& s) {
 class PromptLineSource final : public InputSource {
 public:
     PromptLineSource(std::vector<std::string> tokens, lisp::Interp& in, const Database* db)
-        : tokens_(std::move(tokens)), in_(in), db_(db) {}
+        : db_(db), tokens_(std::move(tokens)), in_(in) {}
 
     bool next_value(const Prompt& prompt, InputValue& out) override;
 

@@ -34,14 +34,12 @@
 
 #include <cmath>
 #include <memory>
-#include <numbers>
 #include <sstream>
 
 using namespace ncad;
 
 namespace {
 
-constexpr double kPi = std::numbers::pi;
 
 // Parses a token as a point against `db`'s current UCS, the way the command
 // line does.

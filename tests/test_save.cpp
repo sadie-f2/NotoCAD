@@ -18,6 +18,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 
@@ -201,8 +202,18 @@ TEST_CASE("save: a failed write leaves the drawing modified") {
 
     // A path that cannot be created. The flag must survive, or a full disk
     // quietly becomes a lost drawing.
+    //
+    // The unwritable path is built rather than hardcoded: a REGULAR FILE used
+    // as a directory component fails with ENOTDIR on every POSIX system, and
+    // fails for that reason regardless of privileges. This used to be
+    // /proc/..., which does not exist on macOS at all -- so the test passed
+    // there by accident rather than by testing what it names.
+    const std::string blocker = temp_path("not-a-directory");
+    { std::ofstream make_it(blocker); }
+    REQUIRE(std::filesystem::is_regular_file(blocker));
+
     engine.begin(make_command("SAVE"));
-    engine.supply(InputValue::of_string("/proc/definitely/not/writable.dxf"));
+    engine.supply(InputValue::of_string(blocker + "/nope.dxf"));
 
     CHECK(db.journal().dirty());
     CHECK(db.sysvars().get_string(Sysvar::DwgName).empty());

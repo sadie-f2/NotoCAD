@@ -6,6 +6,10 @@
 #include "ncad/paths.hpp"
 
 #include <cstdio>
+// <ostream> for the char and const char* operator<< overloads. libstdc++ drags
+// them in through <string>; libc++ does not, so omitting it builds on Linux and
+// fails on macOS.
+#include <ostream>
 #include <string>
 
 namespace ncad::lisp {

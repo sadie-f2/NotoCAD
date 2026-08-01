@@ -469,7 +469,8 @@ void ViewportWidget::draw_ucs_icon(QPainter& painter) const {
     QPointF anchor(kIconMargin, height() - kIconMargin);
     if (mode == 2) {
         const QPoint op(static_cast<int>(o.x), static_cast<int>(o.y));
-        if (rect().adjusted(kIconLength, kIconLength, -kIconLength, -kIconLength).contains(op)) {
+        const int inset = static_cast<int>(kIconLength);
+        if (rect().adjusted(inset, inset, -inset, -inset).contains(op)) {
             anchor = QPointF(o.x, o.y);
         }
     }

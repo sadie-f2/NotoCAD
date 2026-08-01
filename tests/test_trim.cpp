@@ -38,10 +38,6 @@ namespace {
 
 constexpr double kPi = std::numbers::pi;
 
-const Entity* at(const Database& db, std::size_t i) {
-    return i < db.order().size() ? db.get(db.order()[i]) : nullptr;
-}
-
 // Every sample of `piece` must lie somewhere on `original`.
 void check_lies_on(const Entity& piece, const Entity& original, double tol = 1e-6) {
     for (const double local : {0.0, 0.25, 0.5, 0.75, 1.0}) {

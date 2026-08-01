@@ -72,7 +72,7 @@ std::string about_text() {
     // exists but currently defines nothing, so this is the branch that goes
     // live when DWG import is wired rather than a claim made in advance.
     s += "--- LibreDWG (this build) -------------------------------------\n";
-    s += "This binary was built with -DNOTO_WITH_DWG=ON and links\n";
+    s += "This binary was built with -DNCAD_WITH_DWG=ON and links\n";
     s += "LibreDWG, which is GPLv3. THIS BINARY MUST THEREFORE BE\n";
     s += "CONVEYED UNDER GPLv3. The project's own source remains\n";
     s += "BSD-3-Clause; it is the distributed binary that is affected.\n";
@@ -80,7 +80,7 @@ std::string about_text() {
 #else
     s += "--- LibreDWG (not in this build) ------------------------------\n";
     s += "DWG import is an optional compile-time module and is OFF. This\n";
-    s += "build links no GPL code. A -DNOTO_WITH_DWG=ON binary would link\n";
+    s += "build links no GPL code. A -DNCAD_WITH_DWG=ON binary would link\n";
     s += "LibreDWG, which is GPLv3, and would have to be conveyed under\n";
     s += "GPLv3 -- which is exactly why it is an option and not a\n";
     s += "dependency.\n";

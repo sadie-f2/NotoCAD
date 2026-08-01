@@ -62,7 +62,9 @@ add_executable(ncad_tests
 )
 
 target_include_directories(ncad_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/app)
-target_link_libraries(ncad_tests PRIVATE ncad_core ncad_lisp ncad_app ncad_flags)
+# ncad_app carries ncad_core and ncad_lisp PUBLICly, so naming them here too
+# repeats them on the link line. GNU ld is silent about that; Apple's ld warns.
+target_link_libraries(ncad_tests PRIVATE ncad_app ncad_flags)
 
 add_test(NAME ncad_tests COMMAND ncad_tests)
 

@@ -8,13 +8,11 @@
 #include "ncad/entities.hpp"
 
 #include <memory>
-#include <numbers>
 
 using namespace ncad;
 
 namespace {
 
-constexpr double kPi = std::numbers::pi;
 
 const Line* line_at(const Database& db, std::size_t i) {
     return static_cast<const Line*>(db.get(db.order()[i]));
