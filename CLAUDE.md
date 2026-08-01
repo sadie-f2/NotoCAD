@@ -255,9 +255,27 @@ says it links no GPL code. The Hershey acknowledgements are there because that
 licence requires them to travel with the font data, and the data is compiled in;
 a test asserts they are present, so falling out of compliance fails the suite.
 
-The version's patch number is the command count — 0.0.54 means 54 commands —
+The version's patch number is the command count — 0.2.58 means 58 commands —
 and `tests/test_registry.cpp` asserts the two agree. Adding a command means
 raising the literal there and `project(VERSION)` in the root CMakeLists.
+
+**Every registered command counts**, whether or not R12 had it: MEASUREGEOM,
+ROTATE3D, SPLINE, ELLIPSE, REDO and UCSICON are all in the total. The number
+says how much of the tool exists, not how much of the 1992 manual is covered.
+QUIT is the one thing you can type that is *not* counted — it ends the session
+rather than acting on the drawing, so `prompt.cpp` handles it beside EXIT and it
+owns no `Command`. That is why `?` lists 59 names against a registry of 58.
+
+**The minor number marks a milestone reached**, and is bumped deliberately
+rather than by any rule a test can check:
+
+- **0.1** — the R12 command set became usable: entities, editing, blocks, UCS,
+  layers and linetypes, undo, DXF both ways.
+- **0.2** — **macOS**, and R2000 confirmed in a real reader. The port built and
+  passed on the first attempt from a written handoff, which made the second
+  platform a day rather than a phase. Alongside it: AC1015 output verified
+  entity by entity in AutoCAD 2026, the `noto` → `ncad` rename, and iperl
+  reachable on any machine rather than one.
 
 `cmake -B build -DNCAD_BUILD_GUI=ON` adds `./build/src/gui/ncad_gui`, the Qt
 shell: the same drawing, engine and interpreter as `ncad`, with a viewport.
