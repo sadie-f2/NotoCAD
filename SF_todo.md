@@ -931,7 +931,24 @@ guarantee.
 
 The worry was that our output was bloated. It is not. Measured on 320,000
 splines, written by us and then re-saved by AutoCAD 2026 after reading ours, so
-the geometry is held constant:
+the geometry is held constant.
+
+**Two things this comparison is NOT**, both worth stating because the obvious
+reading of the table below overclaims:
+
+- **It is not AC1015-era behaviour.** This is AutoCAD **2026** asked to write
+  AC1015, which is not the same thing as what AutoCAD 2000 wrote, and we have no
+  R2000-era reference to check against. So "AutoCAD writes the tolerances and
+  the extrusion unconditionally" is a fact about a modern writer emitting a
+  legacy format, not a fact about the format. It is still the right thing to
+  match — a current AutoCAD is the reader that actually has to accept our files,
+  and it is the strictest one we have access to — but it does not license
+  conclusions about what AC1015 *requires*. A 2026-native file is AC1032 and
+  would look different again.
+- **It supersedes the informal size differences seen earlier**, which compared
+  similar DESIGNS rather than the same data. Those were never like-for-like and
+  should not be reasoned from. This is the first controlled measurement: one
+  drawing, two writers, identical geometry.
 
 | | ours | AutoCAD |
 |---|---|---|
