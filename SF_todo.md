@@ -927,36 +927,56 @@ formats and still lists R12 in 2026, so being able to emit AC1015 or later is
 warranted — but nothing needs it yet, and AC1009 remains the interchange
 guarantee.
 
-## DXF is very large for arrays of arrays of splines
+## DXF size for spline arrays — MEASURED, and we are smaller than AutoCAD
 
-Reported from use, and not urgent — that drawing exists to push at what the
-engine and the viewport will stand, so it is the extreme case by construction
-rather than a workload to optimise for. Recorded so the measurement starts from
-a question rather than a feeling.
+The worry was that our output was bloated. It is not. Measured on 320,000
+splines, written by us and then re-saved by AutoCAD 2026 after reading ours, so
+the geometry is held constant:
 
-**Wanted: a comparison first, not an optimisation.** The same geometry written
-by AutoCAD, at R12 and at R2000, beside ours. Without that there is no way to
-tell an inefficiency from the format's own cost, and three plausible culprits
-have very different answers:
+| | ours | AutoCAD |
+|---|---|---|
+| file | **518.9 MB** | 658.9 MB |
+| per spline | **1,437 B** | 1,847 B |
+| control points | 11 | 13 |
+| knots | 15 | 17 |
+| fit points | 11 | 11 |
+| extrusion 210/220/230 | omitted at default | always |
+| tolerances 42/43/44 | omitted | always |
+| knots | normalised 0→1 | chord length, 0→17.9… |
 
-- **A spline degrading at R12 is a tessellation**, bounded below by
-  `arc_segment_count` at a thousandth of the major axis and clamped to [8, 512].
-  A million of them is a million polylines of up to 512 vertices, and that is
-  the format working as designed rather than a defect. R2000 writes the curve
-  itself and should be dramatically smaller — the one-of-everything drawing went
-  8,397 bytes to 4,525 for exactly this reason.
-- **An ARRAY is N independent entities**, not a reference. R12 has no associative
-  array, so this is honest; but a MINSERT *is* a reference, and an array of
-  arrays could in principle be one MINSERT of a block. That is a real
-  representation question rather than a writer one, and it is the same
-  mechanism the mesh work in phase 13 will want.
-- **`dxf_real` writes full round-trip precision** — up to 17 significant digits
-  per ordinate, three ordinates per point. Shortening it would be lossy and is
-  the wrong lever; it is listed only so it is ruled out deliberately rather than
-  reached for first.
+**So there is nothing to fix in the writer**, and the R12-tessellation and
+MINSERT theories that were recorded here before the measurement were both wrong
+about where the bytes went. Both files are almost entirely SPLINE records
+(460 MB of ours, 591 MB of AutoCAD's); the entity count is identical.
 
-Measure before touching any of it. The likely finding is that R2000 plus MINSERT
-is the whole answer and the writer needs nothing.
+### The real finding is fidelity, not size
+
+**AutoCAD re-solves the curve from our fit points and discards our control
+polygon.** It produced 13 control points where we wrote 11, and 7 where we wrote
+5 in the conformance drawing — we give n control points for n fit points, it
+gives n+2. Different end conditions. The curve still passes through every fit
+point; between them it is AutoCAD's interpolation rather than ours.
+
+Our own round trip IS exact, and only because the re-solve is deterministic and
+uses our solver: a five-point spline written, read and rewritten has identical
+control points. That is worth knowing before trusting it — the exactness comes
+from both ends being us, not from the file.
+
+### One change would fix both, and it is a decision
+
+**Omitting group 74 makes the curve exact everywhere and the file ~36% smaller.**
+With no fit points the control polygon and knots are the only definition, so no
+reader can re-solve and every reader draws our curve. Fit points are 33 of the
+92 groups in a record.
+
+What it costs: the drawing forgets which points the user picked. That is real —
+it is what PEDIT's refitting would want, and re-deriving it from the control
+polygon is not the same information.
+
+Writing both is what AutoCAD does and is not wrong. But it is worth being
+explicit that the cost of writing both is paid in cross-application fidelity,
+which is exactly the thing AC1015 was adopted to buy. Do it when SPLINE editing
+is on the table rather than now.
 
 ## A point from LISP is WORLD; a point typed at the prompt is UCS
 
