@@ -15,6 +15,7 @@ add_executable(ncad_tests
   test_getvar.cpp
   test_dxfout.cpp
   test_command.cpp
+  test_appload.cpp
   test_prompt.cpp
   test_osnap_derived.cpp
   test_sysvar.cpp

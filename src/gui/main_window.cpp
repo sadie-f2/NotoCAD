@@ -39,6 +39,7 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent), interp_(ctx_), engine_(db_) {
     interp_.set_database(&db_);
     interp_.set_command_engine(&engine_);
+    engine_.set_script_loader(&script_loader_);
 
     // Something to look at on startup. Goes away when there is a DXF reader and
     // a file to open instead.

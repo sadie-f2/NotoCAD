@@ -905,6 +905,7 @@ constexpr SubrDef kSubrs[] = {
     {"WRITE-CHAR", subr_write_char, 1, 2},
     {"FINDFILE", subr_findfile, 1, 1},
     {"DXFOUT", subr_dxfout, 1, 1},
+    {"LOAD", subr_load, 1, 1},
     {"QUIT", subr_quit, 0, 0},
     {"EXIT", subr_quit, 0, 0},
 

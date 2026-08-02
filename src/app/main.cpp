@@ -25,6 +25,7 @@
 #include "ncad/command.hpp"
 #include "ncad/database.hpp"
 #include "ncad/lisp/eval.hpp"
+#include "ncad/lisp/interp_script_loader.hpp"
 #include "ncad/lisp/reader.hpp"
 #include "ncad/lisp/value.hpp"
 #include "ncad/version.hpp"
@@ -89,15 +90,17 @@ bool eval_source(ncad::lisp::Interp& in, const std::string& source, const std::s
     return false;
 }
 
+// Loads through InterpScriptLoader rather than reading the file itself, so
+// startup loading, APPLOAD and (load ...) are one path and not three that can
+// drift apart -- see script_loader.hpp.
 bool load_file(ncad::lisp::Interp& in, const std::string& path) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
-        std::cerr << "ncad: cannot open " << path << "\n";
+    ncad::lisp::InterpScriptLoader loader(in);
+    std::string message;
+    if (!loader.load_file(path, message)) {
+        std::cerr << path << ": " << message << "\n";
         return false;
     }
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    return eval_source(in, buffer.str(), path);
+    return true;
 }
 
 // The loop. Accumulates lines until the reader agrees it has a complete form,
@@ -202,6 +205,8 @@ int main(int argc, char** argv) {
     ncad::lisp::Interp in(ctx);
     in.set_database(&db);
     in.set_command_engine(&engine);
+    ncad::lisp::InterpScriptLoader script_loader(in);
+    engine.set_script_loader(&script_loader);
 
     for (const std::string& path : files) {
         if (!load_file(in, path)) return 1;

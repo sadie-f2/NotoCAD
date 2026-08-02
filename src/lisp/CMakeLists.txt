@@ -11,6 +11,7 @@ add_library(ncad_lisp STATIC
   sset_subrs.cpp
   sysvar_subrs.cpp
   file_subrs.cpp
+  interp_script_loader.cpp
   geom_subrs.cpp
   io_subrs.cpp
   wildcard.cpp

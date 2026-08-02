@@ -14,8 +14,8 @@ visualisation.
 
 ## Status
 
-**0.2.58** — the third component of the version is the implemented command count.
-58 commands, and the version says how much of the tool exists rather than how
+**0.2.59** — the third component of the version is the implemented command count.
+59 commands, and the version says how much of the tool exists rather than how
 much of the 1992 manual is covered: every registered command counts, whether or
 not R12 had it.
 
@@ -64,7 +64,9 @@ named set, LIMITS, and a system variable table reachable from AutoLISP through
 
 **File I/O:** DXF read and write. `SETVAR DXFVERSION` selects R12 (AC1009) or
 R2000 (AC1015); R12 is the interchange guarantee, R2000 is the first version that
-can name what the database already holds.
+can name what the database already holds. `APPLOAD` loads a `.lsp` file into a
+running session -- the same path as `ncad file.lsp` at startup and `(load ...)`
+from within a script, so a function defined by one is reachable by the others.
 
 **Object snaps** are complete at the kernel level: the static ones
 (END/MID/CEN/QUA) on the entity vtable, the derived ones (NEA/PER/TAN/INT) as
@@ -72,8 +74,8 @@ free functions over the kernel, headless and tested.
 
 **AutoLISP:** arena, reader, evaluator, special forms, the builtin function
 table, the entity-access functions (`entmake`, `entget`, `entmod`, `entdel`,
-`entlast`, `entnext`) and the selection-set family (`ssget`, `ssadd`, `ssdel`,
-`sslength`, `ssname`, `ssmemb`). Scoping is dynamic, as R12's is.
+`entlast`, `entnext`), `load`, and the selection-set family (`ssget`, `ssadd`,
+`ssdel`, `sslength`, `ssname`, `ssmemb`). Scoping is dynamic, as R12's is.
 
 **The Qt6 shell**, `ncad_gui`: a wireframe viewport with pan, zoom and orbit, a
 command line driving the same engine and interpreter as `ncad`, entity picking,
@@ -130,7 +132,7 @@ that evaluates AutoLISP, not a LISP prompt that calls commands.
 
 ```console
 $ ncad
-ncad 0.2.58 -- type ? for commands, ( for AutoLISP, QUIT to exit.
+ncad 0.2.59 -- type ? for commands, ( for AutoLISP, QUIT to exit.
 Command: LINE
 Specify first point: 0,0
 Specify next point: 100,0

@@ -1353,6 +1353,21 @@ public:
     Step next(CommandContext& ctx, const InputValue& value) override;
 };
 
+// APPLOAD: prompt for a file name and load it into the running session --
+// whatever it defun's or setq's is visible afterward, same as `ncad file.lsp`
+// at startup, and the (load ...) function inside a script. Three ways in, one
+// path underneath: see script_loader.hpp and file_subrs.hpp's load_lisp_file.
+//
+// Real AutoCAD's APPLOAD also loads ARX/VLX applications through a dialog;
+// only the LSP-loading half exists here, since that is the whole of what this
+// program can load.
+class AppLoadCommand final : public Command {
+public:
+    const char* name() const override { return "APPLOAD"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+};
+
 // Looks a command up by its FULL name, case-insensitively. Returns nullptr if
 // unknown, which callers report rather than treating as a crash.
 //

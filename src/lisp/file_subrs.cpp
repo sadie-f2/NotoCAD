@@ -14,6 +14,8 @@
 #include "ncad/database.hpp"
 #include "ncad/dxf.hpp"
 
+#include <fstream>
+#include <sstream>
 #include <string>
 
 namespace ncad::lisp {
@@ -41,6 +43,54 @@ bool subr_dxfout(Interp& in, const Value* args, std::size_t, Value& out) {
 bool subr_quit(Interp& in, const Value*, std::size_t, Value& out) {
     in.request_quit();
     out = make_nil();
+    return true;
+}
+
+LoadResult load_lisp_file(Interp& in, const std::string& path) {
+    LoadResult r;
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        r.message = "cannot open " + path;
+        return r;
+    }
+    r.opened = true;
+
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+
+    in.clear_error();
+    Value result;
+    if (!in.eval_string(buffer.str(), result)) {
+        r.message = in.error().message();
+        return r;
+    }
+    r.ok = true;
+    return r;
+}
+
+// (load "path") -> T on success, nil if the file could not be opened. An
+// error inside the file -- a bad form, a failing call -- is a real error
+// here too, the same as anywhere else a form fails: nil is reserved for "the
+// file itself was the problem," the same distinction dxfout draws for a
+// write that never started.
+bool subr_load(Interp& in, const Value* args, std::size_t, Value& out) {
+    if (args[0].type != Type::Str) {
+        return in.fail(EvalStatus::BadArgumentType,
+                       "load: path is not a string: " + prin1(args[0]));
+    }
+
+    const std::string path(args[0].str->view());
+    const LoadResult r = load_lisp_file(in, path);
+    if (!r.opened) {
+        out = make_nil();
+        return true;
+    }
+    // eval_string already called in.fail() with the real status and detail of
+    // whatever went wrong inside the file; that is the error worth keeping,
+    // not a generic one invented here.
+    if (!r.ok) return false;
+
+    out = make_true();
     return true;
 }
 

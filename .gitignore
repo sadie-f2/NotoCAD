@@ -5,3 +5,6 @@ compile_commands.json
 *.o
 *.a
 *.dxf
+
+# Scratch AutoLISP scripts and their output -- not yet a repo deliverable.
+/scripts/

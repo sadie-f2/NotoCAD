@@ -5632,6 +5632,32 @@ Step DxfOutCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::done(path + " written as " + dxf_version_label(version));
 }
 
+// --- APPLOAD ------------------------------------------------------------
+
+Step AppLoadCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Select LISP file";
+    return Step::ask(p);
+}
+
+Step AppLoadCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind != InputKind::String || value.text.empty()) {
+        return Step::failed("a file name is required");
+    }
+    if (!ctx.scripts) {
+        return Step::failed("no interpreter is attached to load into");
+    }
+
+    const std::string path = ensure_extension(expand_user_path(value.text), ".lsp");
+
+    std::string message;
+    if (!ctx.scripts->load_file(path, message)) {
+        return Step::failed(message.empty() ? "could not load " + path : message);
+    }
+    return Step::done(path + " loaded");
+}
+
 // --- registry ---------------------------------------------------------------
 
 CommandPtr make_command(std::string_view name) {
@@ -5656,6 +5682,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "ERASE") return std::make_unique<EraseCommand>();
     if (upper == "DXFIN" || upper == "OPEN") return std::make_unique<DxfInCommand>();
     if (upper == "DXFOUT") return std::make_unique<DxfOutCommand>();
+    if (upper == "APPLOAD") return std::make_unique<AppLoadCommand>();
     if (upper == "AREA") return std::make_unique<AreaCommand>();
     if (upper == "ARRAY") return std::make_unique<ArrayCommand>();
     if (upper == "DIST") return std::make_unique<DistCommand>();
@@ -5698,7 +5725,7 @@ CommandPtr make_command(std::string_view name) {
 
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
-        "ABOUT", "ARC", "AREA", "ARRAY", "CIRCLE", "ELLIPSE", "NEW", "SAVE", "SAVEAS", "QSAVE",
+        "ABOUT", "APPLOAD", "ARC", "AREA", "ARRAY", "CIRCLE", "ELLIPSE", "NEW", "SAVE", "SAVEAS", "QSAVE",
         "MEASUREGEOM", "ORTHO", "OSNAP", "SETVAR", "SPLINE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN",
         "LIMITS", "LTSCALE",
@@ -5712,6 +5739,7 @@ const std::vector<CommandAlias>& command_aliases() {
     // The R12 acad.pgp short forms for the commands that exist so far.
     static const std::vector<CommandAlias> aliases = {
         {"A", "ARC"},
+        {"AP", "APPLOAD"},
         {"EL", "ELLIPSE"},
         {"SPL", "SPLINE"},
         {"MEA", "MEASUREGEOM"},

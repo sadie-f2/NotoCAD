@@ -27,6 +27,7 @@
 #include "ncad/database.hpp"
 #include "ncad/inflight.hpp"
 #include "ncad/osnap.hpp"
+#include "ncad/script_loader.hpp"
 #include "ncad/selection.hpp"
 #include "ncad/tables.hpp"
 #include "ncad/vec3.hpp"
@@ -252,6 +253,10 @@ struct CommandContext {
     // command that needs it must say so rather than pretend -- see
     // view_control.hpp for why this is an interface and not a Viewport.
     ViewControl* view{nullptr};
+
+    // APPLOAD's way into the interpreter. Null only if nobody wired one up --
+    // see script_loader.hpp for why this is an interface and not an Interp*.
+    ScriptLoader* scripts{nullptr};
 };
 
 class Command {
@@ -319,6 +324,10 @@ public:
 
     // Not owned. Set by whatever has a display; left null by `ncad`.
     void set_view_control(ViewControl* view) { ctx_.view = view; }
+
+    // Wired by whoever owns the Interp -- `ncad` and the Qt shell both do, at
+    // startup, the same way each wires set_view_control.
+    void set_script_loader(ScriptLoader* scripts) { ctx_.scripts = scripts; }
     ViewControl* view_control() { return ctx_.view; }
 
     CommandEngine(const CommandEngine&) = delete;

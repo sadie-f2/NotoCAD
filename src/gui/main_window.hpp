@@ -12,6 +12,7 @@
 #include "ncad/command.hpp"
 #include "ncad/database.hpp"
 #include "ncad/lisp/eval.hpp"
+#include "ncad/lisp/interp_script_loader.hpp"
 #include "prompt.hpp"
 
 #include <QKeySequence>
@@ -62,6 +63,7 @@ private:
     Database db_;
     lisp::Context ctx_;
     lisp::Interp interp_;
+    lisp::InterpScriptLoader script_loader_{interp_};
     CommandEngine engine_;
 
     ViewportWidget* view_{nullptr};
