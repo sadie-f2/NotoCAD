@@ -15,6 +15,25 @@ feedback, CIRCLE's construction options, UI polish, the view commands, interacti
 AutoLISP input, pick cycling, and PEDIT's curve options — and the analysis went with
 them, because the reason a thing is wanted is the most perishable part of wanting it.
 
+## Immediate — oversights, ahead of everything below
+
+Not design questions, just things caught in use that should not wait behind phase order.
+
+- [ ] **DXFOUT (and SAVE, etc.) should ask which version, not silently use DXFVERSION.**
+      Ideally sticky: the chosen value pushes back into SETVAR DXFVERSION as the new
+      default for the rest of the session, so asking once does not mean asking every
+      time.
+- [ ] **Qt command line, macOS: Cmd-V pastes in, but text selected in the command
+      window cannot be copied out** -- neither middle-click paste nor Cmd-C work on
+      it. Linux is unaffected, X11 select-and-middle-paste already works there.
+- [ ] **POINT does not offer a NEA osnap.** In real AutoCAD, NEA is arguably the only
+      snap that means anything for a zero-dimensional entity -- END is convenient (a
+      point looks like its own endpoint from some point of view) but not correct, and
+      NEA is missing rather than merely secondary.
+- [ ] **Vanity: colour "Not" in the NotoCAD wordmark cyan.** Considered red for "CAD"
+      too, and decided against it -- no reason to make the naming/trademark question
+      any more pointed than it has to be.
+
 ## Direction
 
 **Editing and command breadth come before 3D meshes and surfaces.**

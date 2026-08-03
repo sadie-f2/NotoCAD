@@ -1701,6 +1701,11 @@ Step SetVarCommand::next(CommandContext& ctx, const InputValue& value) {
                 case SysvarType::Point: p.kind = PromptKind::Point; break;
                 case SysvarType::String: p.kind = PromptKind::String; break;
             }
+            // DXFVERSION's whole domain is two names, and typing neither at
+            // 4am with no reminder is exactly the failure mode a keyword list
+            // exists to prevent -- see match_keyword in input_text.cpp.
+            if (var_ == "DXFVERSION") p.keywords = {"R12", "R2000"};
+
             p.message = "New value for " + var_ + " <" + sysvar_value_text(current) + ">";
             p.allow_empty = true;
             return Step::ask(p);
@@ -1716,7 +1721,12 @@ Step SetVarCommand::next(CommandContext& ctx, const InputValue& value) {
                 case InputKind::Integer: v = SysvarValue::of_int(value.integer); break;
                 case InputKind::Real: v = SysvarValue::of_real(value.real); break;
                 case InputKind::Point: v = SysvarValue::of_point(value.point); break;
-                case InputKind::String: v = SysvarValue::of_string(value.text); break;
+                // A keyword answer (DXFVERSION's R12/R2000 list) carries its
+                // text the same way a plain string prompt's answer does.
+                // Stored variables are upper case; SETVAR upcases here so
+                // "r2000" and "R2000" store the same thing.
+                case InputKind::String:
+                case InputKind::Keyword: v = SysvarValue::of_string(upcase(value.text)); break;
                 default: return Step::failed("a value is required");
             }
 

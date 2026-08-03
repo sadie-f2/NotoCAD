@@ -4,6 +4,7 @@
 #include "test.hpp"
 
 #include "ncad/database.hpp"
+#include "ncad/input_text.hpp"
 #include "ncad/osnap.hpp"
 #include "ncad/commands.hpp"
 #include "ncad/sysvar.hpp"
@@ -261,6 +262,44 @@ TEST_CASE("setvar: refuses an unknown name and an out-of-range value") {
     CHECK(engine.status() == EngineStatus::Failed);
     // Refused, not clamped, and the old value stands.
     CHECK(db.sysvars().get_int(Sysvar::CursorSize) == 5);
+}
+
+TEST_CASE("setvar: DXFVERSION's prompt names its two valid values") {
+    // The gap this closes: DXFVERSION's whole domain is R12 and R2000, and
+    // SETVAR's value prompt named neither of them, so a value typed from
+    // memory (or supplied inline as `SETVAR DXFVERSION R2000`) worked, but
+    // nothing on screen told you what to type if you didn't already know.
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("SETVAR"));
+    engine.supply(InputValue::of_string("DXFVERSION"));
+    const std::string prompt = engine.prompt().text();
+    CHECK(prompt.find("[R12/R2000]") != std::string::npos);
+
+    // Through parse_input, exactly as a typed line goes, "R2000" now matches
+    // a keyword rather than falling through as a plain string -- InputKind
+    // changes from String to Keyword, which is the whole reason SETVAR's
+    // value handling had to learn about InputKind::Keyword alongside String.
+    InputValue answer;
+    std::string error;
+    REQUIRE(parse_input(engine.prompt(), "R2000", answer, error));
+    CHECK(answer.kind == InputKind::Keyword);
+
+    engine.supply(answer);
+    CHECK(engine.status() == EngineStatus::Finished);
+    CHECK(db.sysvars().get_string(Sysvar::DxfVersionVar) == "R2000");
+
+    // One line, all three tokens -- SETVAR DXFVERSION R2000 -- must still
+    // finish in one shot exactly as it always has; the keyword list is a
+    // hint on the prompt, not a new required step.
+    engine.begin(make_command("SETVAR"));
+    engine.supply(InputValue::of_string("DXFVERSION"));
+    InputValue answer2;
+    REQUIRE(parse_input(engine.prompt(), "R12", answer2, error));
+    engine.supply(answer2);
+    CHECK(engine.status() == EngineStatus::Finished);
+    CHECK(db.sysvars().get_string(Sysvar::DxfVersionVar) == "R12");
 }
 
 TEST_CASE("setvar: a read-only variable reports rather than refusing outright") {
