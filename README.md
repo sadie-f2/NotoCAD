@@ -46,6 +46,17 @@ The headless core is consistent with the command line design of AutoCAD, and is
 a substantial convenience in the development cycle: most tests of mathematical
 functionality can be performed by engineer or assistant without GUI interaction.
 
+Feature/usability notes: 
+The initial implementation is *very* bare-bones, no dialogs / file operations
+are only on the command line, and no tab-completion (yet). This works ok on
+Linux - mouse button copy / paste is free, but these are all needed features that
+are right alongside the additional core functionality pieces in progress.
+
+The painted SPRITE in top-right corner has the running hostname prominent so the
+dev can see at a glance if she's working locally or over X11. Same thing for 
+the version / commit hash for knowing for sure of the running version. The whole 
+sprite is probably not a permanent feature. 
+
 **Entities:** LINE, CIRCLE, ARC, POLYLINE (with bulges), TEXT, POINT, SOLID,
 3DFACE, INSERT and MINSERT — plus ELLIPSE, SPLINE and MTEXT, which AC1009 cannot
 name and which are held exactly in the database and degraded honestly on the way
