@@ -117,8 +117,6 @@ bool CommandLineWidget::has_text_selection() const {
     return history_->textCursor().hasSelection() || input_->hasSelectedText();
 }
 
-bool CommandLineWidget::input_empty() const { return input_->text().isEmpty(); }
-
 void CommandLineWidget::copy_selection() {
     if (history_->textCursor().hasSelection()) {
         history_->copy();

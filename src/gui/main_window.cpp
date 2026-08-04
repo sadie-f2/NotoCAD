@@ -3,8 +3,6 @@
 
 #include "main_window.hpp"
 
-#include "ncad/clipboard.hpp"
-
 #include <QApplication>
 #include <QKeyEvent>
 
@@ -239,18 +237,21 @@ void MainWindow::on_cut_shortcut() {
 }
 
 void MainWindow::on_paste_shortcut() {
-    // Geometry paste only from a clean slate: an idle prompt, an empty input
-    // line, and DXF on the clipboard. Anything else -- half-typed text, a
-    // command mid-flight, ordinary words on the clipboard -- means the chord
-    // is about characters, and goes to the input line like any editor's paste.
-    if (session_idle() && command_line_->input_empty()) {
-        std::string text;
-        if (clipboard_.get_text(text) && clip_looks_like_dxf(text)) {
-            on_line_entered(QStringLiteral("PASTECLIP"));
-            return;
-        }
+    // Focus is the context, and supplying it is the user's job -- Sadie's
+    // call, in place of sniffing the clipboard to guess intent. Focus in the
+    // command line means characters, into the input; focus anywhere else
+    // means geometry, and runs PASTECLIP, which says so itself when the
+    // clipboard turns out not to hold DXF. The cost of the rule is that
+    // pasting geometry right after typing means clicking the viewport first;
+    // the gain is that nothing is ever decided by what the bytes look like.
+    QWidget* focus = QApplication::focusWidget();
+    if (focus != nullptr && command_line_->isAncestorOf(focus)) {
+        command_line_->paste_into_input();
+        return;
     }
-    command_line_->paste_into_input();
+    if (session_idle()) on_line_entered(QStringLiteral("PASTECLIP"));
+    // Mid-command the chord has no meaning that would not be swallowed as
+    // the answer to the standing prompt, so it does nothing, like Copy.
 }
 
 void MainWindow::add_zoom_shortcut(const QKeySequence& keys, int delta) {

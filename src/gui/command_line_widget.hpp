@@ -71,7 +71,6 @@ public:
     // trigger this by accident. Falls back to the input line, replicating
     // QLineEdit's own copy so an ordinary command-line copy is unaffected.
     bool has_text_selection() const;
-    bool input_empty() const;
     void copy_selection();
     void cut_selection();
     void paste_into_input();

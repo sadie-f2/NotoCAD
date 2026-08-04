@@ -57,9 +57,10 @@ private:
     void add_zoom_shortcut(const QKeySequence& keys, int delta);
 
     // Copy, Cut and Paste each mean two things in a CAD window -- characters
-    // or geometry -- and this is where the two are told apart. A text
-    // selection in the command line wins; otherwise, at an idle Command:
-    // prompt, the chord runs COPYCLIP/CUTCLIP/PASTECLIP exactly as if typed.
+    // or geometry -- and this is where the two are told apart. Copy and Cut
+    // go by evidence: a text selection wins, otherwise an idle Command:
+    // prompt runs COPYCLIP/CUTCLIP exactly as if typed. Paste goes by focus:
+    // in the command line it is characters, anywhere else it is PASTECLIP.
     void on_copy_shortcut();
     void on_cut_shortcut();
     void on_paste_shortcut();

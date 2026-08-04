@@ -52,9 +52,11 @@ Not design questions, just things caught in use that should not wait behind phas
       Merge plus one translation, in one undo group, and becomes Previous. Block
       definitions travel by closure, nested INSERTs included. `clipboard.hpp` has the
       design notes; `Clipboard` is an interface on CommandContext like ViewControl,
-      Qt hands over the system clipboard, `ncad` a session-local one. Cmd-V pastes
-      geometry only from a clean slate (idle prompt, empty input, DXF on the
-      clipboard); anything else is a text paste into the input line. COPYBASE --
+      Qt hands over the system clipboard, `ncad` a session-local one. Cmd-V goes by
+      FOCUS -- in the command line it is a text paste, anywhere else it runs
+      PASTECLIP, which reports honestly if the clipboard holds no DXF. Sadie's call,
+      replacing an earlier content-sniff: the rule puts context on the user, which
+      alpha software may. COPYBASE --
       ask for the base point instead of taking the bbox corner -- is the natural
       later addition. When pickfirst/grips (4b) arrive, COPYCLIP should honour the
       implied selection like every other editing command.
