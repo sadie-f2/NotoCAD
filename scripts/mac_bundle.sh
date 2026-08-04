@@ -21,12 +21,35 @@ set -euo pipefail
 IDENTITY="${1:--}"   # "-" is codesign's ad-hoc identity
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$REPO/build-bundle"
-QT_PREFIX="$(brew --prefix qt)"
+
+# How far back the bundle claims to run. Everything below enforces it: our
+# own code compiles against it, and the gate refuses any bundled binary
+# stamped newer. arm64 hardware starts at macOS 11, so 12.0 is nearly the
+# whole installed base.
+DEPLOY_TARGET="${NCAD_DEPLOY_TARGET:-12.0}"
+
+# Prefer the official Qt binaries (built for macOS 12+) over Homebrew's.
+# Homebrew bottles are compiled per-OS-release for THIS machine -- a bundle
+# made from them refuses to launch on any older macOS, which is how the
+# first field install failed. Homebrew remains fine for development builds;
+# it is only distribution that needs the portable Qt.
+QT_PREFIX="${NCAD_QT_PREFIX:-}"
+if [ -z "$QT_PREFIX" ]; then
+  QT_PREFIX="$(ls -d "$HOME"/Qt/6.*/macos 2>/dev/null | sort -V | tail -1 || true)"
+fi
+if [ -z "$QT_PREFIX" ]; then
+  QT_PREFIX="$(brew --prefix qt)"
+  echo "WARNING: no official Qt found under ~/Qt -- falling back to Homebrew's."
+  echo "         This bundle will only run on macOS $(sw_vers -productVersion | cut -d. -f1).x and newer."
+fi
+echo "Qt:     $QT_PREFIX"
+echo "min OS: $DEPLOY_TARGET"
 
 echo "== configure + build (Release, bundle shape) =="
 cmake -S "$REPO" -B "$BUILD" -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
+      -DCMAKE_OSX_DEPLOYMENT_TARGET="$DEPLOY_TARGET" \
       -DNCAD_BUILD_GUI=ON \
       -DNCAD_MACOS_BUNDLE=ON \
       -DNCAD_BUILD_TESTS=ON
@@ -107,6 +130,30 @@ if [ -n "$LEAKS" ]; then
   exit 1
 fi
 echo "   clean"
+
+echo "== min-OS check: nothing may demand a newer macOS than $DEPLOY_TARGET =="
+# dyld refuses a library whose min-OS is newer than the running system, with
+# a "version incompatibility" complaint -- which a recipient reads as the app
+# being broken, not as a build-machine artifact. Every Mach-O in the bundle
+# must claim DEPLOY_TARGET or older.
+TOO_NEW="$(
+  find "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/PlugIns" \
+      -type f \( -name '*.dylib' -o -perm +111 \) 2>/dev/null \
+  | while IFS= read -r bin; do
+      minos="$(otool -l "$bin" 2>/dev/null | awk '/^ *minos/ {print $2; exit}')"
+      [ -z "$minos" ] && continue
+      if [ "$(printf '%s\n%s\n' "$DEPLOY_TARGET" "$minos" | sort -V | tail -1)" != "$DEPLOY_TARGET" ]; then
+        echo "$bin needs macOS $minos"
+      fi
+    done
+)"
+if [ -n "$TOO_NEW" ]; then
+  echo "BINARIES DEMANDING A NEWER macOS:"
+  echo "$TOO_NEW"
+  echo "The bundle would refuse to launch on macOS $DEPLOY_TARGET."
+  exit 1
+fi
+echo "   all binaries claim macOS $DEPLOY_TARGET or older"
 
 echo "== sign ($IDENTITY) =="
 codesign --deep --force --sign "$IDENTITY" "$APP"
