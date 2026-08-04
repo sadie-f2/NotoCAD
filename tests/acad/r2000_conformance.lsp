@@ -157,9 +157,11 @@
 ;;; than leaving as a puzzle: this writes a minimal DXF holding one MTEXT and
 ;;; reads it back.
 ;;;
-;;; DXFIN CLEARS THE ENTITIES, so this runs FIRST and everything else is drawn
-;;; on top of it. Layers and linetypes survive a read, which is why cf-tables
-;;; can run either side; entities do not.
+;;; DXFIN used to CLEAR the entities, which is why this runs first and
+;;; everything else is drawn on top of it. It now imports alongside whatever is
+;;; already in the drawing, so that ordering is no longer required -- it is kept
+;;; only because there is no reason to change it and the station numbering reads
+;;; better with station 0 built first. Tables always survived a read.
 ;;;
 ;;; The string carries inline codes on purpose. \P is a paragraph break, \L
 ;;; underline, \S a stacked fraction -- the formatting NotoCAD holds exactly

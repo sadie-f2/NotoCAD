@@ -19,17 +19,39 @@ them, because the reason a thing is wanted is the most perishable part of wantin
 
 Not design questions, just things caught in use that should not wait behind phase order.
 
-- [ ] **DXFOUT (and SAVE, etc.) should ask which version, not silently use DXFVERSION.**
-      Ideally sticky: the chosen value pushes back into SETVAR DXFVERSION as the new
-      default for the rest of the session, so asking once does not mean asking every
-      time.
-- [ ] **Qt command line, macOS: Cmd-V pastes in, but text selected in the command
-      window cannot be copied out** -- neither middle-click paste nor Cmd-C work on
-      it. Linux is unaffected, X11 select-and-middle-paste already works there.
-- [ ] **POINT does not offer a NEA osnap.** In real AutoCAD, NEA is arguably the only
-      snap that means anything for a zero-dimensional entity -- END is convenient (a
-      point looks like its own endpoint from some point of view) but not correct, and
-      NEA is missing rather than merely secondary.
+- [x] **DXFOUT (and SAVE, etc.) should ask which version, not silently use DXFVERSION.**
+      Sticky: the chosen value pushes back into DXFVERSION as the new default for the
+      rest of the session, so asking once does not mean asking every time. QSAVE stays
+      silent on purpose -- asking there would defeat the one command that must not
+      interrupt. The sticky push-back goes through `Sysvars::set_metadata`, not
+      `set_string`: it runs inside SAVE/DXFOUT's own still-open undo group, and
+      journalling it there is the DWGPREFIX/DWGNAME bug again -- the group would close
+      with a change of its own and the drawing would read dirty the instant it was
+      saved. SETVAR DXFVERSION, typed directly, still journals; only the automatic
+      push-back is exempt.
+- [x] **Qt command line: text selected in the transcript could not be copied out.**
+      Turned out not to be macOS-specific -- Cmd-V/Ctrl-V pasting in but not copying out
+      was the same root cause on every platform. The transcript pane never holds
+      keyboard focus (deliberately, so stray typing cannot vanish into it), so the copy
+      shortcut always resolved against the one-line input instead, wherever it was
+      selected. X11's middle-click paste is a separate, always-on mechanism that
+      happened to mask the gap on Linux; it was never actually fixed there either.
+      `QKeySequence::Copy` (Ctrl+C / Cmd+C) now checks the transcript's selection first.
+- [x] **POINT did not offer a NEA osnap.** NEA is the one snap that means something for
+      a zero-dimensional entity; END is convenient (a point looks like its own endpoint
+      from some angle) but not correct. `Prompt::extra_mask` is new plumbing -- prompts
+      previously had no way to ask for snaps beyond OSMODE -- and it is additive, so
+      OSMODE stays the session default rather than needing NEA added to it globally.
+- [x] **DXFIN emptied the drawing it was importing into.** Root cause: OPEN and DXFIN
+      were one command class, so DXFIN ran OPEN's code and `read_dxf_text` cleared
+      unconditionally. Now `DxfReadMode::{Replace,Merge}` and one `DxfInCommand` with a
+      mode, the shape `SaveCommand` already uses. R12 agrees: DXFIN into a drawing that
+      holds entities reads the geometry and leaves what is there. Merge needs no handle
+      renumbering -- `Database::clear` deliberately never rewinds `next_handle_` -- and
+      merges tables by name with the existing entry winning, so an import cannot
+      redefine a layer being drawn on. It also keeps the drawing's name (or the next
+      QSAVE would silently retarget the file imported FROM), its current UCS, and its
+      undo history, and is one undoable step.
 - [ ] **Vanity: colour "Not" in the NotoCAD wordmark cyan.** Considered red for "CAD"
       too, and decided against it -- no reason to make the naming/trademark question
       any more pointed than it has to be.

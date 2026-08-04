@@ -13,6 +13,7 @@
 #pragma once
 
 #include "ncad/command.hpp"
+#include "ncad/dxf.hpp"
 #include "ncad/entities.hpp"
 #include "ncad/render.hpp"
 
@@ -1298,9 +1299,10 @@ public:
     Step next(CommandContext& ctx, const InputValue& value) override;
 
 private:
-    Step write_to(CommandContext& ctx, const std::string& path);
+    Step ask_version(CommandContext& ctx, const std::string& path);
+    Step write_to(CommandContext& ctx, const std::string& path, DxfVersion version);
 
-    enum class State { AskName, ConfirmOverwrite };
+    enum class State { AskName, ConfirmOverwrite, AskVersion };
 
     Mode mode_{Mode::Save};
     State state_{State::AskName};
@@ -1330,16 +1332,31 @@ private:
     SelectionPrompter select_;
 };
 
-// DXFIN: read a DXF file, replacing the drawing.
+// OPEN and DXFIN. Both read a DXF file; what differs is what happens to the
+// drawing that is already there.
 //
-// R12 distinguishes OPEN (a DWG) from DXFIN (a DXF). Only DXF exists here, so
-// this is the one that reads a drawing, and OPEN is its alias rather than a
-// separate command that would have nothing else to do.
+// R12 distinguishes OPEN (a DWG) from DXFIN (a DXF), and only DXF exists here,
+// so OPEN was an alias of DXFIN for a long time. That was wrong in one visible
+// way: DXFIN emptied the drawing it was importing into. R12's DXFIN adds to a
+// drawing that already holds entities, which is the whole reason to have the
+// command beside OPEN, so the two are now one class with a mode rather than one
+// behaviour with two names -- the same shape SaveCommand uses for SAVE/SAVEAS/
+// QSAVE.
+//
+// Consequences of Merge, all of them deliberate and all recorded in
+// dxf_read.hpp: the drawing keeps its name, its current UCS and its undo
+// history, and the import is one undoable step.
 class DxfInCommand final : public Command {
 public:
-    const char* name() const override { return "DXFIN"; }
+    enum class Mode { Open, Import };
+
+    explicit DxfInCommand(Mode mode) : mode_(mode) {}
+    const char* name() const override { return mode_ == Mode::Open ? "OPEN" : "DXFIN"; }
     Step start(CommandContext& ctx) override;
     Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    Mode mode_{Mode::Open};
 };
 
 // DXFOUT: prompt for a file name and write the drawing. In R12 this is a
@@ -1351,6 +1368,12 @@ public:
     const char* name() const override { return "DXFOUT"; }
     Step start(CommandContext& ctx) override;
     Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State { AskName, AskVersion };
+
+    State state_{State::AskName};
+    std::string pending_;
 };
 
 // APPLOAD: prompt for a file name and load it into the running session --

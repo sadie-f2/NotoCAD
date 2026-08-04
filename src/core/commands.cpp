@@ -1806,6 +1806,11 @@ Step PointCommand::start(CommandContext&) {
     Prompt p;
     p.kind = PromptKind::Point;
     p.message = "Point";
+    // NEA is the one snap that means something for a zero-dimensional entity;
+    // END is merely convenient (a point looks like its own endpoint from some
+    // angle) and not correct. OSMODE stays the session default, so this is
+    // additive rather than overriding it.
+    p.extra_mask = kOsnapNearest;
     return Step::ask(p);
 }
 
@@ -5377,14 +5382,56 @@ std::string current_drawing_path(const CommandContext& ctx) {
     return file.empty() ? std::string{} : dir + file;
 }
 
+// Shared by SAVE and DXFOUT: asking which version to write used to mean
+// silently trusting DXFVERSION, which is wrong the first time a drawing needs
+// the other one. R12/R2000 as keywords rather than a free-form prompt for the
+// same reason SETVAR gives DXFVERSION a keyword list -- the domain is two
+// names, not a place for a typo to go unnoticed.
+Prompt dxf_version_prompt(const CommandContext& ctx) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "DXF version <" + ctx.db.sysvars().get_string(Sysvar::DxfVersionVar) + ">";
+    p.keywords = {"R12", "R2000"};
+    p.allow_empty = true;
+    return p;
+}
+
+// Resolves the answer to dxf_version_prompt (Enter keeps DXFVERSION as it
+// stands) and writes the choice back as the session's new default, so asking
+// once does not mean asking every time -- a later SETVAR DXFVERSION also
+// reports what SAVE/DXFOUT last chose, since it is the same field.
+//
+// set_metadata, not set_string: this runs inside SAVE/DXFOUT's still-open undo
+// group, and journalling it here is the DWGPREFIX/DWGNAME bug again -- the
+// group would close with a change of its own, and mark_saved() would have
+// captured the serial one write too early, leaving the drawing dirty the
+// instant it was saved. Which version to write in is bookkeeping about the
+// save, not drawing content, the same distinction that already applies to
+// DWGNAME. SETVAR DXFVERSION, typed directly, still journals -- only this
+// automatic push-back is exempt.
+DxfVersion resolve_and_store_dxf_version(CommandContext& ctx, const InputValue& value) {
+    std::string text = ctx.db.sysvars().get_string(Sysvar::DxfVersionVar);
+    if (value.kind == InputKind::String || value.kind == InputKind::Keyword) {
+        text = upcase(value.text);
+    }
+    const DxfVersion version = dxf_version_from_name(text);
+    ctx.db.sysvars().set_metadata(Sysvar::DxfVersionVar,
+                                  SysvarValue::of_string(dxf_version_label(version)));
+    return version;
+}
+
 }  // namespace
 
 Step SaveCommand::start(CommandContext& ctx) {
     const std::string current = current_drawing_path(ctx);
 
     // QSAVE is the one that must not interrupt: a known name means write it and
-    // say nothing. That is the whole reason it exists.
-    if (mode_ == Mode::QSave && !current.empty()) return write_to(ctx, current);
+    // say nothing -- that includes not asking the version, so it stays
+    // DXFVERSION as last set rather than gaining a prompt SAVE/SAVEAS get.
+    if (mode_ == Mode::QSave && !current.empty()) {
+        return write_to(ctx, current,
+                         dxf_version_from_name(ctx.db.sysvars().get_string(Sysvar::DxfVersionVar)));
+    }
 
     Prompt p;
     p.kind = PromptKind::String;
@@ -5401,11 +5448,15 @@ Step SaveCommand::start(CommandContext& ctx) {
 }
 
 Step SaveCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (state_ == State::AskVersion) {
+        return write_to(ctx, pending_, resolve_and_store_dxf_version(ctx, value));
+    }
+
     if (state_ == State::ConfirmOverwrite) {
         // Default No: the answer that loses nothing is the one Enter gives.
         const bool yes = value.kind == InputKind::Keyword && keyword_is(value, "YES");
         if (!yes) return Step::done("Not saved");
-        return write_to(ctx, pending_);
+        return ask_version(ctx, pending_);
     }
 
     std::string typed;
@@ -5433,16 +5484,20 @@ Step SaveCommand::next(CommandContext& ctx, const InputValue& value) {
         return Step::ask(p);
     }
 
-    return write_to(ctx, path);
+    return ask_version(ctx, path);
 }
 
-Step SaveCommand::write_to(CommandContext& ctx, const std::string& raw) {
+Step SaveCommand::ask_version(CommandContext& ctx, const std::string& path) {
+    pending_ = path;
+    state_ = State::AskVersion;
+    return Step::ask(dxf_version_prompt(ctx));
+}
+
+Step SaveCommand::write_to(CommandContext& ctx, const std::string& raw, DxfVersion version) {
     // Normalised before it is recorded, so DWGPREFIX is a directory that can be
     // used rather than whatever mixture of dots and tildes was typed.
     const std::string path = normalised_path(raw);
 
-    const DxfVersion version =
-        dxf_version_from_name(ctx.db.sysvars().get_string(Sysvar::DxfVersionVar));
     if (!write_dxf_file(ctx.db, path, version)) {
         // The flag stays set. Clearing it next to the call rather than on the
         // success branch is how a full disk quietly becomes a lost drawing.
@@ -5566,12 +5621,14 @@ Step ListCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::done(out);
 }
 
-// --- DXFIN ------------------------------------------------------------------
+// --- OPEN and DXFIN ---------------------------------------------------------
 
 Step DxfInCommand::start(CommandContext&) {
     Prompt p;
     p.kind = PromptKind::String;
-    p.message = "File name";
+    // Named for what it does, since the two modes now differ in kind and not
+    // only in which file is read.
+    p.message = mode_ == Mode::Open ? "File name" : "File name to import";
     return Step::ask(p);
 }
 
@@ -5586,25 +5643,43 @@ Step DxfInCommand::next(CommandContext& ctx, const InputValue& value) {
     // "plan.DXF.dxf" and "~/plan" was looked for in the current directory.
     const std::string path = ensure_extension(expand_user_path(value.text), ".dxf");
 
-    const DxfReadResult r = read_dxf_file(ctx.db, path);
+    const bool importing = mode_ == Mode::Import;
+    const std::size_t before = importing ? ctx.db.size() : 0;
+
+    const DxfReadResult r = read_dxf_file(
+        ctx.db, path, importing ? DxfReadMode::Merge : DxfReadMode::Replace);
     if (!r.ok) return Step::failed(r.error.empty() ? "could not read the file" : r.error);
 
-    // THE DRAWING IS NOW THIS FILE. Recorded here and not only in SAVE, or
-    // opening a drawing and saving it would prompt for a name as though it had
-    // come from nowhere -- and worse, a name left over from an earlier SAVE
-    // would be offered for a drawing it has nothing to do with.
-    //
-    // Set after the read succeeds, so a failed open leaves both the drawing and
-    // its name alone.
-    const std::string full = normalised_path(path);
-    ctx.db.sysvars().set_metadata(Sysvar::DwgPrefix,
-                                  SysvarValue::of_string(path_directory(full)));
-    ctx.db.sysvars().set_metadata(Sysvar::DwgName, SysvarValue::of_string(path_filename(full)));
+    if (!importing) {
+        // THE DRAWING IS NOW THIS FILE. Recorded here and not only in SAVE, or
+        // opening a drawing and saving it would prompt for a name as though it
+        // had come from nowhere -- and worse, a name left over from an earlier
+        // SAVE would be offered for a drawing it has nothing to do with.
+        //
+        // Set after the read succeeds, so a failed open leaves both the drawing
+        // and its name alone.
+        //
+        // An import is not this file: the drawing keeps the name it already had,
+        // or a DXFIN would silently retarget the next QSAVE at the file that was
+        // imported FROM.
+        const std::string full = normalised_path(path);
+        ctx.db.sysvars().set_metadata(Sysvar::DwgPrefix,
+                                      SysvarValue::of_string(path_directory(full)));
+        ctx.db.sysvars().set_metadata(Sysvar::DwgName,
+                                      SysvarValue::of_string(path_filename(full)));
 
-    // The selection named entities in a drawing that no longer exists.
-    ctx.selection.clear();
+        // The selection named entities in a drawing that no longer exists. An
+        // import leaves it alone -- those entities are all still there.
+        ctx.selection.clear();
+    }
 
-    std::string message = std::to_string(r.entities) + " entities, " +
+    // What actually arrived, counted from the database rather than taken from
+    // the reader: on a merge the interesting number is how much the drawing
+    // grew, and an INSERT naming a block that was already defined is one entity
+    // here and several in the file.
+    const std::size_t added = importing ? ctx.db.size() - before : r.entities;
+
+    std::string message = std::to_string(added) + (importing ? " entities imported, " : " entities, ") +
                           std::to_string(r.layers) + " layers";
     if (r.proxies != 0) {
         // Said plainly rather than buried: these are the parts this program
@@ -5622,24 +5697,29 @@ Step DxfOutCommand::start(CommandContext&) {
     Prompt p;
     p.kind = PromptKind::String;
     p.message = "Enter file name";
+    state_ = State::AskName;
     return Step::ask(p);
 }
 
 Step DxfOutCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (state_ == State::AskVersion) {
+        const DxfVersion version = resolve_and_store_dxf_version(ctx, value);
+        if (!write_dxf_file(ctx.db, pending_, version)) {
+            return Step::failed("cannot write " + pending_);
+        }
+        // The revision is named in the reply, because which one was written is
+        // the thing a user needs to know and cannot see from the filename.
+        return Step::done(pending_ + " written as " + dxf_version_label(version));
+    }
+
     if (value.kind != InputKind::String || value.text.empty()) {
         return Step::failed("a file name is required");
     }
 
     // The same treatment every other file command gives a name.
-    const std::string path = ensure_extension(expand_user_path(value.text), ".dxf");
-
-    const DxfVersion version =
-        dxf_version_from_name(ctx.db.sysvars().get_string(Sysvar::DxfVersionVar));
-    if (!write_dxf_file(ctx.db, path, version)) return Step::failed("cannot write " + path);
-
-    // The revision is named in the reply, because which one was written is the
-    // thing a user needs to know and cannot see from the filename.
-    return Step::done(path + " written as " + dxf_version_label(version));
+    pending_ = ensure_extension(expand_user_path(value.text), ".dxf");
+    state_ = State::AskVersion;
+    return Step::ask(dxf_version_prompt(ctx));
 }
 
 // --- APPLOAD ------------------------------------------------------------
@@ -5690,7 +5770,8 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "LIMITS") return std::make_unique<LimitsCommand>();
     if (upper == "LTSCALE") return std::make_unique<LtScaleCommand>();
     if (upper == "ERASE") return std::make_unique<EraseCommand>();
-    if (upper == "DXFIN" || upper == "OPEN") return std::make_unique<DxfInCommand>();
+    if (upper == "DXFIN") return std::make_unique<DxfInCommand>(DxfInCommand::Mode::Import);
+    if (upper == "OPEN") return std::make_unique<DxfInCommand>(DxfInCommand::Mode::Open);
     if (upper == "DXFOUT") return std::make_unique<DxfOutCommand>();
     if (upper == "APPLOAD") return std::make_unique<AppLoadCommand>();
     if (upper == "AREA") return std::make_unique<AreaCommand>();

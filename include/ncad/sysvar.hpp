@@ -165,12 +165,18 @@ public:
     // values that describe where the drawing LIVES rather than what it
     // contains.
     //
-    // DWGNAME and DWGPREFIX are the case, and they are the whole case. Undo
-    // must not change which file you are editing -- that is not a hole in undo,
-    // it is undo's scope. Journalling them is worse than useless: SAVE would
-    // record a change of its own, so the group closing after mark_saved() would
-    // push a new serial and the drawing would be dirty the instant it was
-    // saved. Which is exactly the bug that produced this method.
+    // DWGNAME and DWGPREFIX are the original case: undo must not change which
+    // file you are editing -- that is not a hole in undo, it is undo's scope.
+    // Journalling them is worse than useless: SAVE would record a change of
+    // its own, so the group closing after mark_saved() would push a new
+    // serial and the drawing would be dirty the instant it was saved. Which is
+    // exactly the bug that produced this method.
+    //
+    // DXFVERSION's sticky push-back from SAVE/DXFOUT is the same bug in the
+    // same place -- which version was chosen to write is bookkeeping about the
+    // save, not drawing content, and it runs inside that command's own open
+    // undo group. SETVAR DXFVERSION, typed directly, still journals through
+    // set_string; only the automatic push-back goes through here.
     //
     // Anything that is drawing CONTENT goes through set_owned, for the reason
     // written above it. Adding a caller here needs the same argument made

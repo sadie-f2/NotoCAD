@@ -37,6 +37,7 @@
 // guess there is worse than an honest passthrough.
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace ncad {
@@ -68,11 +69,38 @@ struct DxfReadResult {
     std::string version;
 };
 
-// Replaces the contents of `db`. On failure the database is left cleared rather
-// than half-populated, since a partly-read drawing is worse than none.
-DxfReadResult read_dxf_file(Database& db, const std::string& path);
+// Whether the read replaces the drawing or adds to it.
+//
+// The distinction is OPEN versus DXFIN, and R12 draws it the same way: DXFIN
+// into a drawing that already holds entities reads the geometry and leaves what
+// is there. They shared one implementation here, which is why DXFIN used to
+// empty the drawing it was importing into.
+//
+// Merge is safe on handles without any renumbering: Database::add always takes
+// next_handle_ and Database::clear deliberately never rewinds it, so an incoming
+// entity cannot collide with one already present. Table entries merge by name --
+// add_layer returns the existing id when the name is taken -- so a layer the
+// drawing already defines keeps ITS colour and linetype rather than being
+// redefined by the file being imported.
+enum class DxfReadMode : std::uint8_t {
+    Replace,  // OPEN: the file becomes the drawing
+    Merge,    // DXFIN: the file is added to the drawing
+};
+
+// Reads `path` into `db`. Replace clears first, and on failure the database is
+// left cleared rather than half-populated, since a partly-read drawing is worse
+// than none.
+//
+// Merge adds instead, and deliberately does NOT touch the header: the current
+// UCS belongs to the drawing being imported into, not to the file arriving. It
+// also leaves the undo journal alone, so the caller's command group makes the
+// whole import one undoable step -- Replace still clears it, because undoing
+// past the load of a drawing is not meaningful.
+DxfReadResult read_dxf_file(Database& db, const std::string& path,
+                            DxfReadMode mode = DxfReadMode::Replace);
 
 // The same, from text already in memory. This is what the tests drive.
-DxfReadResult read_dxf_text(Database& db, const std::string& text);
+DxfReadResult read_dxf_text(Database& db, const std::string& text,
+                            DxfReadMode mode = DxfReadMode::Replace);
 
 }  // namespace ncad

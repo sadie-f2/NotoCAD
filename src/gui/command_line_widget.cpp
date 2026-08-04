@@ -12,11 +12,13 @@
 #include <QHBoxLayout>
 #include <QCoreApplication>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QLabel>
 #include <QPalette>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QScrollBar>
+#include <QShortcut>
 #include <QVBoxLayout>
 
 namespace ncad {
@@ -104,6 +106,24 @@ CommandLineWidget::CommandLineWidget(QWidget* parent) : QWidget(parent) {
     column->addLayout(row);
 
     connect(input_, &QLineEdit::returnPressed, this, &CommandLineWidget::on_return_pressed);
+
+    // history_ never holds keyboard focus (see its ctor comment above), so the
+    // platform copy shortcut would otherwise always resolve against input_
+    // and a transcript selection could never be copied out. QKeySequence::Copy
+    // is Ctrl+C on Linux/Windows and Cmd+C on macOS, so one shortcut covers
+    // both -- this is not a macOS-specific fix, X11's middle-click paste was
+    // just masking the same gap on Linux.
+    auto* copy_shortcut = new QShortcut(QKeySequence::Copy, this);
+    copy_shortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(copy_shortcut, &QShortcut::activated, this, &CommandLineWidget::copy_selection);
+}
+
+void CommandLineWidget::copy_selection() {
+    if (history_->textCursor().hasSelection()) {
+        history_->copy();
+        return;
+    }
+    input_->copy();
 }
 
 void CommandLineWidget::append(const QString& text, const QColor& color) {

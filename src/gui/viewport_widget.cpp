@@ -532,7 +532,8 @@ void ViewportWidget::update_osnap() {
     // override of kOsnapNone is NON: snap to nothing, deliberately.
     q.mask = engine_->has_osnap_override()
                  ? engine_->osnap_override()
-                 : static_cast<OsnapMask>(db_.sysvars().get_int(Sysvar::OsMode));
+                 : static_cast<OsnapMask>(db_.sysvars().get_int(Sysvar::OsMode)) |
+                       engine_->prompt().extra_mask;
     if (q.mask == kOsnapNone) return;
 
     q.aperture_px = aperture_px();

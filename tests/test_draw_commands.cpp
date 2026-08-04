@@ -55,6 +55,16 @@ TEST_CASE("point: one point makes one entity") {
     CHECK(near_equal(static_cast<const PointEntity*>(e)->position(), Vec3{3, 4, 5}, 1e-12));
 }
 
+TEST_CASE("point: offers NEA on top of OSMODE, not only END") {
+    // NEA is the one snap that means something for a zero-dimensional entity;
+    // OSMODE's default (END|CEN|INT) does not include it, and POINT must not
+    // have to change the session default just to offer it at its own prompt.
+    Database db;
+    CommandEngine engine(db);
+    engine.begin(make_command("POINT"));
+    CHECK((engine.prompt().extra_mask & kOsnapNearest) != 0);
+}
+
 // --- SOLID and 3DFACE -------------------------------------------------------
 
 TEST_CASE("solid: four points make one quadrilateral") {

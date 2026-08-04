@@ -104,7 +104,7 @@ struct EntityGroups {
 
 class Reader {
 public:
-    explicit Reader(Database& db) : db_(db) {}
+    Reader(Database& db, DxfReadMode mode) : db_(db), mode_(mode) {}
 
     DxfReadResult run(std::string text);
 
@@ -134,6 +134,7 @@ private:
     void resolve_inserts();
 
     Database& db_;
+    DxfReadMode mode_{DxfReadMode::Replace};
     DxfReadResult result_;
     std::vector<PendingInsert> pending_inserts_;
 
@@ -807,25 +808,40 @@ DxfReadResult Reader::run(std::string text) {
     resolve_inserts();
     // Applied after the tables, so that a named current UCS is set from the
     // header rather than from whichever table entry happened to be read last.
-    if (have_header_ucs_) db_.set_current_ucs(header_ucs_, header_ucs_name_);
+    //
+    // Not on a merge: the current UCS belongs to the drawing being imported
+    // INTO. Letting an imported file reset it would move the construction plane
+    // out from under whatever the user was doing, which is the sort of thing
+    // DXFIN has no business doing to a drawing already in progress.
+    if (have_header_ucs_ && mode_ == DxfReadMode::Replace) {
+        db_.set_current_ucs(header_ucs_, header_ucs_name_);
+    }
     result_.ok = true;
     return result_;
 }
 
 }  // namespace
 
-DxfReadResult read_dxf_text(Database& db, const std::string& text) {
-    db.clear();
-    db.journal().clear();
-    Reader r(db);
+DxfReadResult read_dxf_text(Database& db, const std::string& text, DxfReadMode mode) {
+    if (mode == DxfReadMode::Replace) {
+        db.clear();
+        db.journal().clear();
+    }
+
+    Reader r(db, mode);
     DxfReadResult result = r.run(text);
+
     // A freshly opened drawing has no history: undoing past the load is not
     // meaningful, and the load itself is not an edit.
-    db.journal().clear();
+    //
+    // A merge is the opposite on both counts. It IS an edit, made to a drawing
+    // with a history worth keeping, so the journal is left alone and the
+    // caller's command group makes the whole import one undoable step.
+    if (mode == DxfReadMode::Replace) db.journal().clear();
     return result;
 }
 
-DxfReadResult read_dxf_file(Database& db, const std::string& path) {
+DxfReadResult read_dxf_file(Database& db, const std::string& path, DxfReadMode mode) {
     std::ifstream file(path);
     if (!file) {
         DxfReadResult r;
@@ -834,7 +850,7 @@ DxfReadResult read_dxf_file(Database& db, const std::string& path) {
     }
     std::ostringstream buffer;
     buffer << file.rdbuf();
-    return read_dxf_text(db, buffer.str());
+    return read_dxf_text(db, buffer.str(), mode);
 }
 
 }  // namespace ncad

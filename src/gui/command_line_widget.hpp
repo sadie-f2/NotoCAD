@@ -60,6 +60,13 @@ public:
     int font_points() const { return font_points_; }
     void step_font_size(int delta) { set_font_points(font_points_ + delta); }
 
+    // Copies from whichever pane has a selection: the transcript takes
+    // priority, since a selection there could only be intentional -- it can
+    // never hold keyboard focus, so nothing else would trigger this by
+    // accident. Falls back to the input line, replicating QLineEdit's own
+    // copy so an ordinary command-line copy is unaffected.
+    void copy_selection();
+
 signals:
     void lineEntered(const QString& line);
 

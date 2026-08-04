@@ -90,6 +90,13 @@ struct Prompt {
     Vec3 last_point{};
     bool has_last_point{false};
 
+    // Snap types this specific prompt wants on top of OSMODE, ORed in unless a
+    // typed override is active for this pick. POINT is the case that motivated
+    // it: NEA means something for a zero-dimensional entity and END does not,
+    // but OSMODE is a session-wide default that should not have to include NEA
+    // just so POINT can offer it.
+    OsnapMask extra_mask{kOsnapNone};
+
     // "Specify next point or [Close/Undo]: "
     std::string text() const;
 };

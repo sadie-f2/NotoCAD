@@ -170,6 +170,7 @@ TEST_CASE("save: writes, records the name, and clears the modified flag") {
 
     engine.begin(make_command("SAVE"));
     engine.supply(InputValue::of_string(path));
+    engine.supply(InputValue{});  // Enter: keep DXFVERSION as it stands
 
     CHECK(std::filesystem::exists(path));
     CHECK(!db.journal().dirty());
@@ -191,6 +192,7 @@ TEST_CASE("save: recording the name does not itself dirty the drawing") {
 
     engine.begin(make_command("SAVE"));
     engine.supply(InputValue::of_string(path));
+    engine.supply(InputValue{});  // Enter: keep DXFVERSION as it stands
 
     CHECK(!db.journal().dirty());
 }
@@ -214,6 +216,7 @@ TEST_CASE("save: a failed write leaves the drawing modified") {
 
     engine.begin(make_command("SAVE"));
     engine.supply(InputValue::of_string(blocker + "/nope.dxf"));
+    engine.supply(InputValue{});  // Enter: keep DXFVERSION as it stands
 
     CHECK(db.journal().dirty());
     CHECK(db.sysvars().get_string(Sysvar::DwgName).empty());
@@ -231,8 +234,10 @@ TEST_CASE("saveas: an existing OTHER file must be confirmed, and No means no") {
 
     engine.begin(make_command("SAVE"));
     engine.supply(InputValue::of_string(first));
+    engine.supply(InputValue{});  // Enter: keep DXFVERSION as it stands
     engine.begin(make_command("SAVE"));
     engine.supply(InputValue::of_string(second));
+    engine.supply(InputValue{});  // Enter: keep DXFVERSION as it stands
     CHECK(std::filesystem::exists(second));
 
     // Now SAVEAS back over the first: it exists and is not the current drawing.
@@ -256,6 +261,7 @@ TEST_CASE("qsave: overwrites the current drawing without asking") {
 
     engine.begin(make_command("SAVE"));
     engine.supply(InputValue::of_string(path));
+    engine.supply(InputValue{});  // Enter: keep DXFVERSION as it stands
 
     make_edit(db, 2.0);
     CHECK(db.journal().dirty());
@@ -301,6 +307,7 @@ TEST_CASE("open: the drawing remembers the file it came from") {
         make_edit(seed, 3.0);
         engine.begin(make_command("SAVE"));
         engine.supply(InputValue::of_string(path));
+        engine.supply(InputValue{});  // Enter: keep DXFVERSION as it stands
     }
 
     Database db;
@@ -330,6 +337,7 @@ TEST_CASE("open: a stale name does not survive onto a different drawing") {
 
     engine.begin(make_command("SAVE"));
     engine.supply(InputValue::of_string(first));
+    engine.supply(InputValue{});  // Enter: keep DXFVERSION as it stands
 
     // Build a second file, then open it. The name must follow the OPEN, or SAVE
     // would offer the first drawing's name for the second drawing's contents.
@@ -339,6 +347,7 @@ TEST_CASE("open: a stale name does not survive onto a different drawing") {
         make_edit(other, 2.0);
         oe.begin(make_command("SAVE"));
         oe.supply(InputValue::of_string(second));
+        oe.supply(InputValue{});  // Enter: keep DXFVERSION as it stands
     }
 
     engine.begin(make_command("OPEN"));
@@ -355,10 +364,106 @@ TEST_CASE("open: a failed read leaves the drawing and its name alone") {
     make_edit(db, 1.0);
     engine.begin(make_command("SAVE"));
     engine.supply(InputValue::of_string(path));
+    engine.supply(InputValue{});  // Enter: keep DXFVERSION as it stands
 
     engine.begin(make_command("OPEN"));
     engine.supply(InputValue::of_string(temp_path("no_such_file_here.dxf")));
 
     CHECK(db.order().size() == 1);
     CHECK(db.sysvars().get_string(Sysvar::DwgName) == "keeper.dxf");
+}
+
+// --- DXFIN imports, OPEN replaces -------------------------------------------
+
+TEST_CASE("dxfin: imports alongside the drawing instead of emptying it") {
+    // The reported bug. OPEN and DXFIN were one command class, so DXFIN cleared
+    // the drawing it was importing into -- which is the one thing an import
+    // must not do.
+    const std::string path = temp_path("import_me.dxf");
+    std::filesystem::remove(path);
+
+    {
+        Database seed;
+        CommandEngine engine(seed);
+        make_edit(seed, 3.0);
+        engine.begin(make_command("SAVE"));
+        engine.supply(InputValue::of_string(path));
+        engine.supply(InputValue{});
+    }
+
+    Database db;
+    CommandEngine engine(db);
+    make_edit(db, 1.0);
+    make_edit(db, 2.0);
+    REQUIRE(db.size() == 2);
+
+    engine.begin(make_command("DXFIN"));
+    engine.supply(InputValue::of_string(path));
+
+    CHECK(db.size() == 3);  // the two that were here, plus the one imported
+    CHECK(engine.message().find("imported") != std::string::npos);
+}
+
+TEST_CASE("dxfin: the drawing keeps its own name, so QSAVE is not retargeted") {
+    // An import is not an open. If DXFIN set DWGNAME, the next QSAVE would
+    // silently write over the file that was imported FROM.
+    const std::string mine = temp_path("mine.dxf");
+    const std::string other = temp_path("other.dxf");
+    std::filesystem::remove(mine);
+    std::filesystem::remove(other);
+
+    {
+        Database seed;
+        CommandEngine engine(seed);
+        make_edit(seed, 9.0);
+        engine.begin(make_command("SAVE"));
+        engine.supply(InputValue::of_string(other));
+        engine.supply(InputValue{});
+    }
+
+    Database db;
+    CommandEngine engine(db);
+    make_edit(db, 1.0);
+    engine.begin(make_command("SAVE"));
+    engine.supply(InputValue::of_string(mine));
+    engine.supply(InputValue{});
+    REQUIRE(db.sysvars().get_string(Sysvar::DwgName) == "mine.dxf");
+
+    engine.begin(make_command("DXFIN"));
+    engine.supply(InputValue::of_string(other));
+
+    CHECK(db.sysvars().get_string(Sysvar::DwgName) == "mine.dxf");
+}
+
+TEST_CASE("dxfin: one import is one undo step, and OPEN still replaces") {
+    const std::string path = temp_path("undo_import.dxf");
+    std::filesystem::remove(path);
+
+    {
+        Database seed;
+        CommandEngine engine(seed);
+        make_edit(seed, 3.0);
+        make_edit(seed, 4.0);
+        engine.begin(make_command("SAVE"));
+        engine.supply(InputValue::of_string(path));
+        engine.supply(InputValue{});
+    }
+
+    Database db;
+    CommandEngine engine(db);
+    make_edit(db, 1.0);
+
+    engine.begin(make_command("DXFIN"));
+    engine.supply(InputValue::of_string(path));
+    REQUIRE(db.size() == 3);
+
+    engine.begin(make_command("UNDO"));
+    CHECK(db.size() == 1);  // the whole import came back out, in one step
+
+    // OPEN is the other half: it still replaces, which is why the two were
+    // split rather than DXFIN simply being changed.
+    engine.begin(make_command("OPEN"));
+    engine.supply(InputValue::of_string(path));
+    CHECK(db.size() == 2);  // the file's contents, and nothing of what was here
+    CHECK(db.sysvars().get_string(Sysvar::DwgName) == "undo_import.dxf");
 }

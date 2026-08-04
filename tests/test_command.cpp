@@ -9,6 +9,7 @@
 #include "ncad/entities.hpp"
 #include "ncad/input_text.hpp"
 #include "ncad/lisp/eval.hpp"
+#include "ncad/sysvar.hpp"
 
 #include <cstdio>
 #include <fstream>
@@ -455,7 +456,9 @@ TEST_CASE("DXFOUT: writes from the command prompt, not only from LISP") {
     const std::string path = "ncad_test_cmd_dxfout.dxf";
     std::remove(path.c_str());
 
-    TextInputSource src(tokenize_script(path + "\n"));
+    // The trailing blank line is Enter at the DXF-version prompt: keep
+    // DXFVERSION as it stands.
+    TextInputSource src(tokenize_script(path + "\n\n"));
     f.engine.begin(make_command("DXFOUT"));
     CHECK(f.engine.run(src) == EngineStatus::Finished);
     CHECK(f.engine.message().find("written") != std::string::npos);
@@ -477,7 +480,7 @@ TEST_CASE("DXFOUT: supplies the extension when it is left off") {
     const std::string stem = "ncad_test_cmd_extension";
     std::remove((stem + ".dxf").c_str());
 
-    TextInputSource src(tokenize_script(stem + "\n"));
+    TextInputSource src(tokenize_script(stem + "\n\n"));
     f.engine.begin(make_command("DXFOUT"));
     CHECK(f.engine.run(src) == EngineStatus::Finished);
 
@@ -489,7 +492,7 @@ TEST_CASE("DXFOUT: supplies the extension when it is left off") {
     // And not doubled when it is already there.
     ScriptFixture g;
     g.run("CIRCLE 0,0 1\n");
-    TextInputSource src2(tokenize_script(stem + ".dxf\n"));
+    TextInputSource src2(tokenize_script(stem + ".dxf\n\n"));
     g.engine.begin(make_command("DXFOUT"));
     CHECK(g.engine.run(src2) == EngineStatus::Finished);
     CHECK(g.engine.message().find(".dxf.dxf") == std::string::npos);
@@ -499,10 +502,53 @@ TEST_CASE("DXFOUT: supplies the extension when it is left off") {
 TEST_CASE("DXFOUT: an unwritable path fails the command") {
     ScriptFixture f;
     f.run("CIRCLE 0,0 1\n");
-    TextInputSource src(tokenize_script("/nonexistent-dir-xyzzy/out.dxf\n"));
+    TextInputSource src(tokenize_script("/nonexistent-dir-xyzzy/out.dxf\n\n"));
     f.engine.begin(make_command("DXFOUT"));
     CHECK(f.engine.run(src) == EngineStatus::Failed);
     CHECK(f.engine.message().find("cannot write") != std::string::npos);
+}
+
+TEST_CASE("DXFOUT: asks which version rather than silently reading DXFVERSION") {
+    ScriptFixture f;
+    f.run("CIRCLE 0,0 1\n");
+    const std::string path = "ncad_test_dxfout_asks.dxf";
+    std::remove(path.c_str());
+
+    f.engine.begin(make_command("DXFOUT"));
+    f.engine.supply(InputValue::of_string(path));
+    CHECK(f.engine.active());
+    CHECK(f.engine.prompt().message.find("DXF version") != std::string::npos);
+
+    f.engine.supply(InputValue::of_keyword("R2000"));
+    CHECK(f.engine.message().find("R2000") != std::string::npos);
+
+    std::remove(path.c_str());
+}
+
+TEST_CASE("DXFOUT: the chosen version is sticky, pushed back into DXFVERSION") {
+    ScriptFixture f;
+    f.run("CIRCLE 0,0 1\n");
+    CHECK(f.db.sysvars().get_string(Sysvar::DxfVersionVar) == "R12");
+
+    const std::string path = "ncad_test_dxfout_sticky.dxf";
+    std::remove(path.c_str());
+    f.engine.begin(make_command("DXFOUT"));
+    f.engine.supply(InputValue::of_string(path));
+    f.engine.supply(InputValue::of_keyword("R2000"));
+
+    CHECK(f.db.sysvars().get_string(Sysvar::DxfVersionVar) == "R2000");
+    std::remove(path.c_str());
+
+    // And a second DXFOUT now offers R2000 as the default, Enter keeps it.
+    const std::string path2 = "ncad_test_dxfout_sticky2.dxf";
+    std::remove(path2.c_str());
+    f.engine.begin(make_command("DXFOUT"));
+    f.engine.supply(InputValue::of_string(path2));
+    CHECK(f.engine.prompt().message.find("R2000") != std::string::npos);
+    f.engine.supply(InputValue{});
+    CHECK(f.engine.message().find("R2000") != std::string::npos);
+    CHECK(f.db.sysvars().get_string(Sysvar::DxfVersionVar) == "R2000");
+    std::remove(path2.c_str());
 }
 
 TEST_CASE("commands: abbreviations resolve, exact names win") {
@@ -678,7 +724,9 @@ TEST_CASE("lisp: the prompt gets first refusal over the command registry") {
     CHECK(f.db.size() == 1);
 
     std::remove("LINE.dxf");
-    f.eval(R"((command "DXFOUT" "LINE"))");
+    // The trailing "" is Enter at the DXF-version prompt: keep DXFVERSION as
+    // it stands.
+    f.eval(R"((command "DXFOUT" "LINE" ""))");
     CHECK(!f.engine.active());  // DXFOUT ran to completion
 
     std::ifstream written("LINE.dxf", std::ios::binary);

@@ -39,9 +39,11 @@ TEST_CASE("registry: a constructed command answers to the name it was asked for"
         CommandPtr c = make_command(name);
         if (!c) continue;
 
-        // Not always identical: OPEN is an alias of DXFIN and reports DXFIN,
-        // which is correct -- what matters is that it reports SOME advertised
-        // name rather than something unreachable.
+        // Not always identical: SAVEAS and QSAVE are modes of SaveCommand. What
+        // matters is that a command reports SOME advertised name rather than
+        // something unreachable. OPEN and DXFIN used to be the case here too,
+        // until DXFIN stopped clearing the drawing and they became two modes
+        // that each report their own name.
         const std::string reported = c->name();
         bool advertised = false;
         for (const std::string& n : command_names()) {

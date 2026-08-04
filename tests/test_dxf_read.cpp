@@ -448,3 +448,124 @@ TEST_CASE("dxf read: a 2018 file's sections and markers are stepped over") {
     REQUIRE(db.order().size() == 1);
     CHECK(db.get(db.order()[0])->type() == EntityType::Line);
 }
+
+// --- Merge, which is what DXFIN does ----------------------------------------
+
+TEST_CASE("dxf merge: entities are added to the drawing rather than replacing it") {
+    // The reported bug: DXFIN emptied the drawing it was importing into,
+    // because OPEN and DXFIN were one implementation and OPEN must clear.
+    Database db;
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 1, 0}));
+    REQUIRE(db.size() == 1);
+
+    const DxfReadResult r = read_dxf_text(db, dxf({kEntitiesOpen,
+                                                   "  0\nLINE\n  8\n0\n 10\n1.0\n 20\n2.0\n 30\n"
+                                                   "0.0\n 11\n4.0\n 21\n6.0\n 31\n0.0",
+                                                   kEnd}),
+                                          DxfReadMode::Merge);
+    CHECK(r.ok);
+    CHECK(db.size() == 2);  // both, not one
+}
+
+TEST_CASE("dxf merge: imported entities cannot collide with handles already in use") {
+    // Database::clear deliberately never rewinds next_handle_, and add always
+    // takes the next one, so this holds without any renumbering pass. It is
+    // pinned because a merge is the first thing that would notice if it stopped
+    // being true.
+    Database db;
+    const Handle first = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+
+    read_dxf_text(db, dxf({kEntitiesOpen,
+                           "  0\nLINE\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n"
+                           " 11\n2.0\n 21\n0.0\n 31\n0.0",
+                           kEnd}),
+                  DxfReadMode::Merge);
+
+    REQUIRE(db.size() == 2);
+    CHECK(db.order()[0] == first);
+    CHECK(db.order()[1] != first);
+    CHECK(db.get(first) != nullptr);  // the original survived intact
+}
+
+TEST_CASE("dxf merge: a layer the drawing already defines keeps its own colour") {
+    // Table entries merge by name and the existing one wins, so importing a
+    // file that happens to name GEOM does not redefine the layer being drawn on.
+    Database db;
+    const LayerId mine = db.add_layer("GEOM", 3, kInvalidLinetype);
+    REQUIRE(mine != kInvalidLayer);
+
+    read_dxf_text(db,
+                  "  0\nSECTION\n  2\nTABLES\n"
+                  "  0\nTABLE\n  2\nLAYER\n"
+                  "  0\nLAYER\n  2\nGEOM\n 62\n5\n 70\n0\n"
+                  "  0\nENDTAB\n  0\nENDSEC\n  0\nEOF\n",
+                  DxfReadMode::Merge);
+
+    CHECK(db.find_layer("GEOM") == mine);
+    CHECK(db.layer(mine).color == 3);  // not 5, from the file
+}
+
+TEST_CASE("dxf merge: the current UCS is the drawing's, not the imported file's") {
+    // An import must not move the construction plane out from under whatever
+    // the user was doing.
+    Database db;
+    Ucs mine;
+    mine.origin = Vec3{7, 8, 9};
+    db.set_current_ucs(mine, "MINE");
+
+    read_dxf_text(db,
+                  "  0\nSECTION\n  2\nHEADER\n"
+                  "  9\n$UCSORG\n 10\n1.0\n 20\n2.0\n 30\n3.0\n"
+                  "  0\nENDSEC\n  0\nEOF\n",
+                  DxfReadMode::Merge);
+
+    CHECK_VEC(db.current_ucs().origin, 7.0, 8.0, 9.0, 1e-12);
+}
+
+TEST_CASE("dxf merge: undo history survives, and Replace still discards it") {
+    // A merge IS an edit made to a drawing whose history is worth keeping.
+    Database db;
+    db.journal().begin_group("LINE");
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 1, 0}));
+    db.journal().end_group();
+    REQUIRE(db.journal().undo_depth() == 1);
+
+    read_dxf_text(db, dxf({kEntitiesOpen,
+                           "  0\nLINE\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n"
+                           " 11\n2.0\n 21\n0.0\n 31\n0.0",
+                           kEnd}),
+                  DxfReadMode::Merge);
+    // The earlier group is still there. It is 2 rather than 1 because no
+    // command group is open here, so the imported entity is its own step --
+    // see the DXFIN test for the case that matters, where the engine's group
+    // makes the whole import one.
+    CHECK(db.journal().undo_depth() == 2);
+
+    // Replace is the other half of the contract: undoing past the load of a
+    // drawing is not meaningful.
+    read_dxf_text(db, dxf({kEntitiesOpen, kEnd}), DxfReadMode::Replace);
+    CHECK(db.journal().undo_depth() == 0);
+}
+
+TEST_CASE("dxf merge: inside a command group the whole import is one undo step") {
+    // What DXFIN actually does, since CommandEngine opens a group per command.
+    // Undoing an import must take back the whole file, not one entity of it.
+    Database db;
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 1, 0}));
+    const std::size_t before = db.size();
+
+    db.journal().begin_group("DXFIN");
+    read_dxf_text(db,
+                  dxf({kEntitiesOpen,
+                       "  0\nLINE\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n"
+                       " 11\n2.0\n 21\n0.0\n 31\n0.0",
+                       "  0\nLINE\n  8\n0\n 10\n0.0\n 20\n1.0\n 30\n0.0\n"
+                       " 11\n2.0\n 21\n1.0\n 31\n0.0",
+                       kEnd}),
+                  DxfReadMode::Merge);
+    db.journal().end_group();
+
+    REQUIRE(db.size() == before + 2);
+    CHECK(db.journal().undo(db));
+    CHECK(db.size() == before);  // both imported entities went, and only those
+}
