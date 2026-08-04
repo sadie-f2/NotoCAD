@@ -39,9 +39,18 @@ Not design questions, just things caught in use that should not wait behind phas
       `QKeySequence::Copy` (Ctrl+C / Cmd+C) now checks the transcript's selection first.
 - [x] **POINT did not offer a NEA osnap.** NEA is the one snap that means something for
       a zero-dimensional entity; END is convenient (a point looks like its own endpoint
-      from some angle) but not correct. `Prompt::extra_mask` is new plumbing -- prompts
-      previously had no way to ask for snaps beyond OSMODE -- and it is additive, so
-      OSMODE stays the session default rather than needing NEA added to it globally.
+      from some angle) but not correct. The fix is a `EntityType::Point` branch in
+      `nearest_point`: every other branch there solves for a position ALONG something
+      and a point has no along, which is exactly why it was missing. Confirmed working.
+
+      Read the wrong way first, and the wrong answer is still in the tree: the item was
+      taken as the POINT COMMAND's prompt offering NEA while placing, and
+      `Prompt::extra_mask` was built for it. **Open question, needs Sadie:** that forces
+      NEA on at POINT's prompt on top of OSMODE, so placing a point near any geometry
+      snaps to it every time -- AutoCAD does not do that, and NEA being continuous means
+      it fires whenever anything is in the aperture. Recommend reverting both the POINT
+      usage and the field, since with POINT gone `extra_mask` has no callers and
+      mechanism with no caller is a liability rather than a head start.
 - [x] **DXFIN emptied the drawing it was importing into.** Root cause: OPEN and DXFIN
       were one command class, so DXFIN ran OPEN's code and `read_dxf_text` cleared
       unconditionally. Now `DxfReadMode::{Replace,Merge}` and one `DxfInCommand` with a
