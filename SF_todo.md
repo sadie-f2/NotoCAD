@@ -52,9 +52,12 @@ Not design questions, just things caught in use that should not wait behind phas
       redefine a layer being drawn on. It also keeps the drawing's name (or the next
       QSAVE would silently retarget the file imported FROM), its current UCS, and its
       undo history, and is one undoable step.
-- [ ] **Vanity: colour "Not" in the NotoCAD wordmark cyan.** Considered red for "CAD"
+- [x] **Vanity: colour "Not" in the NotoCAD wordmark cyan.** Considered red for "CAD"
       too, and decided against it -- no reason to make the naming/trademark question
-      any more pointed than it has to be.
+      any more pointed than it has to be. The wordmark is the viewport nameplate,
+      which was the only one that existed; it is drawn as two runs now, with the
+      alignment still computed from the whole line. Dimmed from full cyan, since a
+      nameplate that pulls the eye while you work has stopped being a nameplate.
 
 ## Direction
 

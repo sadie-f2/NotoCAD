@@ -34,6 +34,13 @@ const QColor kOsnapMarker(250, 200, 60);
 // at and invisible when working.
 const QColor kNameplate(105, 105, 118);
 
+// "Not" is cyan, the rest of the wordmark is not. Dimmed from full cyan for the
+// same reason the axis colours are: full saturation glares on this background,
+// and a nameplate that pulls the eye while you are working has stopped being a
+// nameplate. Brighter than kNameplate, though, or the accent reads as a
+// rendering artefact rather than as something meant.
+const QColor kWordmarkAccent(90, 165, 175);
+
 // Sadie's: a tenth of the viewport width. Everything else follows from it.
 constexpr double kNameplateWidthFraction = 0.10;
 constexpr double kNameplateMarginPx = 8.0;
@@ -685,10 +692,27 @@ void ViewportWidget::draw_nameplate(QPainter& painter) const {
         painter.setFont(font);
     }
 
+    bool first = true;
     for (const QString& line : lines) {
         // Right-aligned, so the block stays anchored to the corner rather than
         // ragged against it.
-        painter.drawText(QPointF(right - fm.horizontalAdvance(line), y), line);
+        const double x = right - fm.horizontalAdvance(line);
+
+        if (first) {
+            // The wordmark, in two runs. The alignment is still computed from
+            // the WHOLE line and the second run offset by the first's advance:
+            // right-aligning each run on its own would stack them on top of
+            // each other.
+            const QString head = QStringLiteral("Not");
+            painter.setPen(kWordmarkAccent);
+            painter.drawText(QPointF(x, y), head);
+            painter.setPen(kNameplate);
+            painter.drawText(QPointF(x + fm.horizontalAdvance(head), y), line.mid(head.size()));
+        } else {
+            painter.drawText(QPointF(x, y), line);
+        }
+
+        first = false;
         y += fm.height();
     }
 }
