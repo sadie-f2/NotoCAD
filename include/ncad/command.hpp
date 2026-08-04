@@ -40,6 +40,8 @@
 
 namespace ncad {
 
+class Clipboard;
+
 // What kind of answer a prompt wants. The GUI will use this to decide whether to
 // rubber-band a line, show an aperture, or just take text.
 enum class PromptKind : std::uint8_t {
@@ -257,6 +259,11 @@ struct CommandContext {
     // APPLOAD's way into the interpreter. Null only if nobody wired one up --
     // see script_loader.hpp for why this is an interface and not an Interp*.
     ScriptLoader* scripts{nullptr};
+
+    // COPYCLIP and PASTECLIP's transport. An interface for the reason
+    // ViewControl is -- the Qt shell hands over the system clipboard, `ncad`
+    // an in-process one -- and null only if nobody wired one up.
+    Clipboard* clipboard{nullptr};
 };
 
 class Command {
@@ -329,6 +336,10 @@ public:
     // startup, the same way each wires set_view_control.
     void set_script_loader(ScriptLoader* scripts) { ctx_.scripts = scripts; }
     ViewControl* view_control() { return ctx_.view; }
+
+    // Wired at startup like the two above: the Qt shell hands over the system
+    // clipboard, `ncad` an in-process one.
+    void set_clipboard(Clipboard* clipboard) { ctx_.clipboard = clipboard; }
 
     CommandEngine(const CommandEngine&) = delete;
     CommandEngine& operator=(const CommandEngine&) = delete;

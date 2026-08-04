@@ -22,6 +22,7 @@
 // changing anything here.
 #include "prompt.hpp"
 
+#include "ncad/clipboard.hpp"
 #include "ncad/command.hpp"
 #include "ncad/database.hpp"
 #include "ncad/lisp/eval.hpp"
@@ -207,6 +208,11 @@ int main(int argc, char** argv) {
     in.set_command_engine(&engine);
     ncad::lisp::InterpScriptLoader script_loader(in);
     engine.set_script_loader(&script_loader);
+
+    // Session-local: `ncad` has no display and no desktop, so COPYCLIP's reach
+    // here is this process. The Qt shell wires the system clipboard instead.
+    ncad::InProcessClipboard clipboard;
+    engine.set_clipboard(&clipboard);
 
     for (const std::string& path : files) {
         if (!load_file(in, path)) return 1;

@@ -32,6 +32,7 @@ add_library(ncad_core STATIC
   database.cpp
   dxf.cpp
   dxf_read.cpp
+  clipboard.cpp
   command.cpp
   commands.cpp
   about.cpp

@@ -14,6 +14,7 @@
 #include "ncad/lisp/eval.hpp"
 #include "ncad/lisp/interp_script_loader.hpp"
 #include "prompt.hpp"
+#include "qt_clipboard.hpp"
 
 #include <QKeySequence>
 #include <QMainWindow>
@@ -55,6 +56,20 @@ private:
     // bindings cannot drift apart.
     void add_zoom_shortcut(const QKeySequence& keys, int delta);
 
+    // Copy, Cut and Paste each mean two things in a CAD window -- characters
+    // or geometry -- and this is where the two are told apart. A text
+    // selection in the command line wins; otherwise, at an idle Command:
+    // prompt, the chord runs COPYCLIP/CUTCLIP/PASTECLIP exactly as if typed.
+    void on_copy_shortcut();
+    void on_cut_shortcut();
+    void on_paste_shortcut();
+
+    // True at a plain Command: prompt -- no command mid-flight, no LISP form
+    // left open, no QUIT confirmation pending. The only state in which a
+    // shortcut may feed a command name without it being swallowed as the
+    // answer to some other question.
+    bool session_idle() const;
+
     void refresh_prompt();
 
     // Routes PromptSession output into the command line widget.
@@ -64,6 +79,7 @@ private:
     lisp::Context ctx_;
     lisp::Interp interp_;
     lisp::InterpScriptLoader script_loader_{interp_};
+    QtClipboard clipboard_;
     CommandEngine engine_;
 
     ViewportWidget* view_{nullptr};

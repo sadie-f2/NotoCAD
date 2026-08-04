@@ -60,12 +60,21 @@ public:
     int font_points() const { return font_points_; }
     void step_font_size(int delta) { set_font_points(font_points_ + delta); }
 
-    // Copies from whichever pane has a selection: the transcript takes
-    // priority, since a selection there could only be intentional -- it can
-    // never hold keyboard focus, so nothing else would trigger this by
-    // accident. Falls back to the input line, replicating QLineEdit's own
-    // copy so an ordinary command-line copy is unaffected.
+    // The text half of Copy/Cut/Paste. MainWindow owns the shortcuts and
+    // decides between text and geometry -- a selection here means text, an
+    // idle prompt means COPYCLIP/PASTECLIP -- and calls these for the text
+    // side of that decision.
+    //
+    // copy_selection copies from whichever pane has a selection: the
+    // transcript takes priority, since a selection there could only be
+    // intentional -- it can never hold keyboard focus, so nothing else would
+    // trigger this by accident. Falls back to the input line, replicating
+    // QLineEdit's own copy so an ordinary command-line copy is unaffected.
+    bool has_text_selection() const;
+    bool input_empty() const;
     void copy_selection();
+    void cut_selection();
+    void paste_into_input();
 
 signals:
     void lineEntered(const QString& line);

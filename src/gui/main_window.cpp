@@ -3,6 +3,8 @@
 
 #include "main_window.hpp"
 
+#include "ncad/clipboard.hpp"
+
 #include <QApplication>
 #include <QKeyEvent>
 
@@ -40,6 +42,9 @@ MainWindow::MainWindow(QWidget* parent)
     interp_.set_database(&db_);
     interp_.set_command_engine(&engine_);
     engine_.set_script_loader(&script_loader_);
+    // The system clipboard, so COPYCLIP reaches other windows and other
+    // applications. `ncad` wires an in-process one here instead.
+    engine_.set_clipboard(&clipboard_);
 
     // Something to look at on startup. Goes away when there is a DXF reader and
     // a file to open instead.
@@ -74,6 +79,23 @@ MainWindow::MainWindow(QWidget* parent)
     // QKeySequence::ZoomIn is Ctrl+Plus, which needs Shift on most layouts.
     // Ctrl+= is what people actually press, and every browser accepts both.
     add_zoom_shortcut(QKeySequence(Qt::CTRL | Qt::Key_Equal), 1);
+
+    // The platform Copy/Cut/Paste chords -- Ctrl on Linux and Windows, Cmd on
+    // macOS. ApplicationShortcut for the reason the zoom shortcuts are, and
+    // registered HERE, not on the command line widget: whether the chord means
+    // text or geometry is a decision that needs the whole window's state, and
+    // a widget-scoped shortcut only fired while focus sat inside the widget --
+    // which is exactly why transcript copy never worked after a viewport
+    // click.
+    auto* copy_sc = new QShortcut(QKeySequence::Copy, this);
+    copy_sc->setContext(Qt::ApplicationShortcut);
+    connect(copy_sc, &QShortcut::activated, this, &MainWindow::on_copy_shortcut);
+    auto* cut_sc = new QShortcut(QKeySequence::Cut, this);
+    cut_sc->setContext(Qt::ApplicationShortcut);
+    connect(cut_sc, &QShortcut::activated, this, &MainWindow::on_cut_shortcut);
+    auto* paste_sc = new QShortcut(QKeySequence::Paste, this);
+    paste_sc->setContext(Qt::ApplicationShortcut);
+    connect(paste_sc, &QShortcut::activated, this, &MainWindow::on_paste_shortcut);
 
     connect(command_line_, &CommandLineWidget::lineEntered, this, &MainWindow::on_line_entered);
     connect(command_line_, &CommandLineWidget::cancelRequested, this,
@@ -190,6 +212,45 @@ void MainWindow::on_cancel_requested() {
     refresh_prompt();
     view_->update();
     command_line_->focus_input();
+}
+
+bool MainWindow::session_idle() const {
+    return !engine_.active() && !session_->continuing() && !session_->confirming_quit();
+}
+
+void MainWindow::on_copy_shortcut() {
+    // A text selection is deliberate -- the transcript cannot even hold focus,
+    // so one only exists because the user dragged across it -- and wins.
+    if (command_line_->has_text_selection()) {
+        command_line_->copy_selection();
+        return;
+    }
+    if (session_idle()) on_line_entered(QStringLiteral("COPYCLIP"));
+    // Mid-command with nothing selected there is nothing the chord can mean;
+    // feeding COPYCLIP would be taken as the answer to the standing prompt.
+}
+
+void MainWindow::on_cut_shortcut() {
+    if (command_line_->has_text_selection()) {
+        command_line_->cut_selection();
+        return;
+    }
+    if (session_idle()) on_line_entered(QStringLiteral("CUTCLIP"));
+}
+
+void MainWindow::on_paste_shortcut() {
+    // Geometry paste only from a clean slate: an idle prompt, an empty input
+    // line, and DXF on the clipboard. Anything else -- half-typed text, a
+    // command mid-flight, ordinary words on the clipboard -- means the chord
+    // is about characters, and goes to the input line like any editor's paste.
+    if (session_idle() && command_line_->input_empty()) {
+        std::string text;
+        if (clipboard_.get_text(text) && clip_looks_like_dxf(text)) {
+            on_line_entered(QStringLiteral("PASTECLIP"));
+            return;
+        }
+    }
+    command_line_->paste_into_input();
 }
 
 void MainWindow::add_zoom_shortcut(const QKeySequence& keys, int delta) {

@@ -900,6 +900,47 @@ public:
     Step next(CommandContext& ctx, const InputValue& value) override;
 };
 
+// COPYCLIP / CUTCLIP: put a selection on the clipboard, as a DXF fragment a
+// PASTECLIP -- this window's or another's -- merges back in. Both entered
+// AutoCAD in R12 for Windows as ordinary commands that prompt Select objects,
+// which is what makes Cmd-C workable under command-then-select: the shortcut
+// runs the command, and the command asks. CUTCLIP is COPYCLIP that erases what
+// it copied, inside the same undo group.
+//
+// The fragment travels whole: block definitions an INSERT references (nested
+// included), and the layers and linetypes anything names. The base point --
+// the selection's bounding-box corner, since nothing was asked -- rides in
+// $INSBASE. See clipboard.hpp for why the payload is an ordinary DXF document.
+class CopyClipCommand final : public Command {
+public:
+    explicit CopyClipCommand(bool cut) : cut_(cut) {}
+    const char* name() const override { return cut_ ? "CUTCLIP" : "COPYCLIP"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    bool cut_;
+    SelectionPrompter select_;
+};
+
+// PASTECLIP: merge the clipboard's DXF fragment into the drawing at a chosen
+// point. The read is DXFIN's Merge -- table entries resolve by name with this
+// drawing's definition winning, handles cannot collide -- then everything that
+// arrived is translated from the fragment's $INSBASE to the point given. Enter
+// pastes in place, by the fragment's own coordinates. What was pasted becomes
+// the selection, so MOVE Previous picks it straight up.
+class PasteClipCommand final : public Command {
+public:
+    const char* name() const override { return "PASTECLIP"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    Step commit(CommandContext& ctx, const Vec3* dest);
+
+    std::string text_;
+};
+
 // BREAK: remove the piece of a curve between two points.
 //
 // The first of phase 10's commands, and the simplest consumer of the

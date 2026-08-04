@@ -194,6 +194,10 @@ private:
 bool write_dxf_file(const Database& db, const std::string& path,
                     DxfVersion version = DxfVersion::R12);
 
+// The same document as a string. The clipboard's writer, and anything else
+// that wants a DXF without a file under it.
+std::string write_dxf_text(const Database& db, DxfVersion version = DxfVersion::R12);
+
 // One past the highest handle a write would issue. Zero for a version that
 // needs none. Exposed because $HANDSEED must be known before the header.
 Handle dxf_count_handles(const Database& db, DxfVersion version);

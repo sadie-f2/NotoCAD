@@ -37,6 +37,27 @@ Not design questions, just things caught in use that should not wait behind phas
       selected. X11's middle-click paste is a separate, always-on mechanism that
       happened to mask the gap on Linux; it was never actually fixed there either.
       `QKeySequence::Copy` (Ctrl+C / Cmd+C) now checks the transcript's selection first.
+
+      *Superseded in the geometry-clipboard work:* that shortcut was scoped to the
+      command line widget, so it only fired while focus sat there -- dead after any
+      viewport click, which is why it "did not seem to work" on the Mac. The chords now
+      live on MainWindow (application scope) and arbitrate: a text selection wins,
+      otherwise an idle prompt runs COPYCLIP/CUTCLIP/PASTECLIP.
+- [x] **COPYCLIP / CUTCLIP / PASTECLIP: geometry copy/paste between windows.** All
+      three entered AutoCAD in R12 for Windows as ordinary commands that prompt Select
+      objects, so Cmd-C under command-then-select is not a semantics problem -- the
+      shortcut runs the command, the command asks. The payload is a whole DXF document
+      (R2000, so a spline crosses as a spline) on the system clipboard as plain text;
+      the base point rides in `$INSBASE` as WBLOCK already does; paste is DXFIN's
+      Merge plus one translation, in one undo group, and becomes Previous. Block
+      definitions travel by closure, nested INSERTs included. `clipboard.hpp` has the
+      design notes; `Clipboard` is an interface on CommandContext like ViewControl,
+      Qt hands over the system clipboard, `ncad` a session-local one. Cmd-V pastes
+      geometry only from a clean slate (idle prompt, empty input, DXF on the
+      clipboard); anything else is a text paste into the input line. COPYBASE --
+      ask for the base point instead of taking the bbox corner -- is the natural
+      later addition. When pickfirst/grips (4b) arrive, COPYCLIP should honour the
+      implied selection like every other editing command.
 - [x] **POINT did not offer a NEA osnap.** NEA is the one snap that means something for
       a zero-dimensional entity; END is convenient (a point looks like its own endpoint
       from some angle) but not correct. The fix is a `EntityType::Point` branch in

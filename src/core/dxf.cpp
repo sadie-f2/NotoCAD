@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <sstream>
 #include <streambuf>
 #include <ostream>
 
@@ -687,6 +688,14 @@ bool write_dxf_file(const Database& db, const std::string& path, DxfVersion vers
     w.set_handle_seed_hint(dxf_count_handles(db, version));
     w.write_document();
     return out.good();
+}
+
+std::string write_dxf_text(const Database& db, DxfVersion version) {
+    std::ostringstream out;
+    DxfWriter w(out, db, version);
+    w.set_handle_seed_hint(dxf_count_handles(db, version));
+    w.write_document();
+    return out.str();
 }
 
 }  // namespace ncad

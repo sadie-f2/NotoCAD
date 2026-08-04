@@ -107,16 +107,17 @@ CommandLineWidget::CommandLineWidget(QWidget* parent) : QWidget(parent) {
 
     connect(input_, &QLineEdit::returnPressed, this, &CommandLineWidget::on_return_pressed);
 
-    // history_ never holds keyboard focus (see its ctor comment above), so the
-    // platform copy shortcut would otherwise always resolve against input_
-    // and a transcript selection could never be copied out. QKeySequence::Copy
-    // is Ctrl+C on Linux/Windows and Cmd+C on macOS, so one shortcut covers
-    // both -- this is not a macOS-specific fix, X11's middle-click paste was
-    // just masking the same gap on Linux.
-    auto* copy_shortcut = new QShortcut(QKeySequence::Copy, this);
-    copy_shortcut->setContext(Qt::WidgetWithChildrenShortcut);
-    connect(copy_shortcut, &QShortcut::activated, this, &CommandLineWidget::copy_selection);
+    // No copy shortcut of its own. There used to be one here, scoped to this
+    // widget -- which is why it only worked while focus happened to be in the
+    // command line. Copy, Cut and Paste now arbitrate in MainWindow between
+    // text and geometry, and these methods are what its decision calls.
 }
+
+bool CommandLineWidget::has_text_selection() const {
+    return history_->textCursor().hasSelection() || input_->hasSelectedText();
+}
+
+bool CommandLineWidget::input_empty() const { return input_->text().isEmpty(); }
 
 void CommandLineWidget::copy_selection() {
     if (history_->textCursor().hasSelection()) {
@@ -124,6 +125,21 @@ void CommandLineWidget::copy_selection() {
         return;
     }
     input_->copy();
+}
+
+void CommandLineWidget::cut_selection() {
+    // The transcript is read-only, so cutting a selection there degrades to
+    // copying it -- the standard behaviour of every read-only text view.
+    if (history_->textCursor().hasSelection()) {
+        history_->copy();
+        return;
+    }
+    input_->cut();
+}
+
+void CommandLineWidget::paste_into_input() {
+    input_->setFocus(Qt::OtherFocusReason);
+    input_->paste();
 }
 
 void CommandLineWidget::append(const QString& text, const QColor& color) {

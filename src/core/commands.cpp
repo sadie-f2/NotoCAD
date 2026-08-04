@@ -11,6 +11,7 @@
 #include "ncad/pick.hpp"
 #include "ncad/scene.hpp"
 
+#include "ncad/clipboard.hpp"
 #include "ncad/dxf.hpp"
 #include "ncad/dxf_read.hpp"
 #include "ncad/entities.hpp"
@@ -3215,6 +3216,114 @@ Step BaseCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::done();
 }
 
+// --- COPYCLIP / CUTCLIP / PASTECLIP -------------------------------------------
+
+Step CopyClipCommand::start(CommandContext& ctx) {
+    // Refused up front rather than after the selection: asking the user to
+    // pick entities and then announcing they had nowhere to go would be worse.
+    if (!ctx.clipboard) return Step::failed("no clipboard is available");
+    return Step::ask(select_.prompt(ctx));
+}
+
+Step CopyClipCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (select_.feed(ctx, value)) {
+        case SelectionPrompter::Result::Selecting:
+            return Step::ask(select_.prompt(ctx));
+
+        case SelectionPrompter::Result::Finished: {
+            if (ctx.selection.empty()) return Step::done("Nothing selected");
+
+            // COPYCLIP asks no base point -- that is COPYBASE's difference --
+            // so the fragment is pasted by the selection's bounding-box
+            // corner, the closest thing it has to a natural handle.
+            BBox box;
+            for (const Handle h : ctx.selection.handles()) {
+                if (const Entity* e = ctx.db.get(h)) box.expand(e->bbox());
+            }
+            const Vec3 base = box.valid() ? box.min : Vec3{};
+
+            const std::string text = clip_fragment(ctx.db, ctx.selection.handles(), base);
+            if (!ctx.clipboard->set_text(text)) {
+                return Step::failed("the clipboard did not accept the copy");
+            }
+
+            std::size_t n = ctx.selection.size();
+            if (cut_) {
+                n = 0;
+                for (const Handle h : ctx.selection.handles()) {
+                    if (ctx.db.erase(h)) ++n;
+                }
+            }
+            return Step::done(std::to_string(n) +
+                              (cut_ ? " cut to the clipboard" : " copied to the clipboard"));
+        }
+
+        case SelectionPrompter::Result::Rejected:
+            break;
+    }
+    return Step::failed("an entity is required");
+}
+
+Step PasteClipCommand::start(CommandContext& ctx) {
+    if (!ctx.clipboard) return Step::failed("no clipboard is available");
+    if (!ctx.clipboard->get_text(text_)) return Step::failed("the clipboard is empty");
+    if (!clip_looks_like_dxf(text_)) {
+        return Step::failed("the clipboard holds no DXF to paste");
+    }
+
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Insertion point <paste in place>";
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step PasteClipCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (value.kind == InputKind::None) return commit(ctx, nullptr);
+    if (value.kind != InputKind::Point) return Step::failed("a point is required");
+    return commit(ctx, &value.point);
+}
+
+Step PasteClipCommand::commit(CommandContext& ctx, const Vec3* dest) {
+    // Everything the merge adds gets a handle at or past this mark, and lands
+    // at the end of the drawing order -- which is what makes "what arrived"
+    // answerable without the reader keeping a list.
+    const Handle watermark = ctx.db.peek_next_handle();
+
+    const DxfReadResult r = read_dxf_text(ctx.db, text_, DxfReadMode::Merge);
+    if (!r.ok) return Step::failed("the clipboard could not be read as DXF: " + r.error);
+
+    std::vector<Handle> added;
+    for (auto it = ctx.db.order().rbegin(); it != ctx.db.order().rend() && *it >= watermark;
+         ++it) {
+        added.push_back(*it);
+    }
+
+    if (dest) {
+        // Journalled the way MOVE moves: clone, transform, replace -- the
+        // merge's adds and this translation share the command's undo group,
+        // so undo removes the paste in one step.
+        const Mat4 m = Mat4::translation(*dest - clip_base(text_));
+        for (const Handle h : added) {
+            const Entity* e = ctx.db.get(h);
+            if (!e) continue;
+            EntityPtr moved = e->clone();
+            moved->transform(m);
+            ctx.db.replace(h, std::move(moved));
+        }
+    }
+
+    // The paste becomes the selection, so MOVE Previous grabs it directly.
+    ctx.selection.clear();
+    for (auto it = added.rbegin(); it != added.rend(); ++it) ctx.selection.add(*it);
+
+    std::string msg = std::to_string(added.size()) + " pasted";
+    if (r.unresolved_inserts > 0) {
+        msg += ", " + std::to_string(r.unresolved_inserts) + " insert(s) unresolved";
+    }
+    return Step::done(msg);
+}
+
 // --- PEDIT ------------------------------------------------------------------
 
 namespace {
@@ -5789,6 +5898,9 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "INSERT") return std::make_unique<InsertCommand>(false);
     if (upper == "MINSERT") return std::make_unique<InsertCommand>(true);
     if (upper == "WBLOCK") return std::make_unique<WblockCommand>();
+    if (upper == "COPYCLIP") return std::make_unique<CopyClipCommand>(false);
+    if (upper == "CUTCLIP") return std::make_unique<CopyClipCommand>(true);
+    if (upper == "PASTECLIP") return std::make_unique<PasteClipCommand>();
     if (upper == "PEDIT") return std::make_unique<PeditCommand>();
     if (upper == "PLINE") return std::make_unique<PlineCommand>();
     if (upper == "POINT") return std::make_unique<PointCommand>();
@@ -5813,7 +5925,7 @@ const std::vector<std::string>& command_names() {
     static const std::vector<std::string> names = {
         "ABOUT", "APPLOAD", "ARC", "AREA", "ARRAY", "CIRCLE", "ELLIPSE", "NEW", "SAVE", "SAVEAS", "QSAVE",
         "MEASUREGEOM", "ORTHO", "OSNAP", "SETVAR", "SPLINE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
-        "ID", "OPEN",
+        "ID", "OPEN", "COPYCLIP", "CUTCLIP", "PASTECLIP",
         "LIMITS", "LTSCALE",
         "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
