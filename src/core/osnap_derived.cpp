@@ -550,6 +550,20 @@ bool nearest_point(const Entity& e, const Vec3& ref, Vec3* out) {
                               });
     }
 
+    // A point is zero-dimensional, so the nearest place on it is itself. That
+    // reads as trivial and is the whole reason it was missing: every other
+    // branch here solves for a position along something, and a point has no
+    // along. Without it NEA cannot see a POINT at all -- NODE is the only snap
+    // that ever found one, and NEA is the snap a user reaches for when they do
+    // not want to think about which kind of thing is under the cursor.
+    //
+    // NODE still wins when both are enabled: it is discrete and NEA is
+    // continuous, and osnap_search ranks discrete snaps first.
+    if (e.type() == EntityType::Point) {
+        *out = static_cast<const PointEntity&>(e).position();
+        return true;
+    }
+
     if (const Line* l = as_line(e)) {
         double t = 0.0;
         Vec3 foot{};

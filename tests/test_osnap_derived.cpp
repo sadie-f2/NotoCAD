@@ -306,3 +306,27 @@ TEST_CASE("intersection: arcs are filtered to their sweep") {
     CHECK(intersect_entities(a, b, p) == 1);
     CHECK(p[0].y > 0.0);
 }
+
+TEST_CASE("nea: finds a POINT, which is the only snap that means anything on one") {
+    // A point is zero-dimensional, so the nearest place on it is itself. Every
+    // other branch of nearest_point solves for a position ALONG something, and
+    // this one was simply missing -- so NEA could not see a POINT at all.
+    const PointEntity p({3, 4, 5});
+    Vec3 got{};
+    REQUIRE(nearest_point(p, Vec3{10, 10, 10}, &got));
+    CHECK_VEC(got, 3.0, 4.0, 5.0, 1e-12);
+
+    // From anywhere: there is no "off the end" for a point.
+    REQUIRE(nearest_point(p, Vec3{-100, 0, 2}, &got));
+    CHECK_VEC(got, 3.0, 4.0, 5.0, 1e-12);
+}
+
+TEST_CASE("nea: a point offers no tangent and no perpendicular") {
+    // Neither means anything on a zero-dimensional entity, and answering
+    // "the point itself" for them would put a wrong glyph on a right position.
+    const PointEntity p({1, 2, 3});
+    Vec3 got{};
+    Vec3 tangents[kMaxTangents];
+    CHECK(tangent_points(p, Vec3{0, 0, 0}, tangents) == 0);
+    CHECK(!perpendicular_point(p, Vec3{0, 0, 0}, &got));
+}
