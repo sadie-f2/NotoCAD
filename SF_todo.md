@@ -73,6 +73,20 @@ Not design questions, just things caught in use that should not wait behind phas
       feature. AutoCAD does not do that, and typing `nea` at a prompt already gives you
       NEA for one pick, so the field granted no capability that did not exist and only
       removed the ability to decline it. With POINT's use gone it had no callers at all.
+- [ ] **Pick-point commands are mouse-only from the terminal.** TRIM, EXTEND, FILLET and
+      CHAMFER all need to know WHERE on an entity the pick was, and the terminal's entity
+      prompt parses a bare handle with no location (`input_text.cpp`, PromptKind::Entity).
+      FILLET and CHAMFER work around it by standing in the line's midpoint, which is a
+      real answer because a corner is at an END -- see `pick_on` in commands.cpp. TRIM and
+      EXTEND have no such fallback and simply refuse, so they cannot be driven by
+      `(command "TRIM" ...)` at all, which the design says must not be true of any command.
+      Either give them the same kind of stand-in, or let the text prompt accept a
+      handle-and-point form.
+- [ ] **`c:` functions are not dispatched as commands.** `(defun c:box ...)` followed
+      by typing `BOX` says unknown command — found while writing docs/using-notocad.md,
+      which documents the parenthesised call as the workaround. The lookup belongs
+      where the registry miss is currently reported, asking the interpreter whether
+      `C:NAME` is bound before declaring the name unknown.
 - [x] **DXFIN emptied the drawing it was importing into.** Root cause: OPEN and DXFIN
       were one command class, so DXFIN ran OPEN's code and `read_dxf_text` cleared
       unconditionally. Now `DxfReadMode::{Replace,Merge}` and one `DxfInCommand` with a
@@ -255,7 +269,7 @@ rather than guessing — the interface hides which one it is.
 | 8 | Tables and settings | *Done, apart from UNITS.* LAYER, LTYPE with built-in patterns, dash rendering, COLOR, LTSCALE, LIMITS, and current entity properties. **UNITS is not built**: R12's is a page of report-format questions, and the formatting they control is hardcoded to four decimal places in DIST, ID, AREA and LIST. LUNITS/LUPREC/AUNITS/AUPREC do not exist yet. Also missing: LTYPE loading from a real `acad.lin`, and wildcards in layer and linetype names. |
 | 8 | *(detail)* | LAYER, LTYPE and dash rendering, COLOR, LTSCALE, UNITS, LIMITS. Linetypes touch three layers at once: the DXF table, dash generation in the render path, and LTSCALE — not just a table entry. |
 | 9 | DXF read and OPEN | *Done.* `dxf_read.hpp`, the `Proxy` entity, and DXFIN with OPEN as its alias. LINE, CIRCLE, ARC, POLYLINE and INSERT become real entities; everything else becomes a proxy that writes back unchanged. **The BLOCKS gap is closed** — definitions are read, and an INSERT naming a block defined later still resolves, because inserts are fixed up in a second pass. **Still not read:** the HEADER section's system variables (only `$ACADVER` is looked at), so a file's OSMODE, LIMITS and INSBASE are ignored on the way in even though they are now written on the way out. |
-| 10 | Geometry editing | *Paused deliberately, not abandoned.* The kernel (`intersect.hpp`) and the cutting primitives (`curve_edit.hpp`) are built, and **BREAK, TRIM and EXTEND are done**. **OFFSET, FILLET and CHAMFER are deferred** — rarely used in Sadie's workflow and UCS-neutral, so they cost nothing to do later. **CHANGE/CHPROP is deferred on purpose until after UCS**: CHANGE's change point is interpreted in the current UCS, so writing it against WCS now would need revisiting rather than extending — the same trap VPOINT is held back from. |
+| 10 | Geometry editing | **Done, except CHANGE/CHPROP.** The kernel (`intersect.hpp`) and the cutting primitives (`curve_edit.hpp`) are built, and **BREAK, TRIM, EXTEND, OFFSET, FILLET and CHAMFER are done** — the last three at 0.2.65, when a real use for OFFSET turned up (fattening Hershey strokes into outlines with mitred corners). `offset.hpp` and `corner.hpp` carry the geometry. **CHANGE/CHPROP is deferred on purpose until after UCS**: CHANGE's change point is interpreted in the current UCS, so writing it against WCS now would need revisiting rather than extending — the same trap VPOINT is held back from. |
 | 11 | Blocks | *Done.* BLOCK, INSERT, MINSERT, EXPLODE, WBLOCK and BASE, plus the BLOCKS section both ways. Open question 7 is answered below. **Not built:** ATTDEF/ATTRIB, and EXPLODE of a polyline. |
 | 12 | UCS | *Done.* `Ucs` in `tables.hpp`, the named table on `Database`, the current one in system variables, and the UCS/UCSICON commands. PLAN's three answers finally differ. **Not built:** VPOINT (still deferred, see below), and the UCS icon itself, which is viewport drawing rather than kernel work. |
 | 13 | Meshes and surfaces | PFACE, 3DMESH, RULESURF, TABSURF, REVSURF, EDGESURF; AutoLISP file I/O (`open`, `read-line` — `file_subrs.cpp` currently holds only `dxfout`); suppressed-regen batch mode for LISP loops. **The project's stated purpose.** |

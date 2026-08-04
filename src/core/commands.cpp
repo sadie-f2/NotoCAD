@@ -12,6 +12,8 @@
 #include "ncad/scene.hpp"
 
 #include "ncad/clipboard.hpp"
+#include "ncad/corner.hpp"
+#include "ncad/offset.hpp"
 #include "ncad/dxf.hpp"
 #include "ncad/dxf_read.hpp"
 #include "ncad/entities.hpp"
@@ -2795,6 +2797,289 @@ Step TrimCommand::next(CommandContext& ctx, const InputValue& value) {
                                             : "point at the piece to trim");
             }
             return act_on(ctx, value.entity, value.point);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- OFFSET -----------------------------------------------------------------
+
+Prompt OffsetCommand::select_prompt() const {
+    Prompt p;
+    p.kind = PromptKind::Entity;
+    p.message = "Select object to offset";
+    p.allow_empty = true;  // Enter ends the command
+    return p;
+}
+
+Step OffsetCommand::start(CommandContext& ctx) {
+    Prompt p;
+    p.kind = PromptKind::Distance;
+    p.message = "Offset distance or Through";
+    if (ctx.memory.has_offset) {
+        p.message += ctx.memory.offset_through
+                         ? " <Through>"
+                         : " <" + fmt(ctx.memory.offset_distance) + ">";
+        p.allow_empty = true;
+    }
+    p.keywords.push_back("Through");
+    return Step::ask(p);
+}
+
+Step OffsetCommand::offset_at(CommandContext& ctx, const Vec3& side) {
+    const Entity* e = ctx.db.get(target_);
+    if (!e) return Step::failed("no such entity");
+
+    double d = distance_;
+    if (through_) {
+        // The distance a Through point asks for is simply its own distance to
+        // the curve -- which is why Through needs no separate geometry, and
+        // why the side pick and the size are the same answer.
+        double t = 0.0;
+        Vec3 on{};
+        if (!curve_parameter_at(*e, side, &t) || !curve_point_at(*e, t, &on)) {
+            return Step::failed("that object cannot be offset");
+        }
+        d = length(side - on);
+    }
+
+    EntityPtr made = offset_curve(*e, d, side, ctx.db.construction_normal());
+    if (!made) {
+        return Step::failed(through_ ? "cannot offset through that point"
+                                     : "cannot offset that object that far");
+    }
+    ctx.db.add(std::move(made));
+    ++made_;
+
+    target_ = kNullHandle;
+    state_ = State::Select;
+    return Step::ask(select_prompt());
+}
+
+Step OffsetCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::Distance: {
+            if (keyword_is(value, "THROUGH")) {
+                through_ = true;
+            } else if (value.kind == InputKind::None) {
+                if (!ctx.memory.has_offset) return Step::failed("a distance is required");
+                through_ = ctx.memory.offset_through;
+                distance_ = ctx.memory.offset_distance;
+            } else if (value.kind == InputKind::Real) {
+                if (value.real <= 0.0) return Step::failed("the distance must be positive");
+                distance_ = value.real;
+                through_ = false;
+            } else {
+                return Step::failed("a distance is required");
+            }
+
+            ctx.memory.offset_distance = distance_;
+            ctx.memory.offset_through = through_;
+            ctx.memory.has_offset = true;
+
+            state_ = State::Select;
+            return Step::ask(select_prompt());
+        }
+
+        case State::Select: {
+            if (value.kind == InputKind::None) {
+                if (made_ == 0) return Step::done();
+                return Step::done(std::to_string(made_) + " offset");
+            }
+            if (value.kind != InputKind::Entity) return Step::failed("select an object");
+
+            target_ = value.entity;
+            state_ = State::Side;
+
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = through_ ? "Through point" : "Side to offset";
+            return Step::ask(p);
+        }
+
+        case State::Side: {
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            return offset_at(ctx, value.point);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+// --- FILLET / CHAMFER -------------------------------------------------------
+
+namespace {
+
+// Where the pick landed, or the midpoint when there was no pick.
+//
+// A click carries a location and a typed handle does not, and the location is
+// what says which side of the corner survives. Refusing without one would make
+// FILLET mouse-only -- and a command that cannot be driven by `(command ...)`
+// is exactly what this design says must not exist.
+//
+// The midpoint is a real answer rather than a guess: a corner is at an END of
+// each line, so the middle is on the piece that stays. It is ambiguous only for
+// two lines crossing in an X, where nothing but a pick could disambiguate.
+bool pick_on(const CommandContext& ctx, Handle h, const InputValue& value, Vec3* out) {
+    if (value.has_point) {
+        *out = value.point;
+        return true;
+    }
+    const Entity* e = ctx.db.get(h);
+    if (!e || e->type() != EntityType::Line) return false;
+    *out = static_cast<const Line&>(*e).midpoint();
+    return true;
+}
+
+}  // namespace
+
+Prompt FilletCommand::first_prompt(const CommandContext& ctx) const {
+    Prompt p;
+    p.kind = PromptKind::Entity;
+    if (chamfer_) {
+        p.message = "Distances (" + fmt(ctx.memory.chamfer_a) + "," + fmt(ctx.memory.chamfer_b) +
+                    ")/<Select first line>";
+        p.keywords.push_back("Distances");
+    } else {
+        p.message = "Radius (" + fmt(ctx.memory.fillet_radius) + ")/<Select first line>";
+        p.keywords.push_back("Radius");
+    }
+    return p;
+}
+
+Step FilletCommand::start(CommandContext& ctx) { return Step::ask(first_prompt(ctx)); }
+
+Step FilletCommand::apply(CommandContext& ctx, Handle second, const Vec3& pick) {
+    if (second == first_) return Step::failed("two different lines are needed");
+
+    const Entity* ea = ctx.db.get(first_);
+    const Entity* eb = ctx.db.get(second);
+    if (!ea || !eb) return Step::failed("no such entity");
+    if (ea->type() != EntityType::Line || eb->type() != EntityType::Line) {
+        // Honest about the boundary rather than silently doing nothing: arcs
+        // and circles are the next pass, see corner.hpp.
+        return Step::failed(chamfer_ ? "CHAMFER works on two lines"
+                                     : "FILLET works on two lines");
+    }
+
+    const Line& la = static_cast<const Line&>(*ea);
+    const Line& lb = static_cast<const Line&>(*eb);
+    const Vec3 plane = ctx.db.construction_normal();
+
+    CornerFit fit;
+    const bool ok =
+        chamfer_ ? chamfer_lines(la, first_pick_, lb, pick, ctx.memory.chamfer_a,
+                                 ctx.memory.chamfer_b, plane, &fit)
+                 : fillet_lines(la, first_pick_, lb, pick, ctx.memory.fillet_radius, plane, &fit);
+    if (!ok) {
+        return Step::failed(chamfer_ ? "those lines cannot be chamfered that way"
+                                     : "those lines cannot be filleted that way");
+    }
+
+    // In place, so an AutoLISP ename still names the same line afterwards --
+    // the same reason MOVE replaces rather than erasing and adding.
+    const auto shorten = [&](Handle h, const Line& src, const Vec3& keep, const Vec3& cut) {
+        if (length(cut - keep) < kEps) {
+            // The corner consumed the whole line. Leaving a zero-length one
+            // behind would be a pickable, snappable nothing.
+            ctx.db.erase(h);
+            return;
+        }
+        auto out = std::make_unique<Line>(keep, cut);
+        out->props() = src.props();
+        ctx.db.replace(h, std::move(out));
+    };
+    shorten(first_, la, fit.keep_a, fit.cut_a);
+    shorten(second, lb, fit.keep_b, fit.cut_b);
+
+    if (fit.has_arc) {
+        auto arc = std::make_unique<Arc>(fit.centre, fit.radius, fit.start_angle, fit.end_angle,
+                                         plane);
+        arc->props() = ctx.db.current_props();
+        ctx.db.add(std::move(arc));
+    } else if (length(fit.cut_b - fit.cut_a) > kEps) {
+        auto join = std::make_unique<Line>(fit.cut_a, fit.cut_b);
+        join->props() = ctx.db.current_props();
+        ctx.db.add(std::move(join));
+    }
+    return Step::done();
+}
+
+Step FilletCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::First: {
+            if (keyword_is(value, "RADIUS")) {
+                state_ = State::Radius;
+                Prompt p;
+                p.kind = PromptKind::Distance;
+                p.message = "Fillet radius <" + fmt(ctx.memory.fillet_radius) + ">";
+                p.allow_empty = true;
+                return Step::ask(p);
+            }
+            if (keyword_is(value, "DISTANCES")) {
+                state_ = State::DistA;
+                Prompt p;
+                p.kind = PromptKind::Distance;
+                p.message = "First chamfer distance <" + fmt(ctx.memory.chamfer_a) + ">";
+                p.allow_empty = true;
+                return Step::ask(p);
+            }
+            if (value.kind == InputKind::None) return Step::done();
+            if (value.kind != InputKind::Entity) return Step::failed("select a line");
+
+            first_ = value.entity;
+            if (!pick_on(ctx, first_, value, &first_pick_)) {
+                return Step::failed("select a line");
+            }
+            state_ = State::Second;
+
+            Prompt p;
+            p.kind = PromptKind::Entity;
+            p.message = "Select second line";
+            return Step::ask(p);
+        }
+
+        case State::Second: {
+            if (value.kind != InputKind::Entity) return Step::failed("select a line");
+            Vec3 pick{};
+            if (!pick_on(ctx, value.entity, value, &pick)) return Step::failed("select a line");
+            return apply(ctx, value.entity, pick);
+        }
+
+        case State::Radius: {
+            if (value.kind == InputKind::Real) {
+                if (value.real < 0.0) return Step::failed("the radius cannot be negative");
+                ctx.memory.fillet_radius = value.real;
+            } else if (value.kind != InputKind::None) {
+                return Step::failed("a radius is required");
+            }
+            state_ = State::First;
+            return Step::ask(first_prompt(ctx));
+        }
+
+        case State::DistA: {
+            if (value.kind == InputKind::Real) {
+                if (value.real < 0.0) return Step::failed("the distance cannot be negative");
+                ctx.memory.chamfer_a = value.real;
+            } else if (value.kind != InputKind::None) {
+                return Step::failed("a distance is required");
+            }
+            state_ = State::DistB;
+            Prompt p;
+            p.kind = PromptKind::Distance;
+            p.message = "Second chamfer distance <" + fmt(ctx.memory.chamfer_b) + ">";
+            p.allow_empty = true;
+            return Step::ask(p);
+        }
+
+        case State::DistB: {
+            if (value.kind == InputKind::Real) {
+                if (value.real < 0.0) return Step::failed("the distance cannot be negative");
+                ctx.memory.chamfer_b = value.real;
+            } else if (value.kind != InputKind::None) {
+                return Step::failed("a distance is required");
+            }
+            state_ = State::First;
+            return Step::ask(first_prompt(ctx));
         }
     }
     return Step::failed("internal state error");
@@ -5898,6 +6183,9 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "INSERT") return std::make_unique<InsertCommand>(false);
     if (upper == "MINSERT") return std::make_unique<InsertCommand>(true);
     if (upper == "WBLOCK") return std::make_unique<WblockCommand>();
+    if (upper == "OFFSET") return std::make_unique<OffsetCommand>();
+    if (upper == "FILLET") return std::make_unique<FilletCommand>(false);
+    if (upper == "CHAMFER") return std::make_unique<FilletCommand>(true);
     if (upper == "COPYCLIP") return std::make_unique<CopyClipCommand>(false);
     if (upper == "CUTCLIP") return std::make_unique<CopyClipCommand>(true);
     if (upper == "PASTECLIP") return std::make_unique<PasteClipCommand>();
@@ -5927,7 +6215,7 @@ const std::vector<std::string>& command_names() {
         "MEASUREGEOM", "ORTHO", "OSNAP", "SETVAR", "SPLINE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN", "COPYCLIP", "CUTCLIP", "PASTECLIP",
         "LIMITS", "LTSCALE",
-        "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
+        "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "OFFSET", "FILLET", "CHAMFER", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
         "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;
@@ -5963,6 +6251,9 @@ const std::vector<CommandAlias>& command_aliases() {
         {"I", "INSERT"},
         {"X", "EXPLODE"},
         {"W", "WBLOCK"},
+        {"O", "OFFSET"},
+        {"F", "FILLET"},
+        {"CHA", "CHAMFER"},
         {"SO", "SOLID"},
         {"DT", "TEXT"},
         {"3F", "3DFACE"},

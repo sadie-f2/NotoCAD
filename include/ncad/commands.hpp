@@ -941,6 +941,64 @@ private:
     std::string text_;
 };
 
+// OFFSET: the parallel copy of a curve, at a distance or through a point.
+//
+// R12's loop, and the loop is the point: the distance is asked once and then
+// object-and-side repeats until Enter, because offsetting one curve is rare and
+// offsetting a run of them is what the command is for. The geometry is in
+// offset.hpp; this is the prompting and the side pick.
+//
+// Through is not a second mode so much as a second way to say the same number:
+// the distance from the picked point to the curve IS the offset, and the side
+// comes free with it since the point is already on one.
+class OffsetCommand final : public Command {
+public:
+    const char* name() const override { return "OFFSET"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Distance, Select, Side };
+
+    Prompt select_prompt() const;
+    Step offset_at(CommandContext& ctx, const Vec3& side);
+
+    State state_{State::Distance};
+    bool through_{false};
+    double distance_{0.0};
+    Handle target_{kNullHandle};
+    std::size_t made_{0};
+};
+
+// FILLET / CHAMFER: round or bevel the corner where two lines meet.
+//
+// One class for both because they are one construction with two endings -- see
+// corner.hpp, which decides everything except what fills the gap. R12 shares
+// their prompt shape too: an option to set the size, then two picks, and the
+// picks say which side of the crossing survives.
+//
+// FILLET with radius 0 closes a corner without rounding it, which is how two
+// lines that overshoot or fall short are made to meet exactly.
+class FilletCommand final : public Command {
+public:
+    explicit FilletCommand(bool chamfer) : chamfer_(chamfer) {}
+
+    const char* name() const override { return chamfer_ ? "CHAMFER" : "FILLET"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { First, Second, Radius, DistA, DistB };
+
+    Prompt first_prompt(const CommandContext& ctx) const;
+    Step apply(CommandContext& ctx, Handle second, const Vec3& pick);
+
+    bool chamfer_;
+    State state_{State::First};
+    Handle first_{kNullHandle};
+    Vec3 first_pick_{};
+};
+
 // BREAK: remove the piece of a curve between two points.
 //
 // The first of phase 10's commands, and the simplest consumer of the

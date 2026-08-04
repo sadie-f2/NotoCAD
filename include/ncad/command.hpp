@@ -227,6 +227,17 @@ struct CommandMemory {
     // UCS Prev: the coordinate system in force before the current one.
     Ucs previous_ucs{};
     bool has_previous_ucs{false};
+
+    // OFFSET's distance, and FILLET's and CHAMFER's sizes. R12 offers each
+    // back as the default because using one twice is the normal case --
+    // offsetting a whole outline, or rounding every corner the same way.
+    double offset_distance{0.0};
+    bool offset_through{false};
+    bool has_offset{false};
+
+    double fillet_radius{0.0};
+    double chamfer_a{0.0};
+    double chamfer_b{0.0};
 };
 
 // What a command is allowed to touch. Still deliberately narrow: no view, no

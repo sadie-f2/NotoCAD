@@ -172,7 +172,7 @@ file is not misleading by omission:
 - **Tab completion** in the Qt command line. GUI-only by decision.
 - **INT on ellipse and spline**, and therefore TRIM, BREAK and EXTEND on them.
 - **The remaining previews** — POINT, SOLID, INSERT, BREAK, TRIM.
-- **OFFSET, FILLET, CHAMFER, CHANGE/CHPROP.**
+- **CHANGE/CHPROP.**
 - **History recording for scripting**, which pairs with `--script` above.
 - **DIM**, deferred deliberately and now on the roadmap rather than out of scope.
 - **Writing DXF versions later than R12.** Reading them is built.
