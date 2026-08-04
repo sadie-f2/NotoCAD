@@ -43,14 +43,13 @@ Not design questions, just things caught in use that should not wait behind phas
       `nearest_point`: every other branch there solves for a position ALONG something
       and a point has no along, which is exactly why it was missing. Confirmed working.
 
-      Read the wrong way first, and the wrong answer is still in the tree: the item was
-      taken as the POINT COMMAND's prompt offering NEA while placing, and
-      `Prompt::extra_mask` was built for it. **Open question, needs Sadie:** that forces
-      NEA on at POINT's prompt on top of OSMODE, so placing a point near any geometry
-      snaps to it every time -- AutoCAD does not do that, and NEA being continuous means
-      it fires whenever anything is in the aperture. Recommend reverting both the POINT
-      usage and the field, since with POINT gone `extra_mask` has no callers and
-      mechanism with no caller is a liability rather than a head start.
+      Read the wrong way first: the item was taken as the POINT COMMAND's prompt
+      offering NEA while placing, and `Prompt::extra_mask` was built for it. Reverted --
+      it forced NEA on at POINT's prompt on top of OSMODE, so placing a point near any
+      geometry snapped to it every time, NEA being continuous rather than tied to a
+      feature. AutoCAD does not do that, and typing `nea` at a prompt already gives you
+      NEA for one pick, so the field granted no capability that did not exist and only
+      removed the ability to decline it. With POINT's use gone it had no callers at all.
 - [x] **DXFIN emptied the drawing it was importing into.** Root cause: OPEN and DXFIN
       were one command class, so DXFIN ran OPEN's code and `read_dxf_text` cleared
       unconditionally. Now `DxfReadMode::{Replace,Merge}` and one `DxfInCommand` with a

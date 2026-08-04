@@ -1806,11 +1806,6 @@ Step PointCommand::start(CommandContext&) {
     Prompt p;
     p.kind = PromptKind::Point;
     p.message = "Point";
-    // NEA is the one snap that means something for a zero-dimensional entity;
-    // END is merely convenient (a point looks like its own endpoint from some
-    // angle) and not correct. OSMODE stays the session default, so this is
-    // additive rather than overriding it.
-    p.extra_mask = kOsnapNearest;
     return Step::ask(p);
 }
 
