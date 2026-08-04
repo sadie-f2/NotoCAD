@@ -37,3 +37,19 @@ target_link_libraries(ncad_gui_lib PRIVATE ncad_flags)
 # The library is ncad_gui_lib to avoid colliding with the ncad_gui executable.
 add_executable(ncad_gui main.cpp)
 target_link_libraries(ncad_gui PRIVATE ncad_gui_lib ncad_flags)
+
+# The deployable shape, opted into so day-to-day builds keep their flat
+# binary path. CMake generates Contents/MacOS + Info.plist from the
+# properties below; scripts/mac_bundle.sh does the rest (Qt frameworks in,
+# stray Homebrew paths checked, signed, disk image). No icon yet -- when one
+# exists, MACOSX_BUNDLE_ICON_FILE names it here.
+if(APPLE AND NCAD_MACOS_BUNDLE)
+  set_target_properties(ncad_gui PROPERTIES
+    MACOSX_BUNDLE TRUE
+    OUTPUT_NAME "NotoCAD"
+    MACOSX_BUNDLE_BUNDLE_NAME "NotoCAD"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "org.notocad.NotoCAD"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+  )
+endif()
