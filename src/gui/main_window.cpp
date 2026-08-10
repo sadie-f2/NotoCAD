@@ -369,10 +369,31 @@ void MainWindow::run_command(const QString& name) {
 
 void MainWindow::offer_file_dialog() {
     if (!engine_.active()) {
+        // Nothing is standing to answer, so anything the dialog was holding for
+        // a later prompt is stale. Clearing here rather than at each exit is
+        // what stops a stored answer surfacing in a command that never asked.
         file_prompt_token_.clear();
+        pending_format_.clear();
+        pending_overwrite_ok_ = false;
         return;
     }
     const Prompt& p = engine_.prompt();
+
+    // Two questions the save dialog already asked. Putting them again on the
+    // command line is asking twice, which is the whole complaint the file-type
+    // list was added to answer.
+    if (p.file_overwrite && pending_overwrite_ok_) {
+        pending_overwrite_ok_ = false;
+        QTimer::singleShot(0, this, [this]() { on_line_entered(QStringLiteral("Yes")); });
+        return;
+    }
+    if (p.file_format && !pending_format_.isEmpty()) {
+        const QString answer = pending_format_;
+        pending_format_.clear();
+        QTimer::singleShot(0, this, [this, answer]() { on_line_entered(answer); });
+        return;
+    }
+
     if (p.file == FileIntent::None) {
         file_prompt_token_.clear();
         return;
@@ -400,23 +421,55 @@ void MainWindow::run_file_dialog() {
     if (p.file == FileIntent::None) return;
 
     const QString ext = QString::fromStdString(p.file_extension);
-    const QString filter = ext.isEmpty()
-                               ? QStringLiteral("All files (*)")
-                               : QStringLiteral("%1 files (*.%2);;All files (*)")
-                                     .arg(ext.toUpper(), ext);
     const QString caption = QString::fromStdString(p.message);
 
-    const QString path = p.file == FileIntent::Open
-                             ? QFileDialog::getOpenFileName(this, caption, QString(), filter)
-                             : QFileDialog::getSaveFileName(this, caption, QString(), filter);
+    // When the command is going to ask what format to write, the choice goes
+    // in the dialog's file-type list -- which on macOS is the native "File
+    // Format" popup, and is where people look for it. Each entry keeps the
+    // same extension, so choosing one does not rename anything.
+    QStringList filters;
+    for (const std::string& format : p.file_formats) {
+        filters << QStringLiteral("%1 (*.%2)").arg(QString::fromStdString(format), ext);
+    }
+    if (filters.isEmpty()) {
+        filters << (ext.isEmpty() ? QStringLiteral("All files (*)")
+                                  : QStringLiteral("%1 files (*.%2)").arg(ext.toUpper(), ext));
+    }
+    filters << QStringLiteral("All files (*)");
+
+    QString chosen_filter;
+    const QString filter = filters.join(QStringLiteral(";;"));
+    const QString path =
+        p.file == FileIntent::Open
+            ? QFileDialog::getOpenFileName(this, caption, QString(), filter, &chosen_filter)
+            : QFileDialog::getSaveFileName(this, caption, QString(), filter, &chosen_filter);
 
     if (path.isEmpty()) {
         // Declining the dialog cancels the command rather than dropping back to
         // typing: the prompt would otherwise still be standing with no way to
         // answer it that the user has not just refused.
+        pending_format_.clear();
+        pending_overwrite_ok_ = false;
         on_cancel_requested();
         return;
     }
+
+    // Getting a path out of a SAVE dialog means any replacement was already
+    // agreed to -- Qt confirms overwriting unless told not to, on every
+    // platform -- so the command's own question has been answered.
+    pending_overwrite_ok_ = p.file == FileIntent::Save;
+
+    // Which format the file-type list was left on, matched back by name rather
+    // than by position so a reordered list cannot silently change the answer.
+    pending_format_.clear();
+    for (const std::string& format : p.file_formats) {
+        const QString label = QString::fromStdString(format);
+        if (chosen_filter.startsWith(label + QLatin1String(" ("))) {
+            pending_format_ = label;
+            break;
+        }
+    }
+
     on_line_entered(path);
 }
 

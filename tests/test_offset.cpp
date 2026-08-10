@@ -311,6 +311,37 @@ TEST_CASE("file prompts: the ones that name a file say so, with an extension") {
     }
 }
 
+TEST_CASE("file prompts: a save names the formats it could be written in") {
+    Database db;
+    CommandEngine engine(db);
+
+    // Declared on the NAME prompt, because that is when a save dialog is built
+    // and the file-type list is where the choice belongs.
+    for (const char* command : {"SAVEAS", "DXFOUT"}) {
+        engine.begin(make_command(command));
+        REQUIRE(engine.active());
+        REQUIRE(engine.prompt().file_formats.size() == 2);
+        CHECK(engine.prompt().file_formats[0] == "R12");
+        CHECK(engine.prompt().file_formats[1] == "R2000");
+        engine.cancel();
+    }
+
+    // And the later question is marked as the one those formats answer, so a
+    // window that folded it into the dialog does not ask it twice.
+    engine.begin(make_command("SAVEAS"));
+    engine.supply(InputValue::of_string("/tmp/ncad_format_probe.dxf"));
+    REQUIRE(engine.active());
+    CHECK(engine.prompt().file_format);
+    CHECK(!engine.prompt().file_overwrite);
+    engine.cancel();
+
+    // WBLOCK writes R12 without asking, so it offers no list -- the flag says
+    // what the command does rather than what the file type is.
+    engine.begin(make_command("WBLOCK"));
+    CHECK(engine.prompt().file_formats.empty());
+    engine.cancel();
+}
+
 TEST_CASE("file prompts: a prompt that is not about a file says nothing about one") {
     Database db;
     CommandEngine engine(db);

@@ -110,6 +110,15 @@ private:
     // one does not immediately raise it again. Command name and prompt text
     // together, because one command asks for more than one file.
     QString file_prompt_token_;
+
+    // The format the save dialog's file-type list was left on, waiting for the
+    // prompt that asks. Empty whenever the dialog did not offer the choice, so
+    // the command line asks as it always did.
+    QString pending_format_;
+
+    // Whether a save dialog has already had "replace it?" agreed to, so the
+    // command's own overwrite question is not asked a second time.
+    bool pending_overwrite_ok_{false};
 };
 
 }  // namespace ncad

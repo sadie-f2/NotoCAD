@@ -5784,6 +5784,9 @@ Prompt dxf_version_prompt(const CommandContext& ctx) {
     p.message = "DXF version <" + ctx.db.sysvars().get_string(Sysvar::DxfVersionVar) + ">";
     p.keywords = {"R12", "R2000"};
     p.allow_empty = true;
+    // A save dialog may already have asked this as its file type; see
+    // Prompt::file_format. Nothing changes for the terminal, which asks.
+    p.file_format = true;
     return p;
 }
 
@@ -5829,6 +5832,7 @@ Step SaveCommand::start(CommandContext& ctx) {
     p.message = "Save drawing as";
     p.file = FileIntent::Save;
     p.file_extension = "dxf";
+    p.file_formats = {"R12", "R2000"};
     // SAVE offers the current name so Enter accepts it; SAVEAS does not, because
     // asking again and defaulting to the same answer is how you overwrite the
     // file you meant to branch from.
@@ -5871,6 +5875,8 @@ Step SaveCommand::next(CommandContext& ctx, const InputValue& value) {
         Prompt p;
         p.kind = PromptKind::String;
         p.message = path + " exists. Overwrite? [Yes/No] <No>";
+        // A save dialog has already asked this; see Prompt::file_overwrite.
+        p.file_overwrite = true;
         p.keywords.push_back("No");
         p.keywords.push_back("Yes");
         p.allow_empty = true;
@@ -6094,6 +6100,7 @@ Step DxfOutCommand::start(CommandContext&) {
     p.message = "Enter file name";
     p.file = FileIntent::Save;
     p.file_extension = "dxf";
+    p.file_formats = {"R12", "R2000"};
     state_ = State::AskName;
     return Step::ask(p);
 }

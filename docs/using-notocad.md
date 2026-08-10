@@ -163,6 +163,11 @@ for you.**
 - **In the window, file prompts open a file dialog.** OPEN, SAVE, SAVEAS,
   DXFIN, DXFOUT, WBLOCK and APPLOAD all raise one, so you browse instead of
   typing paths. Cancelling the dialog cancels the command.
+- **The DXF version is in the save dialog**, as its file-type choice ("R12" or
+  "R2000" — the *File Format* popup on macOS). Choosing there answers it, so
+  the command line does not ask again; the same goes for replacing an existing
+  file, which the dialog already confirmed. At the terminal both are asked as
+  ordinary prompts.
 - **`FILEDIA` turns that off** — `SETVAR FILEDIA 0`, or from AutoLISP — and
   then file names are typed even in the window. **Do this in any script or
   LISP routine that opens or saves**, or it will stop on a dialog with nobody

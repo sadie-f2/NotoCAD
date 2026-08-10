@@ -87,6 +87,13 @@ Not design questions, just things caught in use that should not wait behind phas
       `FILEDIA` is the R12 switch and earns its keep for the R12 reason: a script driving
       OPEN must not stop on a modal window. `~` at a file prompt asks for the dialog anyway.
 
+      The version choice lives in the save dialog's file-type list rather than in a
+      question after it -- `Prompt::file_formats` on the NAME prompt, since that is when
+      the dialog is built, and `file_format` / `file_overwrite` marking the questions it
+      has thereby answered. Sadie's point, and it generalised immediately: the native
+      dialog also confirms replacing a file, so SAVE's own Overwrite? prompt was the same
+      redundancy a second time.
+
       Two things found by LOOKING at the window rather than by anything failing: a
       stylesheet set on the QMainWindow takes over its children and turned the command
       line's transcript white on white (it is per-toolbar now), and an ellipse icon with a

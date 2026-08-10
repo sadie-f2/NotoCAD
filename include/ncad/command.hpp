@@ -93,6 +93,26 @@ struct Prompt {
     FileIntent file{FileIntent::None};
     std::string file_extension;
 
+    // The formats this file could be written in, when the command is going to
+    // ask about it in a moment. Declared on the NAME prompt because that is
+    // when a save dialog is built and the choice belongs in it -- "Save as
+    // type" is where people look for a format, not in a question afterwards.
+    //
+    // Stating it here does not commit anyone to anything: the terminal ignores
+    // the list and answers the later prompt by typing, exactly as before.
+    std::vector<std::string> file_formats;
+
+    // And this is that later prompt. A window that folded the choice into its
+    // save dialog answers this from what was chosen there, rather than asking
+    // the same question twice.
+    bool file_format{false};
+
+    // "That file exists -- replace it?". Marked for the same reason: every
+    // platform's save dialog asks this itself, so a window that used one has
+    // already had the answer and must not ask again. The terminal, which has
+    // no dialog to have asked, still does.
+    bool file_overwrite{false};
+
     // Where the rubber band starts from. Set by the command; the engine does
     // not use it, a viewport does.
     Vec3 base{};
