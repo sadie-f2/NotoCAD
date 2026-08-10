@@ -335,6 +335,41 @@ void draw_ucsicon(const Ink& k) {
     k.rect(0.1, 0.1, 0.26, 0.26);
 }
 
+void draw_ucs(const Ink& k) {
+    // One frame being replaced by another, which is what the command does --
+    // and what keeps it apart from UCSICON, whose single axis pair this would
+    // otherwise be at 22 pixels.
+    dashed(k.p, true);
+    k.poly({k.at(0.06, 0.72), k.at(0.06, 0.06), k.at(0.72, 0.06)});
+    dashed(k.p, false);
+
+    // The new frame: same origin, turned.
+    const double c = 0.866;  // cos 30
+    const double s = 0.5;    // sin 30
+    const double len = 0.7;
+    k.line(0.06, 0.06, 0.06 + len * c, 0.06 + len * s);
+    k.line(0.06, 0.06, 0.06 - len * s, 0.06 + len * c);
+    k.arrow(0.06 + len * c, 0.06 + len * s, c, s, 0.15);
+    k.arrow(0.06 - len * s, 0.06 + len * c, -s, c, 0.15);
+    // Small: the two frames already meet here, and a larger dot closes the
+    // corner into a blob at actual size.
+    k.dot(0.06, 0.06, 0.045);
+}
+
+void draw_vpoint(const Ink& k) {
+    // A cube looked AT from somewhere. The sight line is the whole difference
+    // from draw_block, which is also a cube.
+    k.poly({k.at(0.34, 0.74), k.at(0.74, 0.74), k.at(0.74, 0.34), k.at(0.34, 0.34),
+            k.at(0.34, 0.74)});
+    k.poly({k.at(0.34, 0.74), k.at(0.5, 0.9), k.at(0.9, 0.9), k.at(0.74, 0.74)});
+    k.poly({k.at(0.9, 0.9), k.at(0.9, 0.5), k.at(0.74, 0.34)});
+
+    dashed(k.p, true);
+    k.line(0.02, 0.2, 0.42, 0.52);
+    dashed(k.p, false);
+    k.arrow(0.46, 0.55, 1.0, 0.8, 0.16);
+}
+
 void draw_layer(const Ink& k) {
     k.poly({k.at(0.5, 0.9), k.at(0.92, 0.68), k.at(0.5, 0.46), k.at(0.08, 0.68), k.at(0.5, 0.9)});
     k.poly({k.at(0.08, 0.46), k.at(0.5, 0.24), k.at(0.92, 0.46)});
@@ -377,7 +412,8 @@ constexpr Entry kIcons[] = {
     {"BREAK", draw_break},     {"OFFSET", draw_offset},   {"FILLET", draw_fillet},
     {"CHAMFER", draw_chamfer}, {"EXPLODE", draw_explode}, {"ZOOM", draw_zoom},
     {"PAN", draw_pan},         {"PLAN", draw_plan},       {"UNDO", draw_undo},
-    {"REDO", draw_redo},       {"UCSICON", draw_ucsicon}, {"LAYER", draw_layer},
+    {"REDO", draw_redo},       {"UCSICON", draw_ucsicon}, {"UCS", draw_ucs},
+    {"VPOINT", draw_vpoint},   {"LAYER", draw_layer},
     {"BLOCK", draw_block},     {"INSERT", draw_block},    {"MEASUREGEOM", draw_measure},
 };
 

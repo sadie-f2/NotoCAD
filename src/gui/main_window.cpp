@@ -405,7 +405,7 @@ QToolBar* MainWindow::add_toolbar(const QString& title, Qt::ToolBarArea area,
 void MainWindow::build_toolbars() {
     add_toolbar(QStringLiteral("File"), Qt::TopToolBarArea,
                 {"NEW", "OPEN", "SAVE", "|", "UNDO", "REDO", "|", "ZOOM", "PAN", "PLAN", "|",
-                 "LAYER", "MEASUREGEOM"});
+                 "UCS", "UCSICON", "VPOINT", "|", "LAYER", "MEASUREGEOM"});
 
     add_toolbar(QStringLiteral("Draw"), Qt::LeftToolBarArea,
                 {"LINE", "PLINE", "CIRCLE", "ARC", "ELLIPSE", "SPLINE", "|", "POINT", "TEXT",
