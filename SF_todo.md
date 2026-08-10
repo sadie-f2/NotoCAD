@@ -128,6 +128,16 @@ Not design questions, just things caught in use that should not wait behind phas
       AND on `aboutToQuit`, because Cmd-Q and the Dock's Quit do not reliably deliver a
       close event and losing an afternoon's arrangement to the wrong exit would be a poor
       reward for having arranged it. `--reset-ui` is the way out of a bad state.
+- [x] **Hiding every toolbar was a one-way door.** Qt offers the checklist on a right
+      click, but only OVER a toolbar -- and once the last one is hidden its strip has
+      collapsed to nothing, so there is nowhere left to click and `--reset-ui` was the
+      only way back. Sadie asked the question before hitting it. `contextMenuEvent` on
+      MainWindow now offers the same menu anywhere the click is not already spoken for;
+      the text widgets keep their own copy/paste menus because they consume it first.
+      Offered always rather than only while something is hidden: a control that appears
+      only once you are stuck is one you could not have learned before you needed it.
+      Toolbars come back at the edge they were left at, since QMainWindow keeps a hidden
+      toolbar's place rather than forgetting it.
 - [ ] **Pick-point commands are mouse-only from the terminal.** TRIM, EXTEND, FILLET and
       CHAMFER all need to know WHERE on an entity the pick was, and the terminal's entity
       prompt parses a bare handle with no location (`input_text.cpp`, PromptKind::Entity).

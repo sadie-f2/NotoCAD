@@ -96,11 +96,14 @@ line; that is the honest projection, not a bug.
 - **Typing goes to the command line from anywhere.** There is no "click the
   command line first" step — start typing and the input follows.
 - **Cmd +/−** (Ctrl on Linux) resizes the command-line text.
-- **Toolbars can be dragged** to any edge, and right-clicking a toolbar gives
-  a checklist for hiding the ones you do not want. Where you put them, the
-  window size, and the command-line text size are remembered between sessions
-  in `~/.config/NotoCAD/ncad_gui.ini`. `ncad_gui --reset-ui` forgets them if
-  the arrangement ever goes wrong.
+- **Toolbars can be dragged** to any edge. **Right-click anywhere** — the
+  drawing area included — for a checklist of them, which is how you hide the
+  ones you do not want and how you get them back afterwards. A toolbar
+  switched back on returns to the edge it was left at.
+- Where the toolbars are, the window size, and the command-line text size are
+  remembered between sessions in `~/.config/NotoCAD/ncad_gui.ini`.
+  `ncad_gui --reset-ui` forgets them if the arrangement ever goes wrong, and
+  `ncad_gui -h` prints that path.
 - **Escape** cancels, from either the viewport or the command line.
 
 ### Copy and paste

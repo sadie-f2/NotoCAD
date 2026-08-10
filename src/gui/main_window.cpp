@@ -9,6 +9,8 @@
 #include <QApplication>
 #include <QFileDialog>
 #include <QKeyEvent>
+#include <QContextMenuEvent>
+#include <QMenu>
 #include <QMessageBox>
 #include <QSettings>
 #include <QTimer>
@@ -24,6 +26,8 @@
 
 #include <QCloseEvent>
 #include <QSplitter>
+
+#include <memory>
 
 namespace ncad {
 
@@ -271,6 +275,23 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     command_line_->deliver_key(key);
     routing_key_ = false;
     return true;
+}
+
+void MainWindow::contextMenuEvent(QContextMenuEvent* event) {
+    // Qt builds this from the toolbars that actually exist, so it cannot drift
+    // as groups are added, and it lists hidden ones too -- which is the whole
+    // point. A toolbar switched back on returns to where it was left, because
+    // QMainWindow keeps a hidden toolbar's place in its layout rather than
+    // forgetting it.
+    //
+    // Offered everywhere rather than only while something is hidden: a control
+    // that appears only once you are stuck is one you cannot have learned
+    // before you needed it. The text widgets keep their own copy/paste menus,
+    // since those consume the click before it reaches here.
+    const std::unique_ptr<QMenu> menu(createPopupMenu());
+    if (!menu) return;
+    menu->exec(event->globalPos());
+    event->accept();
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {

@@ -63,6 +63,12 @@ protected:
     // window is not a command and there is no prompt standing to answer.
     void closeEvent(QCloseEvent* event) override;
 
+    // The toolbar checklist, from a right click ANYWHERE the click is not
+    // already spoken for. QMainWindow offers the same menu but only over a
+    // toolbar, which is exactly no help once the last one is hidden and the
+    // strip it lived in has collapsed to nothing.
+    void contextMenuEvent(QContextMenuEvent* event) override;
+
     // Set while a key is being handed to the command line, so the re-delivered
     // event cannot come back round and recur.
     bool routing_key_{false};
