@@ -4,6 +4,7 @@
 #include "test.hpp"
 
 #include "ncad/command.hpp"
+#include "ncad/commands.hpp"
 #include "ncad/lisp/command_input.hpp"
 #include "ncad/lisp/eval.hpp"
 #include "ncad/lisp/reader.hpp"
@@ -348,4 +349,72 @@ TEST_CASE("session: an unterminated form left open is an error at end of input")
     s.feed("(setq r");
     CHECK(!s.session.finish());
     CHECK(contains(s.rec.err, "unterminated"));
+}
+
+TEST_CASE("prompt: a command finished from outside the session still reports") {
+    // The viewport does not feed lines. It calls CommandEngine::supply()
+    // directly from its mouse handler, which is the whole point of the
+    // resumable design -- but it means nothing in the session had seen the
+    // command end, so the outcome went unreported. MEASUREGEOM worked out the
+    // distance and never said it, and a command that FAILED on a click said
+    // nothing at all.
+    Session s;
+
+    s.engine.begin(make_command("MEASUREGEOM"));
+    s.engine.supply(InputValue::none());               // Distance, the default
+    s.engine.supply(InputValue::of_point({0, 0, 0}));
+    // Still asking, so there is no outcome to report yet.
+    s.session.report_if_finished();
+    CHECK(s.rec.out.empty());
+
+    s.engine.supply(InputValue::of_point({30, 40, 0}));
+    CHECK(!s.engine.active());
+
+    s.session.report_if_finished();
+    CHECK(contains(s.rec.out, "Distance = 50.0000"));
+    CHECK(contains(s.rec.out, "Delta X = 30.0000"));
+    CHECK(contains(s.rec.out, "Delta Y = 40.0000"));
+    CHECK(contains(s.rec.out, "Delta Z = 0.0000"));
+}
+
+TEST_CASE("prompt: a failure from outside the session is reported too") {
+    // The worse half of the same bug: a command that fails on a click used to
+    // say nothing whatsoever, so the click looked like it had been ignored.
+    Session s;
+    s.engine.begin(make_command("MEASUREGEOM"));
+    s.engine.supply(InputValue::of_keyword("RADIUS"));
+    s.engine.supply(InputValue::of_entity(kNullHandle));
+    CHECK(!s.engine.active());
+
+    s.session.report_if_finished();
+    CHECK(!s.rec.err.empty());
+}
+
+TEST_CASE("prompt: reporting twice does not double up") {
+    // report_if_finished runs on every pick, and most picks do not end the
+    // command; the ones that do must not print the answer once per later pick.
+    Session s;
+    s.engine.begin(make_command("MEASUREGEOM"));
+    s.engine.supply(InputValue::none());
+    s.engine.supply(InputValue::of_point({0, 0, 0}));
+    s.engine.supply(InputValue::of_point({3, 4, 0}));
+
+    s.session.report_if_finished();
+    const std::size_t once = s.rec.out.size();
+    CHECK(once > 0);
+
+    // Idle now, and an idle session has nothing new to say. The caller is an
+    // event handler that cannot know which click ended the command, so saying
+    // it twice has to be harmless.
+    s.session.report_if_finished();
+    CHECK(s.rec.out.size() == once);
+
+    // But a NEW command reports its own outcome, even an identical one.
+    s.engine.begin(make_command("MEASUREGEOM"));
+    s.session.report_if_finished();  // active: clears the way
+    s.engine.supply(InputValue::none());
+    s.engine.supply(InputValue::of_point({0, 0, 0}));
+    s.engine.supply(InputValue::of_point({3, 4, 0}));
+    s.session.report_if_finished();
+    CHECK(s.rec.out.size() > once);
 }

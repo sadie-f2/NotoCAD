@@ -98,6 +98,21 @@ Not design questions, just things caught in use that should not wait behind phas
       stylesheet set on the QMainWindow takes over its children and turned the command
       line's transcript white on white (it is per-toolbar now), and an ellipse icon with a
       centre dot reads as an eye.
+- [x] **A command finished by a MOUSE PICK reported nothing.** Found via MEASUREGEOM,
+      which worked out the distance and the deltas and never printed them -- but it was
+      never about MEASUREGEOM. `report_finished` was only reachable from `feed_line`, and
+      the viewport answers prompts by calling `CommandEngine::supply()` directly, which is
+      the whole point of the resumable design. So EVERY command finished by clicking lost
+      its result, and the worse half is that a command that FAILED on a click said nothing
+      whatsoever and looked ignored. `PromptSession::report_if_finished` is the same report
+      for the other way in, and it is idempotent because the caller is an event handler
+      that cannot know which click ended the command.
+- [x] **The window's close button did not ask about unsaved work.** QUIT asked; the close
+      button went straight out. Three answers rather than two, for the reason QUIT gives
+      for having three -- and Save is real rather than a relabelled Discard, which means
+      the close is REFUSED and retried once the save has finished, since a save can put up
+      a file dialog and a version question of its own and none of that can happen inside
+      the close event. A save that fails or is cancelled leaves the window open.
 - [ ] **Pick-point commands are mouse-only from the terminal.** TRIM, EXTEND, FILLET and
       CHAMFER all need to know WHERE on an entity the pick was, and the terminal's entity
       prompt parses a bare handle with no location (`input_text.cpp`, PromptKind::Entity).

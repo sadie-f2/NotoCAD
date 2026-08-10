@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QFileDialog>
 #include <QKeyEvent>
+#include <QMessageBox>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -191,6 +192,47 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     return true;
 }
 
+void MainWindow::closeEvent(QCloseEvent* event) {
+    // Already settled: QUIT asked and was answered, or this question was.
+    if (closing_ || !db_.journal().dirty()) {
+        event->accept();
+        return;
+    }
+
+    // Three answers, for the reason QUIT gives for having three: without
+    // Cancel there is no way to back out of a close you did not mean, and
+    // two answers make "No" ambiguous between "do not save" and "do not
+    // close". A window can offer the third properly, so it does.
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("NotoCAD"));
+    box.setText(QStringLiteral("The drawing has unsaved changes."));
+    box.setInformativeText(QStringLiteral("Save before closing?"));
+    box.setStandardButtons(QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Save);
+
+    switch (box.exec()) {
+        case QMessageBox::Discard:
+            closing_ = true;
+            event->accept();
+            return;
+
+        case QMessageBox::Save:
+            // A save may need a file name, and asking for one puts up another
+            // dialog -- which cannot happen inside this event. So the close is
+            // refused and tried again once the save has actually finished,
+            // which is also what makes a cancelled save leave the window open.
+            event->ignore();
+            close_after_save_ = true;
+            run_command(QStringLiteral("QSAVE"));
+            return;
+
+        default:
+            event->ignore();
+            return;
+    }
+}
+
 MainWindow::~MainWindow() = default;
 
 void MainWindow::refresh_prompt() {
@@ -212,6 +254,8 @@ void MainWindow::on_line_entered(const QString& line) {
     command_line_->echo_input(QString::fromStdString(session_->current_prompt()), line);
 
     if (!session_->feed_line(line.toStdString())) {
+        // QUIT has already asked whatever needed asking.
+        closing_ = true;
         close();
         return;
     }
@@ -226,12 +270,32 @@ void MainWindow::on_line_entered(const QString& line) {
     // like it had been ignored until the mouse was jiggled.
     refresh_prompt();
     view_->refresh_osnap();
+
+    // A close that was waiting on a save. Retried only once the save has
+    // really finished -- it may have gone through a file dialog and a version
+    // question to get here -- and abandoned if the drawing is still dirty,
+    // because a save that failed or was cancelled must not close the window
+    // over the work it did not write.
+    if (close_after_save_ && !engine_.active()) {
+        close_after_save_ = false;
+        if (!db_.journal().dirty()) {
+            closing_ = true;
+            close();
+        }
+    }
 }
 
 void MainWindow::on_point_picked(const QString& prompt, const QString& answer) {
     // A click answered a prompt inside the viewport, so the command line has to
     // catch up with a question it never saw the answer to.
     command_line_->echo_input(prompt, answer);
+
+    // And with the ANSWER, when that click finished the command. The viewport
+    // calls CommandEngine::supply() directly rather than feeding a line, so
+    // nothing had reported the outcome: MEASUREGEOM worked out the distance and
+    // never said it, and a command that failed on a click said nothing at all.
+    session_->report_if_finished();
+
     refresh_prompt();
 }
 

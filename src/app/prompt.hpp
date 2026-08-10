@@ -83,6 +83,17 @@ public:
     // Call when input ends. False if it ended inside an unterminated form.
     bool finish();
 
+    // Reports the outcome of a command that was advanced from OUTSIDE this
+    // session -- a viewport click calling CommandEngine::supply() directly
+    // rather than feeding a line.
+    //
+    // Without it those commands finish in silence: MEASUREGEOM works out the
+    // distance and never says it, ERASE never reports what it erased, and a
+    // command that FAILS on a click says nothing at all. Typed input has
+    // always reported through feed_line; this is the same report for the other
+    // way in, and it is a no-op while a command is still asking.
+    void report_if_finished();
+
 private:
     void report_finished();
     void list_commands();
@@ -92,6 +103,11 @@ private:
     CommandEngine& engine_;
     PromptOutput& out_;
     bool interactive_;
+
+    // Whether the outcome now standing has already been announced, so that an
+    // event handler calling report_if_finished on every click cannot print one
+    // command's answer several times.
+    bool outcome_reported_{false};
 
     // QUIT arrived with unsaved changes and the next line answers for it.
     bool confirm_quit_{false};

@@ -352,7 +352,21 @@ PromptSession::PromptSession(lisp::Context& ctx, lisp::Interp& in, CommandEngine
                              PromptOutput& out, bool interactive)
     : ctx_(ctx), in_(in), engine_(engine), out_(out), interactive_(interactive) {}
 
+void PromptSession::report_if_finished() {
+    if (engine_.active()) {
+        // Still asking. Whatever outcome was last reported is now in the past,
+        // and the one this command is working toward has not happened.
+        outcome_reported_ = false;
+        return;
+    }
+    // Idempotent, because the caller is an event handler and cannot know
+    // whether the click it is reporting is the one that ended the command.
+    if (outcome_reported_) return;
+    report_finished();
+}
+
 void PromptSession::report_finished() {
+    outcome_reported_ = true;
     switch (engine_.status()) {
         case EngineStatus::Finished:
             if (!engine_.message().empty()) out_.write(engine_.message() + "\n");
@@ -388,6 +402,10 @@ std::string PromptSession::current_prompt() const {
 }
 
 bool PromptSession::feed_line(const std::string& line) {
+    // Whatever is about to happen is a new outcome, so the last one having
+    // been reported stops standing in the way of reporting this one.
+    outcome_reported_ = false;
+
     // --- an incomplete LISP form, continued ---------------------------------
     if (!pending_.empty() ||
         (!trim(line).empty() && trim(line)[0] == '(' && !engine_.active())) {

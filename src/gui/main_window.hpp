@@ -49,6 +49,11 @@ protected:
     // that true regardless of what was clicked last.
     bool eventFilter(QObject* watched, QEvent* event) override;
 
+    // The window's own close button reaches the same question QUIT asks. It
+    // has to be answered here rather than delegated to QUIT, because closing a
+    // window is not a command and there is no prompt standing to answer.
+    void closeEvent(QCloseEvent* event) override;
+
     // Set while a key is being handed to the command line, so the re-delivered
     // event cannot come back round and recur.
     bool routing_key_{false};
@@ -119,6 +124,15 @@ private:
     // Whether a save dialog has already had "replace it?" agreed to, so the
     // command's own overwrite question is not asked a second time.
     bool pending_overwrite_ok_{false};
+
+    // The close is already settled -- QUIT answered, or the question asked and
+    // answered -- so closeEvent must not ask again.
+    bool closing_{false};
+
+    // Close once the save that closeEvent started has finished. A save can put
+    // up a dialog of its own and cannot complete inside the close event, so
+    // the close is refused and retried rather than blocked.
+    bool close_after_save_{false};
 };
 
 }  // namespace ncad
