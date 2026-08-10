@@ -113,6 +113,21 @@ Not design questions, just things caught in use that should not wait behind phas
       the close is REFUSED and retried once the save has finished, since a save can put up
       a file dialog and a version question of its own and none of that can happen inside
       the close event. A save that fails or is cancelled leaves the window open.
+- [x] **A drawing can be named on the command line**, which was a target from early on
+      and had rotted into a wrong answer: `ncad plan.dxf` fed the DXF to the interpreter
+      and said "unbound variable: SECTION". A `.dxf` argument now opens as the drawing in
+      both front ends, decided by extension rather than by sniffing the contents -- a rule
+      you can predict from what you are typing beats one that is usually right. Drawings
+      open before scripts run, and a drawing alone does NOT count as work-then-exit, which
+      is what makes `ncad plan.dxf < script` and heredocs work. Both go through the OPEN
+      command rather than reading the file themselves, so DWGNAME, the message and the
+      error path stay single-sourced.
+- [x] **Toolbar placement is sticky**, along with window size and command-line text size,
+      in `~/.config/NotoCAD/ncad_gui.ini` -- QSettings' IniFormat puts it under ~/.config
+      on macOS too, so there is one path to name when it needs deleting. Saved on close
+      AND on `aboutToQuit`, because Cmd-Q and the Dock's Quit do not reliably deliver a
+      close event and losing an afternoon's arrangement to the wrong exit would be a poor
+      reward for having arranged it. `--reset-ui` is the way out of a bad state.
 - [ ] **Pick-point commands are mouse-only from the terminal.** TRIM, EXTEND, FILLET and
       CHAMFER all need to know WHERE on an entity the pick was, and the terminal's entity
       prompt parses a bare handle with no location (`input_text.cpp`, PromptKind::Entity).

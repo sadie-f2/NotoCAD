@@ -10,6 +10,7 @@
 #include <QFileDialog>
 #include <QKeyEvent>
 #include <QMessageBox>
+#include <QSettings>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -40,6 +41,12 @@ const char* const kToolbarStyle =
     "QToolButton:hover { background: #2a2a33; }"
     "QToolButton:pressed { background: #3a3a46; }";
 
+// One INI on both platforms -- QSettings puts IniFormat under ~/.config even
+// on macOS -- because a settings file worth having is one you can name, read
+// and delete when it goes wrong.
+const char* const kSettingsOrg = "NotoCAD";
+const char* const kSettingsApp = "ncad_gui";
+
 // The GUI half of PromptOutput. `ncad` has StreamOutput; this is the only
 // difference between the two front ends.
 class MainWindow::WidgetOutput final : public app::PromptOutput {
@@ -58,7 +65,7 @@ private:
     CommandLineWidget* widget_;
 };
 
-MainWindow::MainWindow(QWidget* parent)
+MainWindow::MainWindow(const QString& drawing, QWidget* parent)
     : QMainWindow(parent), interp_(ctx_), engine_(db_) {
     interp_.set_database(&db_);
     interp_.set_command_engine(&engine_);
@@ -67,16 +74,20 @@ MainWindow::MainWindow(QWidget* parent)
     // applications. `ncad` wires an in-process one here instead.
     engine_.set_clipboard(&clipboard_);
 
-    // Something to look at on startup. Goes away when there is a DXF reader and
-    // a file to open instead.
-    build_sample_drawing(db_);
+    // Something to look at on startup, when nothing was asked for. A named
+    // drawing is opened further down instead -- after the command line exists,
+    // so that opening it can report through the transcript like any other OPEN.
+    if (drawing.isEmpty()) {
+        build_sample_drawing(db_);
 
-    // And it does not count as unsaved work. Building it journals every entity,
-    // so without this a window nobody has touched is already dirty and closing
-    // it asks whether to save a drawing the user did not make -- which teaches
-    // people to dismiss that question without reading it, on the day it is
-    // about their own work. Undo still reaches back through it.
-    db_.journal().mark_saved();
+        // And it does not count as unsaved work. Building it journals every
+        // entity, so without this a window nobody has touched is already dirty
+        // and closing it asks whether to save a drawing the user did not make
+        // -- which teaches people to dismiss that question without reading it,
+        // on the day it is about their own work. Undo still reaches back
+        // through it.
+        db_.journal().mark_saved();
+    }
 
     view_ = new ViewportWidget(db_, this);
     view_->set_engine(&engine_);
@@ -140,10 +151,73 @@ MainWindow::MainWindow(QWidget* parent)
     refresh_prompt();
     command_line_->focus_input();
 
+    // After the toolbars exist: restoreState matches them up by objectName, and
+    // a toolbar created afterwards would be placed wherever addToolBar put it
+    // rather than where it was left.
+    restore_window_state();
+
+    // The named drawing, opened the way anything else opens one -- through the
+    // command, so DWGNAME, the transcript line and the error path are the ones
+    // OPEN already has. Two lines rather than one because a path may contain
+    // spaces, which a single command line would split on.
+    if (!drawing.isEmpty()) {
+        on_line_entered(QStringLiteral("OPEN"));
+        on_line_entered(drawing);
+        // Otherwise the camera is still wherever it started and a drawing that
+        // does not happen to straddle the origin opens off-screen.
+        view_->zoom_extents();
+    }
+
     // Watch every key press in the application, not just this window's, so a
     // keystroke landing on any widget that does not want it still reaches the
     // command line.
     qApp->installEventFilter(this);
+
+    // A backstop for the ways out that are not the close button. Cmd-Q and the
+    // Dock's Quit end the application without necessarily delivering a close
+    // event to the window, and losing an afternoon's toolbar arrangement to
+    // the wrong exit would be a poor reward for having arranged it. Saving
+    // twice is harmless; not saving once is not.
+    connect(qApp, &QCoreApplication::aboutToQuit, this, [this]() { save_window_state(); });
+}
+
+QString MainWindow::settings_path() {
+    QSettings s(QSettings::IniFormat, QSettings::UserScope,
+                QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp));
+    return s.fileName();
+}
+
+void MainWindow::forget_window_state() {
+    QSettings s(QSettings::IniFormat, QSettings::UserScope,
+                QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp));
+    s.clear();
+}
+
+void MainWindow::save_window_state() {
+    QSettings s(QSettings::IniFormat, QSettings::UserScope,
+                QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp));
+    s.setValue(QStringLiteral("geometry"), saveGeometry());
+    s.setValue(QStringLiteral("toolbars"), saveState());
+    // A per-machine fact the program cannot guess -- see set_font_points --
+    // so it is exactly the kind of thing worth remembering.
+    s.setValue(QStringLiteral("commandFontPoints"), command_line_->font_points());
+}
+
+void MainWindow::restore_window_state() {
+    QSettings s(QSettings::IniFormat, QSettings::UserScope,
+                QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp));
+
+    const QByteArray geometry = s.value(QStringLiteral("geometry")).toByteArray();
+    if (geometry.isEmpty()) {
+        resize(1000, 800);  // the first-run size, which used to live in main()
+    } else {
+        restoreGeometry(geometry);
+    }
+
+    restoreState(s.value(QStringLiteral("toolbars")).toByteArray());
+
+    const int points = s.value(QStringLiteral("commandFontPoints"), 0).toInt();
+    if (points > 0) command_line_->set_font_points(points);
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
@@ -202,6 +276,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 void MainWindow::closeEvent(QCloseEvent* event) {
     // Already settled: QUIT asked and was answered, or this question was.
     if (closing_ || !db_.journal().dirty()) {
+        save_window_state();
         event->accept();
         return;
     }
@@ -221,6 +296,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     switch (box.exec()) {
         case QMessageBox::Discard:
             closing_ = true;
+            save_window_state();
             event->accept();
             return;
 

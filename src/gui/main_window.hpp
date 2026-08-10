@@ -32,8 +32,17 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    // `drawing` is a DXF to open instead of the startup sample. Empty means
+    // the sample, which is what an argumentless launch has always shown.
+    explicit MainWindow(const QString& drawing = QString(), QWidget* parent = nullptr);
     ~MainWindow() override;
+
+    // Where the window's own state is kept -- toolbar placement, size, and the
+    // command line's text size. An INI under ~/.config on both platforms
+    // rather than a macOS plist, so there is one path to name when something
+    // needs looking at or deleting, and it is a file a person can read.
+    static QString settings_path();
+    static void forget_window_state();
 
     Database& database() { return db_; }
     ViewportWidget* viewport_widget() { return view_; }
@@ -77,6 +86,12 @@ private:
     // inside the key handler that led to it.
     void offer_file_dialog();
     void run_file_dialog();
+
+    // Toolbar placement and window size, remembered between sessions. Saved
+    // when the window actually closes rather than as things move, so a session
+    // that is killed leaves the last deliberate arrangement in place.
+    void save_window_state();
+    void restore_window_state();
 
     // Copy, Cut and Paste each mean two things in a CAD window -- characters
     // or geometry -- and this is where the two are told apart. Copy and Cut

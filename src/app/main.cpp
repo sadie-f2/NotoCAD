@@ -22,8 +22,11 @@
 // changing anything here.
 #include "prompt.hpp"
 
+#include <cctype>
+
 #include "ncad/clipboard.hpp"
 #include "ncad/command.hpp"
+#include "ncad/commands.hpp"
 #include "ncad/database.hpp"
 #include "ncad/lisp/eval.hpp"
 #include "ncad/lisp/interp_script_loader.hpp"
@@ -66,7 +69,9 @@ bool stdin_is_tty() {
 void print_usage() {
     std::cout << "ncad " << kVersion << " -- command-line CAD, AutoCAD R12 dialect\n\n"
               << "Usage:\n"
-              << "  ncad [options] [file.lsp ...]\n\n"
+              << "  ncad [options] [drawing.dxf] [file.lsp ...]\n\n"
+              << "A .dxf argument is opened as the drawing; anything else is\n"
+              << "loaded as AutoLISP. Drawings are opened before scripts run.\n\n"
               << "Options:\n"
               << "  -e EXPR    evaluate EXPR\n"
               << "  -i         stay interactive after evaluating files\n"
@@ -101,6 +106,34 @@ bool load_file(ncad::lisp::Interp& in, const std::string& path) {
         std::cerr << path << ": " << message << "\n";
         return false;
     }
+    return true;
+}
+
+// A named file is AutoLISP unless it is a drawing. Decided by extension rather
+// than by looking inside: a rule you can predict from the command line you are
+// typing beats one that is usually right, and `ncad plan.dxf` reporting
+// "unbound variable: SECTION" is what the guess costs when it is wrong.
+bool is_drawing_file(const std::string& path) {
+    if (path.size() < 4) return false;
+    std::string tail = path.substr(path.size() - 4);
+    for (char& c : tail) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return tail == ".dxf";
+}
+
+// Opens `path` as the drawing, through the OPEN command rather than by reading
+// the file here: OPEN sets DWGNAME and DWGPREFIX, clears the selection and
+// reports what arrived, and a second implementation of that would drift from
+// the first the day either changed.
+bool open_drawing(ncad::CommandEngine& engine, const std::string& path) {
+    engine.begin(ncad::make_command("OPEN"));
+    engine.supply(ncad::InputValue::of_string(path));
+
+    if (engine.status() != ncad::EngineStatus::Finished) {
+        std::cerr << path << ": " << engine.message() << "\n";
+        return false;
+    }
+    // To stderr, so `ncad plan.dxf -e '(...)' > out` keeps stdout for the work.
+    std::cerr << engine.message() << "\n";
     return true;
 }
 
@@ -214,7 +247,21 @@ int main(int argc, char** argv) {
     ncad::InProcessClipboard clipboard;
     engine.set_clipboard(&clipboard);
 
+    // Drawings first, whatever order they were typed in: a .lsp given beside a
+    // .dxf is nearly always meant to run against it, and loading the script
+    // first would run it against an empty drawing.
+    bool opened_drawing = false;
     for (const std::string& path : files) {
+        if (!is_drawing_file(path)) continue;
+        if (opened_drawing) {
+            std::cerr << "ncad: only one drawing can be opened; " << path << " was not\n";
+            return 2;
+        }
+        if (!open_drawing(engine, path)) return 1;
+        opened_drawing = true;
+    }
+    for (const std::string& path : files) {
+        if (is_drawing_file(path)) continue;
         if (!load_file(in, path)) return 1;
         if (in.quit_requested()) return 0;
     }
@@ -224,7 +271,12 @@ int main(int argc, char** argv) {
     }
 
     // Files or expressions given: do the work and stop, unless asked to stay.
-    const bool had_work = !files.empty() || !expressions.empty();
+    //
+    // A drawing on its own is NOT work in that sense -- `ncad plan.dxf` means
+    // "open this and let me at it", and exiting immediately would make the
+    // form useless. It is also what makes `ncad plan.dxf < script` and a
+    // heredoc work: the drawing is opened, then stdin drives it.
+    const bool had_work = !expressions.empty() || files.size() > (opened_drawing ? 1u : 0u);
     if (had_work && !force_interactive) return 0;
 
     const bool interactive = stdin_is_tty();

@@ -17,10 +17,24 @@ marks them.
 
 - **`ncad`** — the terminal program. The full drawing engine and interpreter
   with no display: it can create, edit, open and save drawings, and run
-  AutoLISP. Point it at `.lsp` files as arguments to run them, or use
-  `-e '(expr)'` for one-liners.
+  AutoLISP.
 - **`ncad_gui` / NotoCAD.app** — the same engine with a viewport above the
   command line. Everything the terminal accepts, the window accepts.
+
+Both take a drawing on the command line:
+
+```sh
+ncad plan.dxf                 # open it, then give me the prompt
+ncad_gui plan.dxf             # open it in a window
+ncad plan.dxf script.lsp      # open it, then run the script against it
+ncad plan.dxf < commands.txt  # or drive it from standard input
+ncad -e '(...)'               # evaluate an expression and exit
+```
+
+A `.dxf` argument is opened as the drawing; anything else is loaded as
+AutoLISP, and drawings are always opened before scripts run so a script has
+something to work on. A drawing on its own leaves you at the prompt rather
+than exiting, which is what makes the heredoc and pipe forms useful.
 
 On macOS, an unsigned or ad-hoc-signed build will be refused by Gatekeeper on
 first launch when it arrived by download: right-click the app, choose *Open*,
@@ -82,6 +96,11 @@ line; that is the honest projection, not a bug.
 - **Typing goes to the command line from anywhere.** There is no "click the
   command line first" step — start typing and the input follows.
 - **Cmd +/−** (Ctrl on Linux) resizes the command-line text.
+- **Toolbars can be dragged** to any edge, and right-clicking a toolbar gives
+  a checklist for hiding the ones you do not want. Where you put them, the
+  window size, and the command-line text size are remembered between sessions
+  in `~/.config/NotoCAD/ncad_gui.ini`. `ncad_gui --reset-ui` forgets them if
+  the arrangement ever goes wrong.
 - **Escape** cancels, from either the viewport or the command line.
 
 ### Copy and paste
