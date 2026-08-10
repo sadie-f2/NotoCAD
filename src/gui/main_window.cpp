@@ -71,6 +71,13 @@ MainWindow::MainWindow(QWidget* parent)
     // a file to open instead.
     build_sample_drawing(db_);
 
+    // And it does not count as unsaved work. Building it journals every entity,
+    // so without this a window nobody has touched is already dirty and closing
+    // it asks whether to save a drawing the user did not make -- which teaches
+    // people to dismiss that question without reading it, on the day it is
+    // about their own work. Undo still reaches back through it.
+    db_.journal().mark_saved();
+
     view_ = new ViewportWidget(db_, this);
     view_->set_engine(&engine_);
     engine_.set_view_control(view_);
