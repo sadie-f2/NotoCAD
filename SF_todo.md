@@ -138,6 +138,26 @@ Not design questions, just things caught in use that should not wait behind phas
       only once you are stuck is one you could not have learned before you needed it.
       Toolbars come back at the edge they were left at, since QMainWindow keeps a hidden
       toolbar's place rather than forgetting it.
+- [ ] **Crash in Qt's macOS cursor conversion, hovering a toolbar handle.** Once, on
+      2026-08-10, while switching windows; report kept as `segfault.8-10-26`. Not ours as
+      far as the stack goes -- `QToolBar::event` -> `QWidget::setCursor` ->
+      `QCocoaCursor::createCursorData` -> `QImage::toCGImage` -> `CGImageCreate` refusing
+      an invalid colorspace, trapping in `CF_IS_OBJC`. Nothing in NotoCAD sets cursors;
+      what our work did was make the path REACHABLE, since before the toolbars there were
+      none to hover.
+
+      Not reproducible in isolation: every bitmap-derived cursor shape converts fine on
+      the same Homebrew Qt 6.11. The event was spontaneous, so the likely sequence is
+      window activation delivering a mouse-move over the toolbar. Two candidates remain --
+      a Qt 6.11 / macOS 15.7 bug, or memory corruption elsewhere leaving CoreGraphics a
+      bad pointer, the cursor code being the victim.
+
+      Discriminators, in order of cost: run `build-asan-gui` (new -- the GUI had never
+      been sanitized, since `build-asan` has NCAD_BUILD_GUI=OFF) and see if ASan fires
+      first; try it on Linux, where a crash would rule the Cocoa cursor path out and point
+      at us; try the LTS Qt in ~/Qt, which is what the bundle ships and is four minor
+      versions back. A Qt bug report needs a minimal reproducer, so capture the crash log
+      and what had focus a moment before.
 - [ ] **Pick-point commands are mouse-only from the terminal.** TRIM, EXTEND, FILLET and
       CHAMFER all need to know WHERE on an entity the pick was, and the terminal's entity
       prompt parses a bare handle with no location (`input_text.cpp`, PromptKind::Entity).
