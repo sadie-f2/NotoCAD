@@ -997,3 +997,56 @@ TEST_CASE("dxf r2000: layers carry a plot style, and every pointer resolves") {
     CHECK(count_records(p, "ACDBPLACEHOLDER") == 1);
     CHECK(count_records(p, "ACDBDICTIONARYWDFLT") == 1);
 }
+
+TEST_CASE("dxf: a drawing already holding the layout blocks does not define them twice") {
+    // What reading an R2000 file leaves behind. Every such file defines
+    // *Model_Space and *Paper_Space, and the reader keeps what it is given --
+    // so the writer, which emits those two itself, was defining them a second
+    // time. Found by diffing our output against AutoCAD's for one source
+    // drawing: four block definitions there, six here.
+    Database db;
+
+    BlockDef model;
+    model.name = "*Model_Space";
+    db.add_block(std::move(model));
+
+    BlockDef paper;
+    paper.name = "*Paper_Space";
+    db.add_block(std::move(paper));
+
+    // A layout block the writer does NOT emit itself, and a real one. Both
+    // must survive: the fix is to skip the duplicates, not to drop anything
+    // whose name begins with a star.
+    BlockDef paper0;
+    paper0.name = "*Paper_Space0";
+    db.add_block(std::move(paper0));
+
+    BlockDef widget;
+    widget.name = "WIDGET";
+    widget.entities.push_back(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+    db.add_block(std::move(widget));
+
+    const std::string text = write_dxf_text(db, DxfVersion::R2000);
+
+    const auto count = [&text](const std::string& needle) {
+        std::size_t n = 0;
+        for (std::size_t at = text.find(needle); at != std::string::npos;
+             at = text.find(needle, at + needle.size())) {
+            ++n;
+        }
+        return n;
+    };
+
+    // Twice each and no more: once naming the BLOCK_RECORD, once naming the
+    // BLOCK. Three was the bug.
+    CHECK(count("\r\n2\r\n*Model_Space\r\n") == 2);
+    CHECK(count("\r\n2\r\n*Paper_Space\r\n") == 2);
+    CHECK(count("\r\n2\r\n*Paper_Space0\r\n") == 2);
+    CHECK(count("\r\n2\r\nWIDGET\r\n") == 2);
+
+    // And what the file says about itself agrees with what is in it.
+    Database back;
+    REQUIRE(read_dxf_text(back, text).ok);
+    CHECK(back.find_block("WIDGET") != kInvalidBlock);
+    CHECK(back.find_block("*Paper_Space0") != kInvalidBlock);
+}

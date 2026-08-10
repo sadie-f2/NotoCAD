@@ -461,6 +461,27 @@ void DxfWriter::write_tables() {
     end_section();
 }
 
+// The two layout blocks this writer emits itself, at R2000, whether or not the
+// drawing holds them.
+//
+// A drawing READ from an R2000 file does hold them -- every such file defines
+// them, and the reader keeps what it is given -- so writing the database's
+// copies as well produced a file with *Model_Space and *Paper_Space defined
+// TWICE. Found by diffing our output against AutoCAD's for the same source
+// drawing. Skipped by name here rather than dropped on read, so nothing else
+// about what the reader preserves has to change.
+bool is_emitted_layout_block(const std::string& name) {
+    static const char* const kNames[] = {"*MODEL_SPACE", "*PAPER_SPACE"};
+    std::string upper = name;
+    for (char& c : upper) {
+        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+    }
+    for (const char* candidate : kNames) {
+        if (upper == candidate) return true;
+    }
+    return false;
+}
+
 void DxfWriter::write_blocks() {
     begin_section("BLOCKS");
 
@@ -495,6 +516,8 @@ void DxfWriter::write_blocks() {
 
     for (const std::unique_ptr<BlockDef>& def : db_.blocks()) {
         if (!def) continue;
+        // Already written above, and writing it again defines it twice.
+        if (dxf_requires_handles(version_) && is_emitted_layout_block(def->name)) continue;
 
         code(0, "BLOCK");
         if (dxf_requires_handles(version_)) {
@@ -593,7 +616,13 @@ void DxfWriter::write_classes() {
 void DxfWriter::write_block_records() {
     if (!dxf_requires_handles(version_)) return;
 
-    const std::size_t count = db_.blocks().size() + 2;  // + model and paper space
+    // Counted rather than assumed: the database may already hold the two this
+    // writer emits itself, and they are skipped below.
+    std::size_t from_db = 0;
+    for (const auto& b : db_.blocks()) {
+        if (b && !is_emitted_layout_block(b->name)) ++from_db;
+    }
+    const std::size_t count = from_db + 2;  // + model and paper space
     const std::string owner = begin_table("BLOCK_RECORD", static_cast<int>(count));
 
     // Model space first, and its handle is kept: every entity in the drawing
@@ -609,6 +638,7 @@ void DxfWriter::write_block_records() {
 
     for (const auto& b : db_.blocks()) {
         if (!b) continue;
+        if (is_emitted_layout_block(b->name)) continue;
         table_record("BLOCK_RECORD", owner, "AcDbBlockTableRecord");
         code(2, b->name);
         code(70, 0);

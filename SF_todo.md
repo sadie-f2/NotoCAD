@@ -138,6 +138,21 @@ Not design questions, just things caught in use that should not wait behind phas
       only once you are stuck is one you could not have learned before you needed it.
       Toolbars come back at the edge they were left at, since QMainWindow keeps a hidden
       toolbar's place rather than forgetting it.
+- [x] **We defined *Model_Space and *Paper_Space twice in every R2000 file we wrote.**
+      Found by diffing our output against AutoCAD 2026's for one source drawing: four
+      block definitions there, six here. The writer emits the two layout blocks itself at
+      R2000 -- R13 and later require them -- and then wrote every block in the database
+      as well, and a drawing READ from an R2000 file holds those two because every such
+      file defines them. The BLOCK_RECORD table had the same duplication and a count that
+      claimed otherwise. Skipped by name in the writer rather than dropped on read, so
+      nothing about what the reader preserves had to change, and `*Paper_Space0` -- a
+      layout block we do NOT emit ourselves -- still survives.
+- [ ] **Reading a 2004 (AC1018) file loses a block and a degenerate line.** Same diff:
+      AutoCAD's import of the original kept a block `A$C94d9856d` holding 56 lines and one
+      ZERO-LENGTH line in model space; ours has neither. Not reproducible from AC1015 --
+      round-tripping AutoCAD's own file through us preserves both, so the reader is fine
+      at the version we test. Whatever it is, it is in how AC1018 expresses them, and
+      diagnosing it needs the original file, which is not in the tree.
 - [ ] **Crash in Qt's macOS cursor conversion, hovering a toolbar handle.** Once, on
       2026-08-10, while switching windows; report kept as `segfault.8-10-26`. Not ours as
       far as the stack goes -- `QToolBar::event` -> `QWidget::setCursor` ->
