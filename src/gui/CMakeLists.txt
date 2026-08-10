@@ -25,6 +25,7 @@ add_library(ncad_gui_lib STATIC
   viewport_widget.cpp
   command_line_widget.cpp
   main_window.cpp
+  command_icons.cpp
 )
 
 target_include_directories(ncad_gui_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${NCAD_VERSION_DIR})

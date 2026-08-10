@@ -3,9 +3,17 @@
 
 #include "main_window.hpp"
 
-#include <QApplication>
-#include <QKeyEvent>
+#include "ncad/commands.hpp"
 
+#include <QAction>
+#include <QApplication>
+#include <QFileDialog>
+#include <QKeyEvent>
+#include <QTimer>
+#include <QToolBar>
+#include <QToolButton>
+
+#include "command_icons.hpp"
 #include "command_line_widget.hpp"
 
 #include <QShortcut>
@@ -16,6 +24,20 @@
 #include <QSplitter>
 
 namespace ncad {
+
+// Toolbar ink. Slightly softer than the command line's text so a wall of
+// icons does not out-shout the drawing, which is the thing being looked at.
+const QColor kToolbarInk(196, 200, 210);
+
+// Dark with the command line rather than with the desktop, for the reason the
+// command line gives: a light strip against a black viewport reads as an
+// unfinished window.
+const char* const kToolbarStyle =
+    "QToolBar { background: #121216; border: 0px; spacing: 1px; }"
+    "QToolBar::separator { background: #33333c; width: 1px; height: 1px; margin: 4px; }"
+    "QToolButton { padding: 3px; border-radius: 3px; }"
+    "QToolButton:hover { background: #2a2a33; }"
+    "QToolButton:pressed { background: #3a3a46; }";
 
 // The GUI half of PromptOutput. `ncad` has StreamOutput; this is the only
 // difference between the two front ends.
@@ -95,6 +117,8 @@ MainWindow::MainWindow(QWidget* parent)
     paste_sc->setContext(Qt::ApplicationShortcut);
     connect(paste_sc, &QShortcut::activated, this, &MainWindow::on_paste_shortcut);
 
+    build_toolbars();
+
     connect(command_line_, &CommandLineWidget::lineEntered, this, &MainWindow::on_line_entered);
     connect(command_line_, &CommandLineWidget::cancelRequested, this,
             &MainWindow::on_cancel_requested);
@@ -171,9 +195,20 @@ MainWindow::~MainWindow() = default;
 
 void MainWindow::refresh_prompt() {
     command_line_->set_prompt(QString::fromStdString(session_->current_prompt()));
+    offer_file_dialog();
 }
 
 void MainWindow::on_line_entered(const QString& line) {
+    // R12's `~`: ask for the dialog at a file prompt even when FILEDIA says
+    // not to offer one. The whole convention lives here rather than in the
+    // parser, because wanting a dialog is a thing to say to a window and means
+    // nothing at a terminal.
+    if (line == QLatin1String("~") && engine_.active() &&
+        engine_.prompt().file != FileIntent::None) {
+        run_file_dialog();
+        return;
+    }
+
     command_line_->echo_input(QString::fromStdString(session_->current_prompt()), line);
 
     if (!session_->feed_line(line.toStdString())) {
@@ -252,6 +287,137 @@ void MainWindow::on_paste_shortcut() {
     if (session_idle()) on_line_entered(QStringLiteral("PASTECLIP"));
     // Mid-command the chord has no meaning that would not be swallowed as
     // the answer to the standing prompt, so it does nothing, like Copy.
+}
+
+// --- toolbars ---------------------------------------------------------------
+
+QToolBar* MainWindow::add_toolbar(const QString& title, Qt::ToolBarArea area,
+                                  std::initializer_list<const char*> commands) {
+    auto* bar = new QToolBar(title, this);
+    bar->setObjectName(title);  // so a future saveState() has something to key on
+    bar->setIconSize(QSize(22, 22));
+    bar->setFloatable(false);
+
+    // Styled per toolbar, NOT on the window. A stylesheet set on the
+    // QMainWindow takes over styling for every child, which silently undoes
+    // the command line's palette and leaves its transcript white on white --
+    // found by looking at the window rather than by anything failing.
+    bar->setStyleSheet(kToolbarStyle);
+
+    for (const char* name : commands) {
+        if (name[0] == '|') {
+            bar->addSeparator();
+            continue;
+        }
+        const QString command = QString::fromLatin1(name);
+
+        // The tooltip teaches the keyboard rather than restating the picture:
+        // the point of the program is the command line, and a button that
+        // never mentions what to type keeps you clicking forever.
+        QString tip = command;
+        for (const CommandAlias& a : command_aliases()) {
+            if (command.compare(QString::fromStdString(a.name), Qt::CaseInsensitive) == 0) {
+                tip += QStringLiteral(" (") + QString::fromStdString(a.alias) + QLatin1Char(')');
+                break;
+            }
+        }
+
+        auto* act = bar->addAction(command_icon(command, kToolbarInk), command);
+        act->setToolTip(tip);
+        connect(act, &QAction::triggered, this, [this, command]() { run_command(command); });
+    }
+
+    addToolBar(area, bar);
+    return bar;
+}
+
+void MainWindow::build_toolbars() {
+    add_toolbar(QStringLiteral("File"), Qt::TopToolBarArea,
+                {"NEW", "OPEN", "SAVE", "|", "UNDO", "REDO", "|", "ZOOM", "PAN", "PLAN", "|",
+                 "LAYER", "MEASUREGEOM"});
+
+    add_toolbar(QStringLiteral("Draw"), Qt::LeftToolBarArea,
+                {"LINE", "PLINE", "CIRCLE", "ARC", "ELLIPSE", "SPLINE", "|", "POINT", "TEXT",
+                 "SOLID", "|", "BLOCK", "INSERT"});
+
+    add_toolbar(QStringLiteral("Modify"), Qt::RightToolBarArea,
+                {"ERASE", "MOVE", "COPY", "|", "ROTATE", "SCALE", "MIRROR", "ARRAY", "STRETCH",
+                 "|", "TRIM", "EXTEND", "BREAK", "|", "OFFSET", "FILLET", "CHAMFER", "|",
+                 "EXPLODE"});
+}
+
+void MainWindow::run_command(const QString& name) {
+    // An unterminated LISP form owns the next line, and feeding a command name
+    // into it would become part of the expression rather than a command.
+    if (session_->continuing()) {
+        command_line_->append_error("Finish the AutoLISP expression first.\n");
+        return;
+    }
+    if (session_->confirming_quit()) return;
+
+    // R12: a command typed at a prompt cancels the one running, and a button
+    // is the same act by another means. Committed work survives, as ever.
+    if (engine_.active()) {
+        engine_.cancel();
+        command_line_->append_output("*Cancel*\n");
+    }
+    on_line_entered(name);
+    command_line_->focus_input();
+}
+
+// --- file dialogs -----------------------------------------------------------
+
+void MainWindow::offer_file_dialog() {
+    if (!engine_.active()) {
+        file_prompt_token_.clear();
+        return;
+    }
+    const Prompt& p = engine_.prompt();
+    if (p.file == FileIntent::None) {
+        file_prompt_token_.clear();
+        return;
+    }
+    // FILEDIA 0 means type it, even here. That is what makes a script or a
+    // LISP routine that drives OPEN safe to run in the window -- and the
+    // reason `~` exists as the one-shot way back to the dialog.
+    if (db_.sysvars().get_int(Sysvar::FileDia) == 0) return;
+
+    const QString token =
+        QString::fromLatin1(engine_.command_name()) + QLatin1Char('|') +
+        QString::fromStdString(p.message);
+    if (token == file_prompt_token_) return;  // already offered, and declined
+    file_prompt_token_ = token;
+
+    QTimer::singleShot(0, this, &MainWindow::run_file_dialog);
+}
+
+void MainWindow::run_file_dialog() {
+    if (!engine_.active()) return;
+
+    // By value: feeding the answer below advances the command, which replaces
+    // the prompt this reference would have pointed at.
+    const Prompt p = engine_.prompt();
+    if (p.file == FileIntent::None) return;
+
+    const QString ext = QString::fromStdString(p.file_extension);
+    const QString filter = ext.isEmpty()
+                               ? QStringLiteral("All files (*)")
+                               : QStringLiteral("%1 files (*.%2);;All files (*)")
+                                     .arg(ext.toUpper(), ext);
+    const QString caption = QString::fromStdString(p.message);
+
+    const QString path = p.file == FileIntent::Open
+                             ? QFileDialog::getOpenFileName(this, caption, QString(), filter)
+                             : QFileDialog::getSaveFileName(this, caption, QString(), filter);
+
+    if (path.isEmpty()) {
+        // Declining the dialog cancels the command rather than dropping back to
+        // typing: the prompt would otherwise still be standing with no way to
+        // answer it that the user has not just refused.
+        on_cancel_requested();
+        return;
+    }
+    on_line_entered(path);
 }
 
 void MainWindow::add_zoom_shortcut(const QKeySequence& keys, int delta) {

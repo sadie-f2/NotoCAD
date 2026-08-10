@@ -418,7 +418,9 @@ private:
     enum class State : std::uint8_t { First, Second, Third, Fourth };
 
     Prompt ask(const char* message, bool allow_empty) const;
-    void emit(CommandContext& ctx);
+    // Not named `emit`: Qt defines that as a macro, and this header is
+    // included by the GUI -- the same rule dash.hpp records.
+    void emit_face(CommandContext& ctx);
 
     bool face3d_;
     State state_{State::First};

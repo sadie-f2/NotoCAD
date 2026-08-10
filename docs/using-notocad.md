@@ -70,6 +70,12 @@ The viewport shows the drawing as wireframe — lines, arcs, and stroke-font
 text, with no shading and no hidden-line removal. A circle seen edge-on is a
 line; that is the honest projection, not a bug.
 
+- **Toolbars** line the top, left and right: File and view along the top, Draw
+  down the left, Modify down the right. A button does exactly what typing the
+  command does — it feeds the name to the same command line — so anything a
+  button can do, you can type, and the tooltip tells you the name and its
+  abbreviation so you can stop clicking. Clicking a button while a command is
+  running cancels it first, as typing a command name would.
 - **Middle-drag** pans. **Shift+middle-drag** orbits. **Wheel** zooms about
   the cursor.
 - **Home** zooms to extents. **Ctrl+Home** returns to plan view.
@@ -153,10 +159,19 @@ all of one species: **you are typing paths at a prompt, and nothing browses
 for you.**
 
 - **DXF is the native format.** `OPEN` reads a file *as* the drawing; `SAVE`,
-  `SAVEAS` and `QSAVE` write it. There are no file dialogs — paths are typed,
-  and relative paths resolve against the directory NotoCAD was started from,
-  which for a double-clicked macOS app is not your project directory. Type
-  absolute paths until you have a feel for it.
+  `SAVEAS` and `QSAVE` write it.
+- **In the window, file prompts open a file dialog.** OPEN, SAVE, SAVEAS,
+  DXFIN, DXFOUT, WBLOCK and APPLOAD all raise one, so you browse instead of
+  typing paths. Cancelling the dialog cancels the command.
+- **`FILEDIA` turns that off** — `SETVAR FILEDIA 0`, or from AutoLISP — and
+  then file names are typed even in the window. **Do this in any script or
+  LISP routine that opens or saves**, or it will stop on a dialog with nobody
+  there to answer it. Typing `~` alone at a file prompt raises the dialog for
+  that one prompt regardless.
+- **At the terminal, paths are typed** — there are no dialogs in `ncad` — and
+  relative paths resolve against the directory NotoCAD was started from, which
+  for a double-clicked macOS app is not your project directory. Type absolute
+  paths until you have a feel for it.
 - **`DXFIN` merges; `OPEN` replaces.** DXFIN adds a file's geometry to the
   current drawing without touching what is there — and where both define a
   layer or block of the same name, *the drawing's own definition wins*.
@@ -228,6 +243,7 @@ are invoked with parentheses.
 - File paths are typed, not browsed; relative paths follow the launch
   directory.
 - No dimensions, no hatching, no grid snap, no plotting.
+- Toolbars cover the common commands; the rest are typed (`?` lists them all).
 - FILLET and CHAMFER work on two lines; arcs and circles are a later pass.
 - OFFSET declines ellipses and splines rather than approximating them.
 - Selection is command-then-select; select-first (grips) is planned.

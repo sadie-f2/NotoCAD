@@ -280,6 +280,70 @@ TEST_CASE("offset command: one undo removes the whole run") {
     CHECK(db.size() == 1);
 }
 
+// --- file prompts -----------------------------------------------------------
+//
+// A window offers a dialog for these and the terminal does not, so what is
+// testable here is the fact the prompt states rather than the dialog itself:
+// that a file prompt says it is one, and says which kind.
+
+TEST_CASE("file prompts: the ones that name a file say so, with an extension") {
+    Database db;
+    CommandEngine engine(db);
+
+    struct Expect {
+        const char* command;
+        FileIntent intent;
+        const char* extension;
+    };
+    const Expect cases[] = {
+        {"OPEN", FileIntent::Open, "dxf"},   {"DXFIN", FileIntent::Open, "dxf"},
+        {"SAVEAS", FileIntent::Save, "dxf"}, {"DXFOUT", FileIntent::Save, "dxf"},
+        {"WBLOCK", FileIntent::Save, "dxf"}, {"APPLOAD", FileIntent::Open, "lsp"},
+    };
+
+    for (const Expect& c : cases) {
+        engine.begin(make_command(c.command));
+        REQUIRE(engine.active());
+        CHECK(engine.prompt().kind == PromptKind::String);
+        CHECK(engine.prompt().file == c.intent);
+        CHECK(engine.prompt().file_extension == c.extension);
+        engine.cancel();
+    }
+}
+
+TEST_CASE("file prompts: a prompt that is not about a file says nothing about one") {
+    Database db;
+    CommandEngine engine(db);
+    engine.begin(make_command("LINE"));
+    CHECK(engine.prompt().file == FileIntent::None);
+    engine.cancel();
+
+    // BLOCK asks for a NAME, not a file -- the distinction the flag exists to
+    // make, since both are String prompts and only one wants a file dialog.
+    engine.begin(make_command("BLOCK"));
+    CHECK(engine.prompt().kind == PromptKind::String);
+    CHECK(engine.prompt().file == FileIntent::None);
+    engine.cancel();
+}
+
+TEST_CASE("file prompts: FILEDIA exists, defaults on, and is not drawing state") {
+    Database db;
+    CHECK(db.sysvars().get_int(Sysvar::FileDia) == 1);
+
+    // Settable from LISP and scripts, which is the point: a routine that drives
+    // OPEN turns it off so no modal window waits for a person who is not there.
+    CHECK(db.sysvars().set_int(Sysvar::FileDia, 0) == Sysvars::SetStatus::Ok);
+    CHECK(db.sysvars().get_int(Sysvar::FileDia) == 0);
+    // Bounded to 0/1: it is a switch, and 2 is not a third kind of dialog.
+    CHECK(db.sysvars().set_int(Sysvar::FileDia, 2) == Sysvars::SetStatus::OutOfRange);
+
+    // Not saved in the drawing -- it follows the installation, like PICKBOX --
+    // so opening a file cannot turn someone's dialogs back on.
+    const SysvarDef* def = find_sysvar("FILEDIA");
+    REQUIRE(def != nullptr);
+    CHECK(!def->save_in_drawing);
+}
+
 // --- FILLET / CHAMFER -------------------------------------------------------
 
 TEST_CASE("fillet: a right angle gets a tangent arc and two shortened lines") {

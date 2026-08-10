@@ -77,6 +77,9 @@ constexpr SysvarDef kTable[] = {
     // something silently reverts to R12 -- which is exactly the surprise it
     // caused before this comment existed.
     {"DXFVERSION", Sysvar::DxfVersionVar, SysvarType::String, false, false, 0, 0, 0, 0.0, "R12", {}},
+    // Defaults on, because the window is where a person is; `ncad` has no
+    // dialog to offer and ignores it, which is the same answer FILEDIA 0 gives.
+    {"FILEDIA", Sysvar::FileDia, SysvarType::Int, false, false, 1, 0, 1, 0.0, "", {}},
 };
 
 static_assert(sizeof(kTable) / sizeof(kTable[0]) == static_cast<std::size_t>(Sysvar::kCount),

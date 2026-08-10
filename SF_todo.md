@@ -73,6 +73,24 @@ Not design questions, just things caught in use that should not wait behind phas
       feature. AutoCAD does not do that, and typing `nea` at a prompt already gives you
       NEA for one pick, so the field granted no capability that did not exist and only
       removed the ability to decline it. With POINT's use gone it had no callers at all.
+- [x] **Toolbars, and file dialogs.** Icons are DRAWN, not shipped -- `command_icons.cpp`,
+      the same argument the Hershey font makes: an icon for a drawing command is a little
+      line drawing, so strokes cost less than a PNG and there is no asset directory, no 2x
+      copy, no icon-set licence, and the ink follows the palette. A button feeds its
+      command name to PromptSession exactly as typing does, so a button can never mean
+      something the command line does not. Unnamed commands fall back to two letters, so
+      adding a button before its icon reads as itself rather than as a blank.
+
+      File dialogs go through `Prompt::file` (a `FileIntent`), which follows RubberBand's
+      precedent exactly: the core states a fact about the ANSWER -- this is a file, it must
+      exist -- and never mentions a dialog, which is what keeps QFileDialog out of it.
+      `FILEDIA` is the R12 switch and earns its keep for the R12 reason: a script driving
+      OPEN must not stop on a modal window. `~` at a file prompt asks for the dialog anyway.
+
+      Two things found by LOOKING at the window rather than by anything failing: a
+      stylesheet set on the QMainWindow takes over its children and turned the command
+      line's transcript white on white (it is per-toolbar now), and an ellipse icon with a
+      centre dot reads as an eye.
 - [ ] **Pick-point commands are mouse-only from the terminal.** TRIM, EXTEND, FILLET and
       CHAMFER all need to know WHERE on an entity the pick was, and the terminal's entity
       prompt parses a bare handle with no location (`input_text.cpp`, PromptKind::Entity).

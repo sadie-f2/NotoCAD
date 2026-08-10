@@ -21,6 +21,8 @@
 
 #include <memory>
 
+class QToolBar;
+
 namespace ncad {
 
 class CommandLineWidget;
@@ -56,6 +58,21 @@ private:
     // bindings cannot drift apart.
     void add_zoom_shortcut(const QKeySequence& keys, int delta);
 
+    // The toolbars. Every button does exactly what typing the command does --
+    // it feeds the name to the same PromptSession -- so a button can never
+    // mean something the command line does not, and no command needs a second
+    // implementation to be clickable.
+    void build_toolbars();
+    QToolBar* add_toolbar(const QString& title, Qt::ToolBarArea area,
+                          std::initializer_list<const char*> commands);
+    void run_command(const QString& name);
+
+    // A file prompt is standing and FILEDIA says to offer a dialog for it.
+    // Deferred out of the current event, because a modal window must not open
+    // inside the key handler that led to it.
+    void offer_file_dialog();
+    void run_file_dialog();
+
     // Copy, Cut and Paste each mean two things in a CAD window -- characters
     // or geometry -- and this is where the two are told apart. Copy and Cut
     // go by evidence: a text selection wins, otherwise an idle Command:
@@ -88,6 +105,11 @@ private:
 
     std::unique_ptr<WidgetOutput> output_;
     std::unique_ptr<app::PromptSession> session_;
+
+    // Which file prompt has already been offered a dialog, so that declining
+    // one does not immediately raise it again. Command name and prompt text
+    // together, because one command asks for more than one file.
+    QString file_prompt_token_;
 };
 
 }  // namespace ncad

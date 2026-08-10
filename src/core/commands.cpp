@@ -1828,7 +1828,7 @@ Prompt SolidCommand::ask(const char* message, bool allow_empty) const {
     return p;
 }
 
-void SolidCommand::emit(CommandContext& ctx) {
+void SolidCommand::emit_face(CommandContext& ctx) {
     auto e = std::make_unique<Face>(face3d_ ? EntityType::Face3d : EntityType::Solid);
     for (int i = 0; i < 4; ++i) e->set_corner(i, corner_[i]);
     // A SOLID is a filled shape in its own plane and stores ECS coordinates; a
@@ -1878,7 +1878,7 @@ Step SolidCommand::next(CommandContext& ctx, const InputValue& value) {
             if (value.kind != InputKind::None && value.kind != InputKind::Point) {
                 return Step::failed("a point is required");
             }
-            emit(ctx);
+            emit_face(ctx);
 
             // The strip continues: this quadrilateral's far edge becomes the
             // next one's near edge.
@@ -3430,6 +3430,8 @@ Step WblockCommand::start(CommandContext&) {
     Prompt p;
     p.kind = PromptKind::String;
     p.message = "File name";
+    p.file = FileIntent::Save;
+    p.file_extension = "dxf";
     return Step::ask(p);
 }
 
@@ -5825,6 +5827,8 @@ Step SaveCommand::start(CommandContext& ctx) {
     Prompt p;
     p.kind = PromptKind::String;
     p.message = "Save drawing as";
+    p.file = FileIntent::Save;
+    p.file_extension = "dxf";
     // SAVE offers the current name so Enter accepts it; SAVEAS does not, because
     // asking again and defaulting to the same answer is how you overwrite the
     // file you meant to branch from.
@@ -6018,6 +6022,8 @@ Step DxfInCommand::start(CommandContext&) {
     // Named for what it does, since the two modes now differ in kind and not
     // only in which file is read.
     p.message = mode_ == Mode::Open ? "File name" : "File name to import";
+    p.file = FileIntent::Open;
+    p.file_extension = "dxf";
     return Step::ask(p);
 }
 
@@ -6086,6 +6092,8 @@ Step DxfOutCommand::start(CommandContext&) {
     Prompt p;
     p.kind = PromptKind::String;
     p.message = "Enter file name";
+    p.file = FileIntent::Save;
+    p.file_extension = "dxf";
     state_ = State::AskName;
     return Step::ask(p);
 }
@@ -6117,6 +6125,8 @@ Step AppLoadCommand::start(CommandContext&) {
     Prompt p;
     p.kind = PromptKind::String;
     p.message = "Select LISP file";
+    p.file = FileIntent::Open;
+    p.file_extension = "lsp";
     return Step::ask(p);
 }
 

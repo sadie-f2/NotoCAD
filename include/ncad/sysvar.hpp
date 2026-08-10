@@ -101,6 +101,15 @@ enum class Sysvar : std::uint16_t {
     // which matters most for the case that wants R2000 at all, generating
     // geometry in bulk and saving it without a person present.
     DxfVersionVar,
+
+    // Whether a file prompt is answered by a dialog or by typing. R12's, and
+    // for R12's reason: a script or a LISP routine that drives OPEN must not
+    // stop on a modal window nobody is there to dismiss. 0 forces typing even
+    // in the GUI, and `~` typed at a file prompt asks for the dialog anyway.
+    //
+    // Not journalled and not saved in the drawing: like PICKBOX, it follows the
+    // installation and the person, not the file.
+    FileDia,
     kCount,
 };
 

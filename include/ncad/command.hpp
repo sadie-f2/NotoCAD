@@ -69,11 +69,29 @@ enum class RubberBand : std::uint8_t {
     Box,   // a screen-aligned rectangle with `base` at the opposite corner
 };
 
+// What a String prompt is really asking for, when the answer is a file name.
+//
+// Advice for whoever is asking, in exactly the way RubberBand is: the engine
+// never reads it and the terminal ignores it entirely. It exists because "the
+// answer to this is a file that must already exist" is a fact about the ANSWER,
+// not an instruction to show a dialog -- which is the line that keeps
+// QFileDialog out of the core while still letting a window put one up.
+enum class FileIntent : std::uint8_t {
+    None,
+    Open,  // must already exist
+    Save,  // may be created, and replacing wants confirming
+};
+
 struct Prompt {
     PromptKind kind{PromptKind::Point};
     std::string message;                 // "Specify first point"
     std::vector<std::string> keywords;   // e.g. {"Close", "Undo"}
     bool allow_empty{false};             // Enter is a valid answer
+
+    // Only meaningful on a String prompt. `file_extension` carries no dot --
+    // "dxf" -- and a window builds whatever filter it likes from it.
+    FileIntent file{FileIntent::None};
+    std::string file_extension;
 
     // Where the rubber band starts from. Set by the command; the engine does
     // not use it, a viewport does.
