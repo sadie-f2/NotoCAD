@@ -184,6 +184,21 @@ Not design questions, just things caught in use that should not wait behind phas
       itself the next time any command finished with the drawing clean, which usually
       means right after the user saved properly. Refusing the save now refuses the close
       with it.
+- [x] **The window closed and the process kept running, unreachable.** Reported as a
+      hang after a large drawing; it was not hung. `sample` showed a perfectly healthy
+      idle event loop -- `NSApplication run` waiting on a mach port, 0% CPU, no modal
+      dialog, no lock -- and System Events reported the process owned ZERO windows. So
+      the window had closed and the application had simply never exited.
+
+      Cause: Qt's `quitOnLastWindowClosed` quits when the last TOP-LEVEL window closes,
+      and a native file dialog on macOS leaves a hidden one behind. After any Open or
+      Save, closing the window was therefore not "the last window closing". Confirmed by
+      control experiment -- plain Qt, no NotoCAD code, one stray top-level widget, and
+      the app outlives its only visible window.
+
+      `MainWindow` now calls `QCoreApplication::quit()` when it accepts a close. This
+      program is one window over one drawing, so its lifetime IS the window's; saying so
+      costs a line and removes every dependence on what Qt happens to be counting.
 - [ ] **DXFOUT leaves the drawing dirty, so quitting still asks.** Correct as designed --
       `mark_saved()` belongs to SAVE/SAVEAS/QSAVE, and an export under another name and
       possibly another version has not saved THIS drawing -- but it surprises the workflow

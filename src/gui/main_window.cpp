@@ -294,11 +294,27 @@ void MainWindow::contextMenuEvent(QContextMenuEvent* event) {
     event->accept();
 }
 
+void MainWindow::quit_application() {
+    // Said outright rather than left to Qt's quitOnLastWindowClosed.
+    //
+    // That default quits when the last top-level window closes, and a native
+    // file dialog on macOS leaves a hidden QFileDialog behind that still counts
+    // as one -- so after any Open or Save, closing the window left the process
+    // running with nothing on screen and no way to reach it. Observed exactly
+    // that: idle in a healthy event loop, zero windows, 0% CPU.
+    //
+    // This program is one window over one drawing, so its lifetime IS the
+    // window's. Stating that costs a line and removes every dependence on what
+    // Qt happens to be counting.
+    QCoreApplication::quit();
+}
+
 void MainWindow::closeEvent(QCloseEvent* event) {
     // Already settled: QUIT asked and was answered, or this question was.
     if (closing_ || !db_.journal().dirty()) {
         save_window_state();
         event->accept();
+        quit_application();
         return;
     }
 
@@ -319,6 +335,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             closing_ = true;
             save_window_state();
             event->accept();
+            quit_application();
             return;
 
         case QMessageBox::Save:

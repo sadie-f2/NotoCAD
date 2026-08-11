@@ -99,6 +99,11 @@ private:
     void save_window_state();
     void restore_window_state();
 
+    // Ends the application when the window closes, rather than trusting Qt to
+    // notice. See the definition -- a native file dialog leaves a hidden window
+    // behind, and the process then outlives its only visible window.
+    void quit_application();
+
     // Copy, Cut and Paste each mean two things in a CAD window -- characters
     // or geometry -- and this is where the two are told apart. Copy and Cut
     // go by evidence: a text selection wins, otherwise an idle Command:
