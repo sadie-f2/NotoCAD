@@ -404,6 +404,13 @@ void MainWindow::on_point_picked(const QString& prompt, const QString& answer) {
 }
 
 void MainWindow::on_cancel_requested() {
+    // A close waiting on a save is abandoned here, not only in on_line_entered.
+    // Cancelling the save dialog cancels the COMMAND, which never reaches that
+    // path -- so the flag stayed set, and the window would then close by itself
+    // the next time any command finished with the drawing clean. Refusing the
+    // save has to refuse the close with it.
+    close_after_save_ = false;
+
     // Escape is the engine's business, not each command's: committed work
     // survives it, as in R12.
     if (engine_.active()) {

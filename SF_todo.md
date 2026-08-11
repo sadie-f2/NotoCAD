@@ -177,6 +177,19 @@ Not design questions, just things caught in use that should not wait behind phas
       on one construction plane, so a mouse-driven move is planar by construction. That is
       correct and is what AutoCAD does; the ways out are typing the coordinate, snapping
       to real geometry (a snap beats the plane), or setting a UCS -- which now works.
+- [x] **A cancelled quit-save left the close pending.** closeEvent's Save answer refuses
+      the close and retries it once the save finishes -- but cancelling the file dialog
+      cancels the COMMAND, which reaches `on_cancel_requested` and never the retry path in
+      `on_line_entered`. So `close_after_save_` stayed set, and the window would close by
+      itself the next time any command finished with the drawing clean, which usually
+      means right after the user saved properly. Refusing the save now refuses the close
+      with it.
+- [ ] **DXFOUT leaves the drawing dirty, so quitting still asks.** Correct as designed --
+      `mark_saved()` belongs to SAVE/SAVEAS/QSAVE, and an export under another name and
+      possibly another version has not saved THIS drawing -- but it surprises the workflow
+      that generates geometry from LISP and exports it, where quitting then warns about
+      losing work that was just written out. Worth deciding whether DXFOUT to the
+      drawing's own name should count, or whether the warning should say what it means.
 - [ ] **Crash in Qt's macOS cursor conversion. TWICE, and both times on Qt::SizeAllCursor.**
       First on 2026-08-10 while switching windows, over a toolbar handle; report kept as
       `segfault.8-10-26`. Then again during a shift-middle ORBIT, no trace captured.
