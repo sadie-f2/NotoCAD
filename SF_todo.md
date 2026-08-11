@@ -164,6 +164,19 @@ Not design questions, just things caught in use that should not wait behind phas
       Worth remembering as a method note: the commercial tool is the interchange
       authority, not the definition of correct. Diff against the SOURCE, not against
       whatever the other program produced from it.
+- [x] **A viewport click ignored the current UCS.** `ViewportWidget::pick_point`
+      unprojected onto a plane whose normal was hardcoded `kWorldZ`, while the core asks
+      `Database::construction_normal()` in 32 places -- the seam CLAUDE.md names for
+      exactly this question. So setting a UCS moved where TYPED coordinates went and not
+      where CLICKED ones did, which is the one pair that must agree. A no-op while the UCS
+      is world, which is why it went unnoticed.
+
+      Found while checking a report that MOVE ignores Z. It does not -- MOVE and COPY
+      both take a full 3D displacement, by second point and by the R12 displacement form,
+      verified at the terminal. What is really being seen is that PICKED points all land
+      on one construction plane, so a mouse-driven move is planar by construction. That is
+      correct and is what AutoCAD does; the ways out are typing the coordinate, snapping
+      to real geometry (a snap beats the plane), or setting a UCS -- which now works.
 - [ ] **Crash in Qt's macOS cursor conversion, hovering a toolbar handle.** Once, on
       2026-08-10, while switching windows; report kept as `segfault.8-10-26`. Not ours as
       far as the stack goes -- `QToolBar::event` -> `QWidget::setCursor` ->

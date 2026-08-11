@@ -281,11 +281,17 @@ Vec3 ViewportWidget::pick_point(const QPoint& pos) const {
         plane_point = engine_->last_point();
     }
 
+    // The CURRENT UCS's plane, not world XY. A click can only mean a point if
+    // something says which plane it lands on, and the drawing already answers
+    // that -- `construction_normal()` is the seam every command in the core
+    // goes through for exactly this question. Hardcoding world Z here meant
+    // setting a UCS changed where typed coordinates went and not where clicked
+    // ones did, which is the one place the two must agree.
     Vec3 hit{};
-    if (viewport_.unproject(sp, plane_point, kWorldZ, &hit)) return hit;
+    if (viewport_.unproject(sp, plane_point, db_.construction_normal(), &hit)) return hit;
 
-    // World XY seen edge-on: there is no sensible point on it, so fall back to
-    // the plane facing the viewer. Better than refusing the click outright.
+    // The construction plane seen edge-on: there is no sensible point on it, so
+    // fall back to the plane facing the viewer. Better than refusing the click.
     return viewport_.unproject_to_target_plane(sp);
 }
 
