@@ -199,6 +199,20 @@ Not design questions, just things caught in use that should not wait behind phas
       `MainWindow` now calls `QCoreApplication::quit()` when it accepts a close. This
       program is one window over one drawing, so its lifetime IS the window's; saying so
       costs a line and removes every dependence on what Qt happens to be counting.
+- [x] **A layer named by a FILE could not be named back.** LAYER upcased what was typed
+      and the symbol table compared exactly, so any mixed-case layer name -- which is all
+      of them in a modern DXF; KiCad writes F.Cu, B.Mask, Edge.Cuts -- was unreachable.
+      Not turned off, not frozen, not set current, and typing the name exactly as `?` had
+      just listed it failed as well, which is what made it look like nonsense: `B.Cu`,
+      `B.CU` and `b.cu` all reported "Layer B.CU not found".
+
+      Fixed in the symbol table, where it belongs: `find_layer`, `find_linetype`,
+      `find_block` and `find_ucs` now compare without regard to case, which is what DXF
+      means by a symbol name -- a drawing cannot hold both Walls and WALLS, and an entity
+      on layer F.CU belongs to the layer written F.Cu. The stored spelling is untouched,
+      so a file's own naming survives a round trip. LAYER still upcases a name it is
+      CREATING, which is R12's convention and what the existing test pins; it no longer
+      upcases one it is merely looking up.
 - [ ] **`?` listings do not appear until the command exits.** LAYER `?` builds the layer
       table and stashes it in `report_`, which is only emitted by `Step::done` -- so
       typing `?` shows nothing and the list arrives when you press Enter to leave. Same in

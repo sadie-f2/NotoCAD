@@ -9,6 +9,32 @@
 #include <cmath>
 
 namespace ncad {
+namespace {
+
+// Symbol table names compare without regard to case, which is what DXF means
+// by them: a drawing cannot hold both "Walls" and "WALLS", and an entity on
+// layer "F.CU" belongs to the layer written as "F.Cu".
+//
+// Found the hard way. LAYER upcased what was typed and compared it exactly, so
+// every mixed-case layer in a modern file -- which is all of them; KiCad writes
+// F.Cu, B.Mask, Edge.Cuts -- could not be named at all. Not turned off, not
+// frozen, not set current. Typing the name exactly as listed failed too.
+//
+// The stored spelling is left alone. What a file called a layer is what this
+// program should call it back.
+bool names_equal(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        char x = a[i];
+        char y = b[i];
+        if (x >= 'a' && x <= 'z') x = static_cast<char>(x - 'a' + 'A');
+        if (y >= 'a' && y <= 'z') y = static_cast<char>(y - 'a' + 'A');
+        if (x != y) return false;
+    }
+    return true;
+}
+
+}  // namespace
 
 double Linetype::pattern_length() const {
     double total = 0.0;
@@ -218,7 +244,7 @@ LayerId Database::add_layer(const std::string& name, std::int16_t color, Linetyp
 
 LayerId Database::find_layer(const std::string& name) const {
     for (std::size_t i = 0; i < layers_.size(); ++i) {
-        if (layers_[i].name == name) return static_cast<LayerId>(i);
+        if (names_equal(layers_[i].name, name)) return static_cast<LayerId>(i);
     }
     return kInvalidLayer;
 }
@@ -240,7 +266,7 @@ UcsId Database::add_ucs(const std::string& name, const Ucs& value) {
 
 UcsId Database::find_ucs(const std::string& name) const {
     for (std::size_t i = 0; i < ucs_table_.size(); ++i) {
-        if (ucs_table_[i].name == name) return static_cast<UcsId>(i);
+        if (names_equal(ucs_table_[i].name, name)) return static_cast<UcsId>(i);
     }
     return kInvalidUcs;
 }
@@ -332,7 +358,7 @@ BlockId Database::add_block(BlockDef def) {
 
 BlockId Database::find_block(const std::string& name) const {
     for (std::size_t i = 0; i < blocks_.size(); ++i) {
-        if (blocks_[i]->name == name) return static_cast<BlockId>(i);
+        if (names_equal(blocks_[i]->name, name)) return static_cast<BlockId>(i);
     }
     return kInvalidBlock;
 }
@@ -403,7 +429,7 @@ LinetypeId Database::add_linetype(const std::string& name, const std::string& de
 
 LinetypeId Database::find_linetype(const std::string& name) const {
     for (std::size_t i = 0; i < linetypes_.size(); ++i) {
-        if (linetypes_[i].name == name) return static_cast<LinetypeId>(i);
+        if (names_equal(linetypes_[i].name, name)) return static_cast<LinetypeId>(i);
     }
     return kInvalidLinetype;
 }

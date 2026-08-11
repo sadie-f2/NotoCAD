@@ -385,3 +385,47 @@ TEST_CASE("ltype: new entities take CELTYPE") {
     const Entity* e = db.get(db.order().back());
     CHECK(db.linetype(e->props().linetype).name == "DASHED");
 }
+
+TEST_CASE("layer: a mixed-case name from a file can be named back, in any case") {
+    // The bug this exists for: LAYER upcased what was typed and the symbol
+    // table compared exactly, so a layer a FILE had named -- KiCad writes F.Cu,
+    // B.Mask, Edge.Cuts, and every modern DXF has names like them -- could not
+    // be reached at all. Not turned off, not frozen, not set current. Typing
+    // the name exactly as LAYER ? had just listed it failed too.
+    Database db;
+    CommandEngine engine(db);
+
+    // As the DXF reader leaves it: stored with the spelling the file used.
+    const LayerId id = db.add_layer("B.Cu", 153);
+
+    for (const char* spelling : {"B.Cu", "B.CU", "b.cu", "b.Cu"}) {
+        CHECK(db.find_layer(spelling) == id);
+    }
+
+    layer(engine, {"OFF", "b.cu"});
+    CHECK(db.layer(id).off());
+    layer(engine, {"ON", "B.CU"});
+    CHECK(!db.layer(id).off());
+
+    // And the spelling the file chose is the spelling kept.
+    CHECK(db.layer(id).name == "B.Cu");
+}
+
+TEST_CASE("layer: the other symbol tables match by name the same way") {
+    Database db;
+    CHECK(db.find_linetype("continuous") == kLinetypeContinuous);
+
+    BlockDef def;
+    def.name = "WidgetPart";
+    const BlockId b = db.add_block(std::move(def));
+    CHECK(db.find_block("WIDGETPART") == b);
+    CHECK(db.find_block("widgetpart") == b);
+    CHECK(db.block(b)->name == "WidgetPart");
+
+    // Adding under a different spelling is the SAME entry, not a second one --
+    // a drawing cannot hold two layers whose names differ only in case.
+    const std::size_t before = db.layers().size();
+    db.add_layer("Walls");
+    CHECK(db.add_layer("WALLS") == db.find_layer("walls"));
+    CHECK(db.layers().size() == before + 1);
+}

@@ -5016,18 +5016,22 @@ namespace {
 // R12 takes comma-separated names and wildcards at these prompts. Only the
 // comma-separated part is here; wildcards want a matcher that PURGE will want
 // too, so they wait until there is a second caller.
+//
+// NOT upcased any more. Layer lookup is case-insensitive where it belongs, in
+// the symbol table, and upcasing here additionally made the error message
+// report a name the user never typed -- "Layer B.CU not found" for B.Cu.
 std::vector<std::string> split_names(const std::string& text) {
     std::vector<std::string> out;
     std::string current;
     for (const char c : text) {
         if (c == ',' || c == ' ') {
-            if (!current.empty()) out.push_back(upcase(current));
+            if (!current.empty()) out.push_back(current);
             current.clear();
         } else {
             current.push_back(c);
         }
     }
-    if (!current.empty()) out.push_back(upcase(current));
+    if (!current.empty()) out.push_back(current);
     return out;
 }
 
@@ -5067,7 +5071,12 @@ Step LayerCommand::apply_to_names(CommandContext& ctx, const std::string& text) 
                 report_ = "Layer " + name + " not found";
                 continue;
             }
-            id = ctx.db.add_layer(name);
+            // Upper only when CREATING one, which is R12's convention for a
+            // name it is choosing. Looking one up leaves what was typed alone:
+            // the lookup is case-insensitive, so there is nothing to gain by
+            // altering it, and altering it made the failure message name a
+            // layer the user had not asked for.
+            id = ctx.db.add_layer(upcase(name));
         }
 
         switch (state_) {
