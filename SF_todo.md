@@ -147,12 +147,23 @@ Not design questions, just things caught in use that should not wait behind phas
       claimed otherwise. Skipped by name in the writer rather than dropped on read, so
       nothing about what the reader preserves had to change, and `*Paper_Space0` -- a
       layout block we do NOT emit ourselves -- still survives.
-- [ ] **Reading a 2004 (AC1018) file loses a block and a degenerate line.** Same diff:
-      AutoCAD's import of the original kept a block `A$C94d9856d` holding 56 lines and one
-      ZERO-LENGTH line in model space; ours has neither. Not reproducible from AC1015 --
-      round-tripping AutoCAD's own file through us preserves both, so the reader is fine
-      at the version we test. Whatever it is, it is in how AC1018 expresses them, and
-      diagnosing it needs the original file, which is not in the tree.
+- [x] **We lose nothing reading AC1018 -- AutoCAD ADDS.** Recorded first as a suspected
+      hole in our reader, and it was the wrong reading; the originals settled it. The
+      source is five KiCad layer exports totalling 41,559 LINEs and 302 CIRCLEs, and
+      DXFIN of all five gives exactly that, entity for entity, with every line matching
+      AutoCAD's geometry.
+
+      The two "missing" things were never in the sources. NO source contains a
+      zero-length line; AutoCAD's merge has one. No source contains `A$C94d9856d`;
+      AutoCAD's merge has it, holding F_Paste's 56 lines translated by a constant offset
+      -- what AutoCAD makes when one drawing is inserted into another -- and nothing
+      references it, while the same geometry also sits in model space at its true
+      position. So that file carries 56 lines of orphaned duplicate geometry and one
+      degenerate entity that we correctly do not.
+
+      Worth remembering as a method note: the commercial tool is the interchange
+      authority, not the definition of correct. Diff against the SOURCE, not against
+      whatever the other program produced from it.
 - [ ] **Crash in Qt's macOS cursor conversion, hovering a toolbar handle.** Once, on
       2026-08-10, while switching windows; report kept as `segfault.8-10-26`. Not ours as
       far as the stack goes -- `QToolBar::event` -> `QWidget::setCursor` ->
