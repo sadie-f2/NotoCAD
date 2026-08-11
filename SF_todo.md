@@ -199,6 +199,18 @@ Not design questions, just things caught in use that should not wait behind phas
       `MainWindow` now calls `QCoreApplication::quit()` when it accepts a close. This
       program is one window over one drawing, so its lifetime IS the window's; saying so
       costs a line and removes every dependence on what Qt happens to be counting.
+- [ ] **`?` listings do not appear until the command exits.** LAYER `?` builds the layer
+      table and stashes it in `report_`, which is only emitted by `Step::done` -- so
+      typing `?` shows nothing and the list arrives when you press Enter to leave. Same in
+      both front ends, but far more confusing in the GUI, where you sit looking at an
+      unchanged transcript. Reported as a suspected GUI bug; it is not one.
+
+      Root cause is an API gap: `Step::ask` cannot carry output. The workaround used by
+      PEDIT and SelectionPrompter -- fold the note into the next prompt's message -- suits
+      "4 found" and not a ten-row table, and the GUI shows a prompt in a single-line
+      label. Options: give `Step::ask` a note the session prints before showing the
+      prompt (general, helps LTYPE and any future listing), or make `?` end the command
+      with the list as its message and rely on Enter repeating LAYER.
 - [ ] **DXFOUT leaves the drawing dirty, so quitting still asks.** Correct as designed --
       `mark_saved()` belongs to SAVE/SAVEAS/QSAVE, and an export under another name and
       possibly another version has not saved THIS drawing -- but it surprises the workflow
