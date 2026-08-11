@@ -177,8 +177,20 @@ Not design questions, just things caught in use that should not wait behind phas
       on one construction plane, so a mouse-driven move is planar by construction. That is
       correct and is what AutoCAD does; the ways out are typing the coordinate, snapping
       to real geometry (a snap beats the plane), or setting a UCS -- which now works.
-- [ ] **Crash in Qt's macOS cursor conversion, hovering a toolbar handle.** Once, on
-      2026-08-10, while switching windows; report kept as `segfault.8-10-26`. Not ours as
+- [ ] **Crash in Qt's macOS cursor conversion. TWICE, and both times on Qt::SizeAllCursor.**
+      First on 2026-08-10 while switching windows, over a toolbar handle; report kept as
+      `segfault.8-10-26`. Then again during a shift-middle ORBIT, no trace captured.
+
+      Two triggers with nothing in common except the cursor shape, which is what turns
+      this from a mystery into a suspect. On macOS most Qt cursors are native NSCursors,
+      but the few with no AppKit equivalent -- size-all among them -- are built from
+      bitmap data and converted via `QImage::toCGImage`, and that conversion is exactly
+      what the stack shows failing. `QToolBar` uses size-all for its drag handle; we used
+      it for orbit. Orbit now uses the closed hand, which is native and cannot take that
+      path, so the one trigger we control is gone. The toolbar handle is Qt's and stays.
+      Original entry follows.
+
+      Once, on 2026-08-10, while switching windows; report kept as `segfault.8-10-26`. Not ours as
       far as the stack goes -- `QToolBar::event` -> `QWidget::setCursor` ->
       `QCocoaCursor::createCursorData` -> `QImage::toCGImage` -> `CGImageCreate` refusing
       an invalid colorspace, trapping in `CF_IS_OBJC`. Nothing in NotoCAD sets cursors;

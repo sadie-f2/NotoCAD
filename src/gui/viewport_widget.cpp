@@ -728,7 +728,22 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::MiddleButton) {
         drag_ = (event->modifiers() & Qt::ShiftModifier) ? Drag::Orbit : Drag::Pan;
         last_pos_ = event->pos();
-        setCursor(drag_ == Drag::Pan ? Qt::ClosedHandCursor : Qt::SizeAllCursor);
+
+        // Both grabs show the closed hand, and orbit deliberately no longer
+        // asks for SizeAllCursor.
+        //
+        // On macOS most Qt cursor shapes are native NSCursors, but the few with
+        // no AppKit equivalent -- size-all among them -- are built from bitmap
+        // data and converted through QImage::toCGImage. That conversion is what
+        // crashed on 2026-08-10, and again during an orbit: two triggers with
+        // nothing in common except this one cursor shape, one of them inside
+        // QToolBar, which uses size-all for its drag handle. The closed hand is
+        // a native cursor and cannot take that path.
+        //
+        // Revert freely if the shared cursor reads wrong -- the distinction
+        // being lost is small, since shift is being held either way, and this
+        // is a mitigation for a suspect rather than a proven fix.
+        setCursor(Qt::ClosedHandCursor);
         event->accept();
         return;
     }
