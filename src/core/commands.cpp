@@ -3027,6 +3027,145 @@ Step DimRadialCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::done(label);
 }
 
+// --- DIMANGULAR ---------------------------------------------------------------
+
+Step DimAngularCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Entity;
+    p.message = "Select first line or arc";
+    p.allow_empty = true;  // Enter asks for three points instead
+    return Step::ask(p);
+}
+
+Step DimAngularCommand::ask_location() {
+    state_ = State::Location;
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "Dimension arc location";
+    p.base = vertex_;
+    p.has_base = true;
+    return Step::ask(p);
+}
+
+Step DimAngularCommand::finish(CommandContext& ctx, const Vec3& at) {
+    auto dim = std::make_unique<Dimension>();
+    dim->props() = ctx.db.current_props();
+    dim->props().normal = normal_;
+    dim->set_kind(DimKind::Angular);
+    dim->set_vertex(vertex_);
+    dim->set_points(arm1_, arm2_);
+    dim->set_definition(at);
+    apply_dim_style(ctx, *dim);
+
+    if (dim->measurement() < kEps) return Step::failed("those arms enclose no angle");
+
+    const std::string label = dim->label();
+    ctx.db.add(std::move(dim));
+    return Step::done(label);
+}
+
+Step DimAngularCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::FirstLine: {
+            // Enter takes the three-point route, as R12's does.
+            if (value.kind == InputKind::None) {
+                state_ = State::Vertex;
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Angle vertex";
+                return Step::ask(p);
+            }
+            if (value.kind != InputKind::Entity) return Step::failed("select a line or arc");
+            const Entity* e = ctx.db.get(value.entity);
+            if (e == nullptr) return Step::failed("no such entity");
+
+            // An arc already IS an angle: its centre is the corner and its ends
+            // are the arms, so one pick answers everything but the placement.
+            if (e->type() == EntityType::Arc) {
+                const auto* a = static_cast<const Arc*>(e);
+                normal_ = a->props().normal;
+                vertex_ = a->center();
+                arm1_ = a->start_point();
+                arm2_ = a->end_point();
+                return ask_location();
+            }
+            if (e->type() != EntityType::Line) return Step::failed("select a line or arc");
+
+            const auto* l = static_cast<const Line*>(e);
+            normal_ = construction_normal(ctx);
+            line1_a_ = l->start();
+            line1_b_ = l->end();
+            state_ = State::SecondLine;
+
+            Prompt p;
+            p.kind = PromptKind::Entity;
+            p.message = "Select second line";
+            return Step::ask(p);
+        }
+
+        case State::SecondLine: {
+            if (value.kind != InputKind::Entity) return Step::failed("select a line");
+            const Entity* e = ctx.db.get(value.entity);
+            if (e == nullptr || e->type() != EntityType::Line) return Step::failed("select a line");
+            const auto* l = static_cast<const Line*>(e);
+
+            // The corner is where the two CARRIERS cross, so lines that stop
+            // short of each other still dimension the angle they would make --
+            // which is the common case in a drawing that has been trimmed.
+            IntersectionList hits;
+            intersect_line_line(line1_a_, line1_b_, l->start(), l->end(), hits);
+            if (hits.empty()) return Step::failed("those lines are parallel");
+            vertex_ = hits[0].point;
+
+            // An arm apiece, taken as the far end of each line from the corner
+            // so the angle is the one between the lines as drawn.
+            const auto far_end = [&](const Vec3& a, const Vec3& b) {
+                return length(a - vertex_) >= length(b - vertex_) ? a : b;
+            };
+            arm1_ = far_end(line1_a_, line1_b_);
+            arm2_ = far_end(l->start(), l->end());
+            return ask_location();
+        }
+
+        case State::Vertex:
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            vertex_ = value.point;
+            normal_ = construction_normal(ctx);
+            state_ = State::ArmOne;
+            {
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "First angle endpoint";
+                p.base = vertex_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+
+        case State::ArmOne:
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            arm1_ = value.point;
+            state_ = State::ArmTwo;
+            {
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Second angle endpoint";
+                p.base = vertex_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+
+        case State::ArmTwo:
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            arm2_ = value.point;
+            return ask_location();
+
+        case State::Location:
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            return finish(ctx, value.point);
+    }
+    return Step::failed("internal state error");
+}
+
 // --- DIM, the mode ------------------------------------------------------------
 
 Step DimCommand::start(CommandContext& ctx) { return ask_option(ctx); }
@@ -3037,8 +3176,8 @@ Step DimCommand::ask_option(CommandContext&) {
     p.message = note_.empty() ? "Dim" : note_;
     note_.clear();
     p.allow_empty = true;  // Enter leaves, as eXit does
-    p.keywords = {"Horizontal", "Vertical", "Aligned", "Rotated",
-                  "Radius",     "Diameter", "Undo",    "eXit"};
+    p.keywords = {"Horizontal", "Vertical", "Aligned", "Rotated", "ANgular",
+                  "Radius",     "Diameter",  "Undo",    "eXit"};
     return Step::ask(p);
 }
 
@@ -3092,6 +3231,9 @@ Step DimCommand::next(CommandContext& ctx, const InputValue& value) {
     }
     if (keyword_is(value, "ALIGNED")) {
         return begin_sub(ctx, std::make_unique<DimLinearCommand>(true));
+    }
+    if (keyword_is(value, "ANGULAR")) {
+        return begin_sub(ctx, std::make_unique<DimAngularCommand>());
     }
     if (keyword_is(value, "RADIUS")) {
         return begin_sub(ctx, std::make_unique<DimRadialCommand>(false));
@@ -6322,10 +6464,25 @@ Step ListCommand::next(CommandContext& ctx, const InputValue& value) {
             }
             case EntityType::Dimension: {
                 const Dimension* d = static_cast<const Dimension*>(e);
-                static const char* const kKind[] = {"rotated", "aligned", "", "diameter",
-                                                    "radius"};
-                out += std::string("\n  ") + kKind[static_cast<int>(d->kind())];
-                out += "\n  measures " + fmt(d->measurement());
+                // A switch, not a table indexed by the enum. DimKind's values
+                // are DXF's and are NOT contiguous -- Angular is 5 -- so an
+                // array sized to the number of kinds is read off its end by the
+                // last one. Which is exactly what happened.
+                const char* kind = "dimension";
+                switch (d->kind()) {
+                    case DimKind::Linear: kind = "rotated"; break;
+                    case DimKind::Aligned: kind = "aligned"; break;
+                    case DimKind::Diameter: kind = "diameter"; break;
+                    case DimKind::Radius: kind = "radius"; break;
+                    case DimKind::Angular: kind = "angular"; break;
+                }
+                out += std::string("\n  ") + kind;
+                // Degrees for an angle, which is the unit it is drawn in and
+                // asked for -- reporting 1.5708 for a right angle is technically
+                // the measurement and practically useless.
+                out += "\n  measures " + (d->kind() == DimKind::Angular
+                                              ? fmt_degrees(d->measurement()) + " degrees"
+                                              : fmt(d->measurement()));
                 out += "\n  text " + d->label();
                 if (!d->text_override().empty()) out += "  (overridden)";
                 break;
@@ -6540,6 +6697,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "DIMALIGNED") return std::make_unique<DimLinearCommand>(true);
     if (upper == "DIMRADIUS") return std::make_unique<DimRadialCommand>(false);
     if (upper == "DIMDIAMETER") return std::make_unique<DimRadialCommand>(true);
+    if (upper == "DIMANGULAR") return std::make_unique<DimAngularCommand>();
     if (upper == "DIM") return std::make_unique<DimCommand>(false);
     if (upper == "DIM1") return std::make_unique<DimCommand>(true);
     if (upper == "FILLET") return std::make_unique<FilletCommand>(false);
@@ -6574,7 +6732,7 @@ const std::vector<std::string>& command_names() {
         "ID", "OPEN", "COPYCLIP", "CUTCLIP", "PASTECLIP",
         "LIMITS", "LTSCALE",
         "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "OFFSET", "FILLET", "CHAMFER",
-        "DIM", "DIM1", "DIMLINEAR", "DIMALIGNED", "DIMRADIUS", "DIMDIAMETER", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
+        "DIM", "DIM1", "DIMLINEAR", "DIMALIGNED", "DIMRADIUS", "DIMDIAMETER", "DIMANGULAR", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
         "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;
@@ -6615,6 +6773,7 @@ const std::vector<CommandAlias>& command_aliases() {
         {"DAL", "DIMALIGNED"},
         {"DRA", "DIMRADIUS"},
         {"DDI", "DIMDIAMETER"},
+        {"DAN", "DIMANGULAR"},
         {"F", "FILLET"},
         {"CHA", "CHAMFER"},
         {"SO", "SOLID"},

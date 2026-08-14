@@ -505,11 +505,19 @@ EntityPtr Reader::build(const EntityGroups& g, GroupStream& in, int& pending_cod
             case 1: e->set_kind(DimKind::Aligned); break;
             case 3: e->set_kind(DimKind::Diameter); break;
             case 4: e->set_kind(DimKind::Radius); break;
+            // Type 2 is the two-line form and 5 the three-point one. Both are
+            // read into the three-point representation, which can express
+            // either -- a two-line angular's vertex is where its arms cross.
+            case 2:
+            case 5: e->set_kind(DimKind::Angular); break;
             default: e->set_kind(DimKind::Linear); break;
         }
 
         e->set_definition(g.point(10));
-        if (e->radial()) {
+        if (e->angular()) {
+            e->set_points(g.point(13), g.point(14));
+            e->set_vertex(g.point(15));
+        } else if (e->radial()) {
             // Group 15 is where the leader meets the curve.
             e->set_points(g.point(15), Vec3{});
         } else {

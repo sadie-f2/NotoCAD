@@ -22,6 +22,13 @@
   (command "CIRCLE" '(200 100) 25)
   (command "DIMDIAMETER" (entlast) '(200 130))
 
+  ; Two arms at 90 degrees, dimensioned both ways: the arc inside reads 90,
+  ; the arc outside reads 270, and both are correct.
+  (command "LINE" '(300 0) '(360 0) "")
+  (command "LINE" '(300 0) '(300 60) "")
+  (command "DIMANGULAR" "" '(300 0) '(360 0) '(300 60) '(320 20))
+  (command "DIMANGULAR" "" '(300 0) '(360 0) '(300 60) '(270 -30))
+
   ; A rotated dimension: 30 degrees across the same rectangle.
   (command "DIM" "ROTATED" 30 '(0 0) '(100 40) '(60 90) "EXIT")
   (princ "\ndimension sample built")

@@ -24,6 +24,13 @@ constexpr double kBarbSpread = 0.30;
 // of the text height.
 constexpr double kTextGap = 0.6;
 
+// Wrapped into [0, 2*pi).
+double norm_turn(double a) {
+    while (a < 0.0) a += kFullTurn;
+    while (a >= kFullTurn) a -= kFullTurn;
+    return a;
+}
+
 // The measurement, formatted the way every other reported length in this
 // program is -- fixed rather than %g, so a column of them lines up.
 std::string fmt_measure(double v) {
@@ -80,7 +87,42 @@ void Dimension::apply_style(double text_height, double arrow_size, double ext_of
     if (ext_beyond >= 0.0) ext_beyond_ = ext_beyond;
 }
 
+// Which of the two angles between the arms was meant, and where the arc runs.
+//
+// Two rays cut the plane into an angle and its explement, and the pair of points
+// alone cannot say which was wanted -- so the ARC LOCATION decides: the angle
+// you are dimensioning is the one you put the arc inside. That is what makes a
+// 90-degree corner dimensionable as 270 by dragging the other way, which is
+// occasionally exactly what a drawing needs.
+bool Dimension::angular_span(double& from, double& sweep) const {
+    const Basis b = arbitrary_axis(props().normal);
+    const Vec3 r1 = first_ - vertex_;
+    const Vec3 r2 = second_ - vertex_;
+    const Vec3 rl = definition_ - vertex_;
+    if (is_zero(r1) || is_zero(r2)) return false;
+
+    const double a1 = std::atan2(dot(r1, b.ay), dot(r1, b.ax));
+    const double a2 = std::atan2(dot(r2, b.ay), dot(r2, b.ax));
+    const double al = is_zero(rl) ? a1 : std::atan2(dot(rl, b.ay), dot(rl, b.ax));
+
+    const double ccw = norm_turn(a2 - a1);
+    // Inside the counterclockwise sweep from the first arm to the second?
+    if (norm_turn(al - a1) <= ccw) {
+        from = a1;
+        sweep = ccw;
+    } else {
+        from = a2;
+        sweep = kFullTurn - ccw;
+    }
+    return sweep > kEps;
+}
+
 double Dimension::measurement() const {
+    if (kind_ == DimKind::Angular) {
+        double from = 0.0;
+        double sweep = 0.0;
+        return angular_span(from, sweep) ? sweep : 0.0;
+    }
     switch (kind_) {
         case DimKind::Radius: return length(first_ - definition_);
         case DimKind::Diameter: return 2.0 * length(first_ - definition_);
@@ -106,6 +148,9 @@ std::string Dimension::label() const {
         // circle-and-slash. Our stroke font has no such glyph and shows the
         // escape literally -- see SF_todo on control codes.
         case DimKind::Diameter: return "%%C" + fmt_measure(measurement());
+        // Degrees, and R12's escape for the sign -- the same bargain %%C takes.
+        case DimKind::Angular:
+            return fmt_measure(measurement() * 180.0 / 3.14159265358979323846) + "%%D";
         default: return fmt_measure(measurement());
     }
 }
@@ -113,6 +158,62 @@ std::string Dimension::label() const {
 void Dimension::regenerate(std::vector<EntityPtr>& out) const {
     const Vec3 n = normalize(props().normal);
     const EntityProps& props_ = props();
+
+    if (angular()) {
+        double from = 0.0;
+        double sweep = 0.0;
+        if (!angular_span(from, sweep)) return;
+
+        // The arc runs at whatever distance from the corner the location was
+        // put, so dragging further out gives a larger arc across the same
+        // angle -- which is how an angular dimension is placed clear of the
+        // geometry it measures.
+        const double r = length(definition_ - vertex_);
+        if (r < kEps) return;
+
+        const Basis b = arbitrary_axis(n);
+        const auto at = [&](double a) {
+            return vertex_ + (b.ax * std::cos(a) + b.ay * std::sin(a)) * r;
+        };
+        // Counterclockwise tangent, which is the direction the arc leaves in.
+        const auto tangent = [&](double a) {
+            return b.ax * -std::sin(a) + b.ay * std::cos(a);
+        };
+
+        auto arc = std::make_unique<Arc>(vertex_, r, from, from + sweep, n);
+        arc->props() = props_;
+        out.push_back(std::move(arc));
+
+        // Extension lines, but only where an arm is shorter than the arc: an
+        // arm that already reaches past it needs no help getting there.
+        for (const Vec3& arm : {first_, second_}) {
+            const double reach = length(arm - vertex_);
+            if (reach + kEps >= r) continue;
+            const Vec3 dir = normalize(arm - vertex_);
+            out.push_back(segment(vertex_ + dir * (reach + ext_offset_),
+                                  vertex_ + dir * (r + ext_beyond_), props_));
+        }
+
+        // Tips on the arc, barbs trailing back along it.
+        out.push_back(arrowhead(at(from), tangent(from), n, arrow_size_, props_));
+        out.push_back(arrowhead(at(from + sweep), tangent(from + sweep) * -1.0, n, arrow_size_,
+                                props_));
+
+        // The label sits just outside the arc at its midpoint, reading along
+        // the tangent there so it lies with the curve rather than across it.
+        const double half = from + sweep * 0.5;
+        const Vec3 outward = b.ax * std::cos(half) + b.ay * std::sin(half);
+        const Vec3 anchor = vertex_ + outward * (r + text_height_ * (0.5 + kTextGap));
+        const Vec3 along = tangent(half);
+
+        auto text = std::make_unique<Text>(anchor, label(), text_height_);
+        text->set_rotation(std::atan2(dot(along, b.ay), dot(along, b.ax)));
+        text->set_align(TextHAlign::Center, TextVAlign::Middle);
+        text->set_align_point(anchor);
+        text->props() = props_;
+        out.push_back(std::move(text));
+        return;
+    }
 
     if (radial()) {
         const Vec3 spoke = first_ - definition_;
@@ -219,6 +320,7 @@ EntityPtr Dimension::clone() const {
     copy->definition_ = definition_;
     copy->first_ = first_;
     copy->second_ = second_;
+    copy->vertex_ = vertex_;
     copy->rotation_ = rotation_;
     copy->text_ = text_;
     copy->text_height_ = text_height_;
@@ -233,6 +335,7 @@ void Dimension::transform(const Mat4& m) {
     definition_ = m.transform_point(definition_);
     first_ = m.transform_point(first_);
     second_ = m.transform_point(second_);
+    vertex_ = m.transform_point(vertex_);
 
     // The style sizes scale with the drawing, as TEXT's height does: a drawing
     // scaled up whose annotation stayed put would be unreadable at one end and
@@ -284,12 +387,15 @@ void Dimension::osnap_points(std::vector<OsnapPoint>& out) const {
     out.push_back({definition_, OsnapType::Insert});
     out.push_back({first_, OsnapType::Endpoint});
     if (!radial()) out.push_back({second_, OsnapType::Endpoint});
+    // The corner is the one point on an angular dimension worth snapping to.
+    if (angular()) out.push_back({vertex_, OsnapType::Center});
 }
 
 void Dimension::grips(std::vector<Grip>& out) const {
     out.push_back(Grip{first_, GripKind::Stretch, 0});
     if (!radial()) out.push_back(Grip{second_, GripKind::Stretch, 1});
     out.push_back(Grip{definition_, GripKind::Move, 2});
+    if (angular()) out.push_back(Grip{vertex_, GripKind::Stretch, 3});
 }
 
 void Dimension::stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) {
@@ -298,6 +404,7 @@ void Dimension::stretch(const Vec3& delta, const GripIndex* indices, std::size_t
             case 0: first_ = first_ + delta; break;
             case 1: if (!radial()) second_ = second_ + delta; break;
             case 2: definition_ = definition_ + delta; break;
+            case 3: if (angular()) vertex_ = vertex_ + delta; break;
             default: break;
         }
     }
@@ -318,7 +425,9 @@ void Dimension::dxf_write(DxfWriter& w) const {
 
     // Group 11, the middle of the text. Readers that regenerate use it to put
     // the label back where it was placed rather than where they would choose.
-    const Vec3 mid = radial() ? (definition_ + first_) * 0.5 : (first_ + second_) * 0.5;
+    const Vec3 mid = radial() ? (definition_ + first_) * 0.5
+                    : angular() ? definition_
+                                : (first_ + second_) * 0.5;
     w.point(11, mid);
 
     // Group 70. The kind IS the low bits, and bit 128 says the text position in
@@ -332,7 +441,16 @@ void Dimension::dxf_write(DxfWriter& w) const {
     // so a program that does not recompute still reports the right number.
     w.code(42, measurement());
 
-    if (radial()) {
+    if (angular()) {
+        // Written in the three-point form even when it came from two picked
+        // lines, because that is how it is HELD -- the vertex is explicit and
+        // the arms are points on it, so what the file says is what the entity
+        // knows rather than a reconstruction of how it was asked for.
+        w.subclass("AcDb3PointAngularDimension");
+        w.point(13, first_);
+        w.point(14, second_);
+        w.point(15, vertex_);
+    } else if (radial()) {
         w.subclass(kind_ == DimKind::Diameter ? "AcDbDiametricDimension"
                                               : "AcDbRadialDimension");
         // Where the leader meets the curve.

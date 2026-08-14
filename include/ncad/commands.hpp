@@ -1070,6 +1070,36 @@ private:
     Vec3 normal_{0.0, 0.0, 1.0};
 };
 
+// DIMANGULAR: the angle between two lines, or across an arc, or three points.
+//
+// The arc location does more than place the annotation: two arms cut the plane
+// into an angle and its explement, and which one you meant is decided by which
+// side you put the arc on. So the same corner dimensions as 90 or as 270
+// depending on where you drag, and neither is a mistake.
+class DimAngularCommand final : public Command {
+public:
+    const char* name() const override { return "DIMANGULAR"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { FirstLine, SecondLine, Vertex, ArmOne, ArmTwo, Location };
+
+    Step ask_location();
+    Step finish(CommandContext& ctx, const Vec3& at);
+
+    State state_{State::FirstLine};
+    Vec3 vertex_{};
+    Vec3 arm1_{};
+    Vec3 arm2_{};
+    Vec3 normal_{0.0, 0.0, 1.0};
+
+    // The first picked line, held until the second arrives -- the corner is
+    // where they cross, which cannot be known from one of them.
+    Vec3 line1_a_{};
+    Vec3 line1_b_{};
+};
+
 // DIM: R12's dimensioning mode, and DIM1 which leaves after one.
 //
 // It owns no geometry code. Each subcommand builds the real command object and

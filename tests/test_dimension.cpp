@@ -362,3 +362,154 @@ TEST_CASE("dimension: EXPLODE turns it into the line work it draws") {
     CHECK(first_dimension(db) == nullptr);
     CHECK(db.size() == 7);             // 4 lines, 2 arrowheads, 1 text
 }
+
+// --- angular --------------------------------------------------------------------
+
+TEST_CASE("dimension: an angular one measures the side the arc was put on") {
+    // Two arms cut the plane into an angle and its explement, and the points
+    // alone cannot say which was meant. The arc location decides, so the same
+    // corner is 90 or 270 depending on where it is dragged -- and neither is a
+    // mistake.
+    Dimension d;
+    d.set_kind(DimKind::Angular);
+    d.set_vertex(Vec3{0, 0, 0});
+    d.set_points(Vec3{50, 0, 0}, Vec3{0, 50, 0});
+
+    d.set_definition(Vec3{20, 20, 0});  // inside the corner
+    CHECK(std::abs(d.measurement() - std::numbers::pi / 2.0) < 1e-12);
+    CHECK(d.label() == "90.0000%%D");
+
+    d.set_definition(Vec3{-20, -20, 0});  // outside it
+    CHECK(std::abs(d.measurement() - 3.0 * std::numbers::pi / 2.0) < 1e-12);
+    CHECK(d.label() == "270.0000%%D");
+}
+
+TEST_CASE("dimension: an angular one draws an arc, two arrowheads and a label") {
+    Dimension d;
+    d.set_kind(DimKind::Angular);
+    d.set_vertex(Vec3{0, 0, 0});
+    d.set_points(Vec3{50, 0, 0}, Vec3{0, 50, 0});
+    d.set_definition(Vec3{60, 60, 0});  // beyond both arms
+
+    std::vector<EntityPtr> parts;
+    d.regenerate(parts);
+    CHECK(count_of(parts, EntityType::Arc) == 1);
+    CHECK(count_of(parts, EntityType::Solid) == 2);
+    CHECK(count_of(parts, EntityType::Text) == 1);
+    // Both arms are shorter than the arc, so both get an extension line.
+    CHECK(count_of(parts, EntityType::Line) == 2);
+
+    // An arc INSIDE the arms needs no extension lines at all.
+    Dimension inside = d;
+    inside.set_definition(Vec3{20, 20, 0});
+    std::vector<EntityPtr> near_parts;
+    inside.regenerate(near_parts);
+    CHECK(count_of(near_parts, EntityType::Line) == 0);
+}
+
+TEST_CASE("dimension command: DIMANGULAR takes two lines, three points, or an arc") {
+    // Two lines: the corner is where their CARRIERS cross, so lines trimmed
+    // back from each other still dimension the angle they would make.
+    Database db;
+    CommandEngine engine(db);
+    const Handle a = db.add(std::make_unique<Line>(Vec3{10, 0, 0}, Vec3{100, 0, 0}));
+    const Handle b = db.add(std::make_unique<Line>(Vec3{0, 10, 0}, Vec3{0, 100, 0}));
+
+    engine.begin(make_command("DIMANGULAR"));
+    engine.supply(InputValue::of_entity(a));
+    engine.supply(InputValue::of_entity(b));
+    engine.supply(InputValue::of_point({30, 30, 0}));
+    REQUIRE(engine.status() == EngineStatus::Finished);
+    REQUIRE(first_dimension(db) != nullptr);
+    CHECK(std::abs(first_dimension(db)->measurement() - std::numbers::pi / 2.0) < 1e-9);
+    CHECK_VEC(first_dimension(db)->vertex(), 0.0, 0.0, 0.0, 1e-9);
+
+    // Three points, reached by Enter at the first prompt as R12 does.
+    Database db2;
+    CommandEngine e2(db2);
+    e2.begin(make_command("DIMANGULAR"));
+    e2.supply(InputValue::none());
+    e2.supply(InputValue::of_point({0, 0, 0}));
+    e2.supply(InputValue::of_point({10, 0, 0}));
+    e2.supply(InputValue::of_point({0, 10, 0}));
+    e2.supply(InputValue::of_point({5, 5, 0}));
+    REQUIRE(first_dimension(db2) != nullptr);
+    CHECK(std::abs(first_dimension(db2)->measurement() - std::numbers::pi / 2.0) < 1e-9);
+
+    // An arc already IS an angle: centre for the corner, ends for the arms.
+    Database db3;
+    CommandEngine e3(db3);
+    const Handle arc =
+        db3.add(std::make_unique<Arc>(Vec3{0, 0, 0}, 25.0, 0.0, std::numbers::pi / 3.0));
+    e3.begin(make_command("DIMANGULAR"));
+    e3.supply(InputValue::of_entity(arc));
+    e3.supply(InputValue::of_point({30, 10, 0}));
+    REQUIRE(first_dimension(db3) != nullptr);
+    CHECK(std::abs(first_dimension(db3)->measurement() - std::numbers::pi / 3.0) < 1e-9);
+}
+
+TEST_CASE("dimension command: DIMANGULAR refuses parallel lines") {
+    Database db;
+    CommandEngine engine(db);
+    const Handle a = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{100, 0, 0}));
+    const Handle b = db.add(std::make_unique<Line>(Vec3{0, 50, 0}, Vec3{100, 50, 0}));
+
+    engine.begin(make_command("DIMANGULAR"));
+    engine.supply(InputValue::of_entity(a));
+    engine.supply(InputValue::of_entity(b));
+    CHECK(engine.status() == EngineStatus::Failed);
+    CHECK(first_dimension(db) == nullptr);
+}
+
+TEST_CASE("dimension: an angular one round trips through DXF") {
+    Database db;
+    auto d = std::make_unique<Dimension>();
+    d->set_kind(DimKind::Angular);
+    d->set_vertex(Vec3{5, 5, 0});
+    d->set_points(Vec3{55, 5, 0}, Vec3{5, 55, 0});
+    d->set_definition(Vec3{25, 25, 0});
+    db.add(std::move(d));
+
+    for (const DxfVersion version : {DxfVersion::R12, DxfVersion::R2000}) {
+        Database back;
+        REQUIRE(read_dxf_text(back, write_dxf_text(db, version)).ok);
+        const Dimension* got = first_dimension(back);
+        REQUIRE(got != nullptr);
+        CHECK(got->kind() == DimKind::Angular);
+        CHECK_VEC(got->vertex(), 5.0, 5.0, 0.0, 1e-9);
+        // The vertex has to survive, or the angle is measured from the origin.
+        CHECK(std::abs(got->measurement() - std::numbers::pi / 2.0) < 1e-6);
+    }
+}
+
+TEST_CASE("dimension: LIST names every kind, including the one past the end") {
+    // DimKind's values are DXF's and are NOT contiguous -- Angular is 5 -- so
+    // the first version of LIST, which indexed a five-entry table by the enum,
+    // read off its end for exactly one kind. A table sized to "the number of
+    // kinds" is wrong whenever the values are someone else's.
+    Database db;
+    CommandEngine engine(db);
+
+    const struct { DimKind kind; const char* word; } cases[] = {
+        {DimKind::Linear, "rotated"},   {DimKind::Aligned, "aligned"},
+        {DimKind::Radius, "radius"},    {DimKind::Diameter, "diameter"},
+        {DimKind::Angular, "angular"},
+    };
+
+    for (const auto& c : cases) {
+        Database one;
+        CommandEngine e(one);
+        auto d = std::make_unique<Dimension>();
+        d->set_kind(c.kind);
+        d->set_vertex(Vec3{0, 0, 0});
+        d->set_points(Vec3{50, 0, 0}, Vec3{0, 50, 0});
+        d->set_definition(c.kind == DimKind::Angular ? Vec3{20, 20, 0} : Vec3{25, -20, 0});
+        const Handle h = one.add(std::move(d));
+
+        e.begin(make_command("LIST"));
+        e.supply(InputValue::of_entity(h));
+        e.supply(InputValue::none());
+        REQUIRE(e.status() == EngineStatus::Finished);
+        CHECK(e.message().find(c.word) != std::string::npos);
+    }
+}

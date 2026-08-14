@@ -33,7 +33,15 @@ them, because the reason a thing is wanted is the most perishable part of wantin
       DIM owns no geometry code: each subcommand builds the real command and forwards to
       it, so the mode and the commands cannot drift.
 
-      Angular is next, and baseline/continue are cheap after it. Known cosmetic gap:
+      Angular followed at 0.2.72, held in the three-point form because it is the general
+      one -- two picked lines reduce to it by intersecting their CARRIERS, so lines trimmed
+      apart still dimension the angle they would make, and an arc reduces to it outright.
+      Which of the two angles is meant is decided by the side the arc is placed on. It also
+      found a real memory bug in LIST: DimKind's values are DXF's and are not contiguous
+      (Angular is 5), so a five-entry table indexed by the enum was read off its end by
+      exactly one kind. A switch now, and a test walks every kind.
+
+      Baseline and continue are next, and cheap. Known cosmetic gap:
       a diameter label is written `%%C50.0000`, which is correct R12 -- AutoCAD renders
       the diameter sign -- while our stroke font shows the escape literally, since the
       Hershey set is ASCII and has no such glyph. R12's control codes (%%C, %%D, %%P)

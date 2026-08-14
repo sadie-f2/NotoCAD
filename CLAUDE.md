@@ -232,9 +232,15 @@ variables ride in the DXF header so a drawing reopened elsewhere annotates itsel
 at its own sizes rather than the reader's.
 
 Linear (rotated, and horizontal/vertical inferred from where the dimension line is
-put), aligned, radius and diameter. `DIM` is R12's mode and owns no geometry code:
-each subcommand builds the real command object and forwards to it, so there is one
-implementation and two front doors. Angular is not built.
+put), aligned, radius, diameter and angular. `DIM` is R12's mode and owns no
+geometry code: each subcommand builds the real command object and forwards to it,
+so there is one implementation and two front doors.
+
+Angular is held in the three-point form — a vertex and a point on each arm —
+because it is the general one: two picked lines reduce to it by intersecting their
+carriers, and an arc reduces to it by construction. Which of the two angles is
+meant is decided by the side the arc is placed on, so the same corner dimensions
+as 90 or as 270 and neither is a mistake.
 
 ## Build
 
@@ -268,7 +274,7 @@ says it links no GPL code. The Hershey acknowledgements are there because that
 licence requires them to travel with the font data, and the data is compiled in;
 a test asserts they are present, so falling out of compliance fails the suite.
 
-The version's patch number is the command count — 0.2.71 means 71 commands —
+The version's patch number is the command count — 0.2.72 means 72 commands —
 and `tests/test_registry.cpp` asserts the two agree. Adding a command means
 raising the literal there and `project(VERSION)` in the root CMakeLists.
 
@@ -277,7 +283,7 @@ ROTATE3D, SPLINE, ELLIPSE, REDO and UCSICON are all in the total. The number
 says how much of the tool exists, not how much of the 1992 manual is covered.
 QUIT is the one thing you can type that is *not* counted — it ends the session
 rather than acting on the drawing, so `prompt.cpp` handles it beside EXIT and it
-owns no `Command`. That is why `?` lists 72 names against a registry of 71.
+owns no `Command`. That is why `?` lists 73 names against a registry of 72.
 
 **The minor number marks a milestone reached**, and is bumped deliberately
 rather than by any rule a test can check:

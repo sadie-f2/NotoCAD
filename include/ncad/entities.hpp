@@ -816,6 +816,11 @@ enum class DimKind : std::uint8_t {
     Aligned = 1,   // parallel to the two points it measures
     Diameter = 3,
     Radius = 4,
+    // Stored in the three-point form -- a vertex and a point on each arm --
+    // because it is the general one: two picked lines reduce to it by
+    // intersecting them, and an arc reduces to it by construction. DXF type 5
+    // says exactly that, so what is written is what is held.
+    Angular = 5,
 };
 
 // DIMENSION: a measurement the drawing carries.
@@ -848,6 +853,7 @@ public:
     void set_kind(DimKind k) { kind_ = k; }
 
     bool radial() const { return kind_ == DimKind::Radius || kind_ == DimKind::Diameter; }
+    bool angular() const { return kind_ == DimKind::Angular; }
 
     // DXF group 10. Where the dimension line runs for a linear dimension; the
     // centre of the curve for a radial one.
@@ -863,6 +869,11 @@ public:
         first_ = a;
         second_ = b;
     }
+
+    // Group 15 for an Angular dimension: the corner the angle is measured at,
+    // with `first` and `second` a point along each arm. Unused otherwise.
+    const Vec3& vertex() const { return vertex_; }
+    void set_vertex(const Vec3& p) { vertex_ = p; }
 
     // Group 50: which way a Linear dimension measures, in its own plane. Zero
     // is horizontal and a quarter turn is vertical, which is all R12's HOR and
@@ -892,6 +903,12 @@ public:
     // prefix its kind wants.
     std::string label() const;
 
+    // Where an angular dimension's arc starts and how far it sweeps, both in
+    // the entity's own plane. False when the arms are degenerate. Exposed
+    // because the measurement and the drawing are the same question asked
+    // twice, and answering it in one place is what stops them disagreeing.
+    bool angular_span(double& from, double& sweep) const;
+
     // The drawn form: lines, SOLID arrowheads and one TEXT. Appended to `out`.
     //
     // The single source for the viewport and for the DXF block, which is the
@@ -912,6 +929,7 @@ private:
     Vec3 definition_{};
     Vec3 first_{};
     Vec3 second_{};
+    Vec3 vertex_{};
     double rotation_{0.0};
     std::string text_;
 
