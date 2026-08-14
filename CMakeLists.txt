@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.20)
 # The patch number is the COMMAND COUNT -- see include/ncad/version.hpp.in.
-project(NotoCAD VERSION 0.2.65 LANGUAGES CXX)
+project(NotoCAD VERSION 0.2.71 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
