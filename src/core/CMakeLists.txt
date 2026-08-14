@@ -14,6 +14,7 @@ add_library(ncad_core STATIC
   faces.cpp
   text.cpp
   mtext.cpp
+  dimension.cpp
   font_hershey.cpp
   proxy.cpp
   insert.cpp

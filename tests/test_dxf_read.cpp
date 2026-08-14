@@ -115,14 +115,15 @@ TEST_CASE("dxf read: an entity after a polyline is not swallowed") {
 
 TEST_CASE("dxf read: an unknown entity survives as a proxy") {
     Database db;
-    // DIMENSION, which has no class here. This test has now used TEXT and then
-    // INSERT and outlived both, which is exactly how a type is meant to leave
-    // proxy status -- the reader changes and nothing else does. Dimensions are
-    // deferred by CLAUDE.md, so this one should last a while.
+    // HATCH, which has no class here. This test has now used TEXT, then INSERT,
+    // then DIMENSION and outlived all three, which is exactly how a type is
+    // meant to leave proxy status -- the reader gains a branch and nothing else
+    // changes. HATCH needs a decision about what it degrades TO before it can
+    // follow them, so this one should last a while.
     const DxfReadResult r = read_dxf_text(
         db, dxf({kEntitiesOpen,
-                 "  0\nDIMENSION\n  8\nDIMS\n  2\n*D1\n 10\n1.0\n 20\n2.0\n 30\n0.0\n"
-                 " 13\n0.0\n 14\n5.0",
+                 "  0\nHATCH\n  8\nHATCHES\n  2\nANSI31\n 10\n1.0\n 20\n2.0\n 30\n0.0\n"
+                 " 91\n1\n 70\n0",
                  kEnd}));
 
     CHECK(r.ok);
@@ -131,7 +132,7 @@ TEST_CASE("dxf read: an unknown entity survives as a proxy") {
 
     const Entity* e = db.get(db.order()[0]);
     CHECK(e->type() == EntityType::Proxy);
-    CHECK(static_cast<const Proxy*>(e)->dxf_name() == "DIMENSION");
+    CHECK(static_cast<const Proxy*>(e)->dxf_name() == "HATCH");
     // Nothing to draw, nothing to pick, nothing to frame.
     CHECK(!e->bbox().valid());
 }
@@ -162,8 +163,8 @@ TEST_CASE("dxf read: TEXT is held as an entity, not as a proxy") {
 TEST_CASE("dxf read: a proxy writes back what it read, unchanged") {
     Database db;
     read_dxf_text(db, dxf({kEntitiesOpen,
-                           "  0\nDIMENSION\n  8\nDIMS\n  2\n*D0\n 10\n1.5\n 20\n2.5\n 30\n0.0\n"
-                           "  1\nsome text\n 70\n0",
+                           "  0\nHATCH\n  8\nHATCHES\n  2\nANSI31\n 10\n1.5\n 20\n2.5\n"
+                           " 30\n0.0\n  1\nsome text\n 70\n0",
                            kEnd}));
     CHECK(db.size() == 1);
 
@@ -174,9 +175,9 @@ TEST_CASE("dxf read: a proxy writes back what it read, unchanged") {
 
     // The point of the exercise: opening a drawing and saving it must not
     // quietly empty it of what this program does not understand.
-    CHECK(text.find("DIMENSION") != std::string::npos);
+    CHECK(text.find("HATCH") != std::string::npos);
     CHECK(text.find("some text") != std::string::npos);
-    CHECK(text.find("*D0") != std::string::npos);
+    CHECK(text.find("ANSI31") != std::string::npos);
 }
 
 TEST_CASE("dxf read: layers and linetypes come from the tables") {

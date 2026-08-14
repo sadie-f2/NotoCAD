@@ -102,6 +102,20 @@ enum class Sysvar : std::uint16_t {
     // geometry in bulk and saving it without a person present.
     DxfVersionVar,
 
+    // Dimension style, R12's DIMxxx family. Only the handful the dimensions
+    // this program draws actually consult -- R12 has about fifty, and carrying
+    // the rest before anything reads them would be a table of decoration.
+    //
+    // ORDER HERE MUST MATCH kTable IN sysvar.cpp. `sysvar_def` indexes the
+    // table by enum value rather than searching it, and the static_assert at
+    // the bottom of that file catches a wrong COUNT but not a wrong ORDER.
+    DimScale,  // multiplies every size below, so a drawing can be annotated for its plot scale
+    DimTxt,    // text height
+    DimAsz,    // arrow length
+    DimExo,    // how far an extension line stands off the geometry
+    DimExe,    // how far it overshoots the dimension line
+    DimTad,    // 0 text in the dimension line, 1 above it
+
     // Whether a file prompt is answered by a dialog or by typing. R12's, and
     // for R12's reason: a script or a LISP routine that drives OPEN must not
     // stop on a modal window nobody is there to dismiss. 0 forces typing even

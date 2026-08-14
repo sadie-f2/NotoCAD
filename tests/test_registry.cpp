@@ -81,10 +81,10 @@ TEST_CASE("registry: the command count is what we think it is") {
     // treat it dropping as a bug until proven otherwise.
     // QUIT is deliberately NOT here. It ends the session rather than acting on
     // the drawing, so prompt.cpp handles it beside EXIT and it owns no Command.
-    // That is why `?` lists 66 names while the registry holds 65, which is
+    // That is why `?` lists 72 names while the registry holds 71, which is
     // confusing enough to be worth saying once.
-    CHECK(command_names().size() == 65);
-    if (command_names().size() != 65) {
+    CHECK(command_names().size() == 71);
+    if (command_names().size() != 71) {
         std::printf("       registry holds %zu commands\n", command_names().size());
     }
 }

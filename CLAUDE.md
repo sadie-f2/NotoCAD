@@ -218,10 +218,23 @@ the formatting is discarded at layout time, not at read time, so opening and
 saving a file cannot quietly destroy it. Wrapping uses the font's real advance
 widths, which is why this could not exist before TEXT had a font.
 
-**Dimensioning is deferred, and separately.** Not built at all; R12's are
-non-associative and are blocks, so they cost nothing to defer. It is on the roadmap
-rather than out of scope, and TEXT no longer blocks it — but see MEASUREGEOM, which
-turned out to answer most of what dimensions were wanted for.
+**Dimensioning is built, and non-associative as R12's are.** A `Dimension` holds
+what it measures and GENERATES its line work; `draw()` and `dxf_write()` call the
+same `regenerate()`, so the screen and the file cannot disagree. On the way out it
+becomes a DIMENSION record plus the anonymous `*D<n>` block R12 puts the geometry
+in — and that block is synthesised in the WRITER only, so nothing else in the
+program has to know about anonymous blocks or a name generator.
+
+The style is baked into the entity when it is made, from DIMSCALE/DIMTXT/DIMASZ/
+DIMEXO/DIMEXE. `draw()` is handed no database and could not read them later, and
+R12 behaves the same way: a dimension keeps the style it was drawn with. The DIM
+variables ride in the DXF header so a drawing reopened elsewhere annotates itself
+at its own sizes rather than the reader's.
+
+Linear (rotated, and horizontal/vertical inferred from where the dimension line is
+put), aligned, radius and diameter. `DIM` is R12's mode and owns no geometry code:
+each subcommand builds the real command object and forwards to it, so there is one
+implementation and two front doors. Angular is not built.
 
 ## Build
 
@@ -255,7 +268,7 @@ says it links no GPL code. The Hershey acknowledgements are there because that
 licence requires them to travel with the font data, and the data is compiled in;
 a test asserts they are present, so falling out of compliance fails the suite.
 
-The version's patch number is the command count — 0.2.65 means 65 commands —
+The version's patch number is the command count — 0.2.71 means 71 commands —
 and `tests/test_registry.cpp` asserts the two agree. Adding a command means
 raising the literal there and `project(VERSION)` in the root CMakeLists.
 
@@ -264,7 +277,7 @@ ROTATE3D, SPLINE, ELLIPSE, REDO and UCSICON are all in the total. The number
 says how much of the tool exists, not how much of the 1992 manual is covered.
 QUIT is the one thing you can type that is *not* counted — it ends the session
 rather than acting on the drawing, so `prompt.cpp` handles it beside EXIT and it
-owns no `Command`. That is why `?` lists 66 names against a registry of 65.
+owns no `Command`. That is why `?` lists 72 names against a registry of 71.
 
 **The minor number marks a milestone reached**, and is bumped deliberately
 rather than by any rule a test can check:

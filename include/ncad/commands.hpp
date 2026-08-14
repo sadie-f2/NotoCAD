@@ -1001,6 +1001,104 @@ private:
     Vec3 first_pick_{};
 };
 
+// DIMLINEAR / DIMALIGNED: the two points being measured, then where the
+// dimension line goes.
+//
+// One class for both, because they differ only in what direction the
+// measurement is taken along -- and DIMLINEAR covers R12's HORizontal and
+// VERtical without either being a separate thing, by reading the direction off
+// where the dimension line was put. Dragging above or below two points means
+// you want the horizontal distance; dragging to the side means the vertical
+// one. That is the modern behaviour and it makes the two R12 subcommands
+// options rather than code.
+class DimLinearCommand final : public Command {
+public:
+    explicit DimLinearCommand(bool aligned) : aligned_(aligned) {}
+
+    const char* name() const override { return aligned_ ? "DIMALIGNED" : "DIMLINEAR"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+    // Forces the measuring direction, for DIM's HORizontal and VERtical, which
+    // do not infer. Radians in the construction plane.
+    void force_rotation(double radians) {
+        rotation_ = radians;
+        forced_ = true;
+    }
+
+    // Ask for the angle BEFORE the two points, which is the order R12's
+    // `DIM / ROTated` uses. DIMLINEAR asks for it last, as a option at the
+    // placement prompt, because by then it is a correction to what the
+    // placement would otherwise have inferred.
+    void ask_rotation_first() { angle_first_ = true; }
+
+private:
+    enum class State : std::uint8_t { First, Second, Location, RotationAngle, TextValue };
+
+    Step place(CommandContext& ctx, const Vec3& at);
+
+    bool aligned_;
+    State state_{State::First};
+    Vec3 first_{};
+    Vec3 second_{};
+    double rotation_{0.0};
+    bool forced_{false};
+    bool angle_first_{false};
+    std::string text_;
+};
+
+// DIMRADIUS / DIMDIAMETER: an arc or circle, then where the leader points.
+//
+// The pick decides which way the leader runs -- the direction from the centre
+// to where you pointed -- so one point answers both "how big" and "where to put
+// it", which is what makes these two prompts rather than four.
+class DimRadialCommand final : public Command {
+public:
+    explicit DimRadialCommand(bool diameter) : diameter_(diameter) {}
+
+    const char* name() const override { return diameter_ ? "DIMDIAMETER" : "DIMRADIUS"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Entity, Location };
+
+    bool diameter_;
+    State state_{State::Entity};
+    Vec3 centre_{};
+    double radius_{0.0};
+    Vec3 normal_{0.0, 0.0, 1.0};
+};
+
+// DIM: R12's dimensioning mode, and DIM1 which leaves after one.
+//
+// It owns no geometry code. Each subcommand builds the real command object and
+// forwards to it, so the mode and the individual commands cannot drift apart --
+// there is only one implementation of a linear dimension and DIM is a second
+// way to reach it. Shaped like PEDIT: an option hub, a one-shot note carrying
+// the last result into the next prompt, Enter or eXit to leave.
+class DimCommand final : public Command {
+public:
+    explicit DimCommand(bool once) : once_(once) {}
+
+    const char* name() const override { return once_ ? "DIM1" : "DIM"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    Step ask_option(CommandContext& ctx);
+    Step begin_sub(CommandContext& ctx, CommandPtr sub);
+
+    bool once_;
+    CommandPtr sub_;
+    std::string note_;
+
+    // What this session made, so Undo can take the last one back. Not the
+    // journal: the whole DIM session is one undoable step, which is how PEDIT
+    // treats its own edits and what R12 does here too.
+    std::vector<Handle> made_;
+};
+
 // BREAK: remove the piece of a curve between two points.
 //
 // The first of phase 10's commands, and the simplest consumer of the

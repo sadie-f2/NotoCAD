@@ -17,6 +17,28 @@ them, because the reason a thing is wanted is the most perishable part of wantin
 
 ## Immediate — oversights, ahead of everything below
 
+- [x] **Dimensioning: linear, aligned, radius, diameter, and R12's DIM mode.** 0.2.71.
+      A real `Dimension` entity that generates its own line work, with `draw()` and
+      `dxf_write()` calling one `regenerate()` -- the same rule preview and commit
+      already follow. Out to DXF as a DIMENSION record plus the anonymous `*D<n>` block
+      R12 puts the geometry in, and that block is synthesised in the WRITER only: the
+      alternative, an entity owning a `BlockDef*`, would have dragged in
+      `block_is_referenced`, clipboard remapping, a name generator and anonymity
+      filtering, none of which existed.
+
+      DIMLINEAR infers horizontal from vertical by how far OUTSIDE the measured pair the
+      dimension line was placed -- not by distance from their midpoint, which counts
+      displacement along the span and made a dimension dropped below the left-hand point
+      measure the vertical distance between two points at the same height, i.e. nothing.
+      DIM owns no geometry code: each subcommand builds the real command and forwards to
+      it, so the mode and the commands cannot drift.
+
+      Angular is next, and baseline/continue are cheap after it. Known cosmetic gap:
+      a diameter label is written `%%C50.0000`, which is correct R12 -- AutoCAD renders
+      the diameter sign -- while our stroke font shows the escape literally, since the
+      Hershey set is ASCII and has no such glyph. R12's control codes (%%C, %%D, %%P)
+      would fix it in the font layer for TEXT generally, not just for dimensions.
+
 Not design questions, just things caught in use that should not wait behind phase order.
 
 - [x] **DXFOUT (and SAVE, etc.) should ask which version, not silently use DXFVERSION.**

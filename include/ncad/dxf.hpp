@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <iosfwd>
 #include <string>
+#include <unordered_map>
 
 namespace ncad {
 
@@ -88,6 +89,20 @@ public:
 
     // The owner of everything in model space, as group 330. Empty at R12.
     const std::string& model_space_owner() const { return model_space_owner_; }
+
+    // The anonymous block a DIMENSION's drawn geometry was written into.
+    //
+    // R12 puts the lines, arrowheads and text of a dimension in a block named
+    // `*D<n>` and has the DIMENSION record point at it by name. That block is
+    // a SERIALISATION detail and lives only here: the database holds a
+    // Dimension that generates its geometry on demand, so nothing else in the
+    // program has to know about anonymous blocks, block references from a
+    // non-INSERT entity, or a name generator.
+    //
+    // Filled by write_blocks(), read by Dimension::dxf_write(). Empty for a
+    // handle that is not a dimension, which cannot happen in practice and
+    // costs nothing to answer safely.
+    const std::string& dimension_block(Handle h) const;
 
     // Emits group 100 subclass markers, which R13 and later require and R12 has
     // no concept of. A no-op at R12, so entities may call it unconditionally.
@@ -174,6 +189,9 @@ private:
     Handle next_handle_{1};
     Handle seed_hint_{0};
     std::string model_space_owner_;
+
+    // Dimension handle -> the `*D<n>` block its geometry went into.
+    std::unordered_map<Handle, std::string> dimension_blocks_;
     std::string last_handle_;
 
     // The plot-style objects, reserved BEFORE the tables are written.

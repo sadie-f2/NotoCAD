@@ -477,6 +477,23 @@ Value build_entity_alist(Context& ctx, const Database& db, const Entity& ent) {
             items.push_back(pair_real(ctx, 51, arc.end_angle()));
             break;
         }
+        case EntityType::Dimension: {
+            // The site the impact list exists for: this switch has a default,
+            // so a missing case compiles and fails silently -- which is exactly
+            // how ELLIPSE was missed. What LISP is handed is what the entity
+            // MEANS, not the line work it draws.
+            const Dimension& dim = static_cast<const Dimension&>(ent);
+            items.push_back(pair_point(ctx, 10, dim.definition()));
+            items.push_back(pair_point(ctx, 13, dim.first()));
+            if (!dim.radial()) items.push_back(pair_point(ctx, 14, dim.second()));
+            items.push_back(pair_int(ctx, 70, static_cast<int>(dim.kind())));
+            items.push_back(pair_real(ctx, 42, dim.measurement()));
+            if (!dim.text_override().empty()) {
+                items.push_back(pair_str(ctx, 1, dim.text_override()));
+            }
+            if (!dim.radial()) items.push_back(pair_real(ctx, 50, dim.rotation()));
+            break;
+        }
         default:
             break;
     }

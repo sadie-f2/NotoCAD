@@ -808,6 +808,122 @@ void flatten_insert(const Insert& ins, std::vector<EntityPtr>& out);
 // everything R12 can represent, which is what the DXF tests pin.
 Mat4 compose_placement(const InsertPlacement& p, const Vec3& base);
 
+// Which kind of measurement a DIMENSION states. The values are DXF group 70's
+// dimension-type field, so the enum IS the serialised form -- the same trick
+// TextHAlign plays with group 72.
+enum class DimKind : std::uint8_t {
+    Linear = 0,    // rotated, and horizontal/vertical are rotations of it
+    Aligned = 1,   // parallel to the two points it measures
+    Diameter = 3,
+    Radius = 4,
+};
+
+// DIMENSION: a measurement the drawing carries.
+//
+// NON-ASSOCIATIVE, as R12's are. The dimension holds the points it was given
+// and nothing watches the geometry those points were taken from; moving a line
+// does not move the dimension that measured it. That is a real limitation and
+// it is also what makes dimensions cheap enough to have -- associativity needs
+// a dependency graph the database does not have and does not want yet.
+//
+// IT GENERATES ITS OWN GEOMETRY. `regenerate()` produces the lines, arrowheads
+// and text, and BOTH `draw()` and `dxf_write()` call it. That is the rule the
+// rest of this codebase states for preview versus commit: derive the same thing
+// with the same code, differing only in what is done with the result. A second
+// generator for the DXF block is exactly how the two would drift.
+//
+// THE STYLE IS BAKED IN. Text height, arrow size and the extension offsets are
+// captured from the DIM system variables when the dimension is made, not read
+// back at draw time. Three reasons, and the first is decisive: `draw()` is
+// handed no database and could not read them. It is also R12's behaviour --
+// dimensions are drawn into a block at creation and do not follow later
+// variable changes until UPDATE re-applies them -- and it means a drawing
+// read from DXF looks like what the file said rather than like the reader's
+// current settings.
+class Dimension final : public Entity {
+public:
+    Dimension() : Entity(EntityType::Dimension) {}
+
+    DimKind kind() const { return kind_; }
+    void set_kind(DimKind k) { kind_ = k; }
+
+    bool radial() const { return kind_ == DimKind::Radius || kind_ == DimKind::Diameter; }
+
+    // DXF group 10. Where the dimension line runs for a linear dimension; the
+    // centre of the curve for a radial one.
+    const Vec3& definition() const { return definition_; }
+    void set_definition(const Vec3& p) { definition_ = p; }
+
+    // Groups 13 and 14 for a linear dimension: the two points being measured.
+    // For a radial one `first` is group 15, the point where the leader meets
+    // the curve, and `second` is unused.
+    const Vec3& first() const { return first_; }
+    const Vec3& second() const { return second_; }
+    void set_points(const Vec3& a, const Vec3& b) {
+        first_ = a;
+        second_ = b;
+    }
+
+    // Group 50: which way a Linear dimension measures, in its own plane. Zero
+    // is horizontal and a quarter turn is vertical, which is all R12's HOR and
+    // VER ever were.
+    double rotation() const { return rotation_; }
+    void set_rotation(double radians) { rotation_ = radians; }
+
+    // Group 1. Empty means "use the measurement", which is the usual case;
+    // anything else replaces the whole label, as R12 has it.
+    const std::string& text_override() const { return text_; }
+    void set_text_override(std::string s) { text_ = std::move(s); }
+
+    // The baked style. `apply_style` is what the commands call, having read the
+    // DIM variables once.
+    void apply_style(double text_height, double arrow_size, double ext_offset,
+                     double ext_beyond);
+    double text_height() const { return text_height_; }
+    double arrow_size() const { return arrow_size_; }
+    double ext_offset() const { return ext_offset_; }
+    double ext_beyond() const { return ext_beyond_; }
+
+    // What this dimension states, in drawing units. Group 42 on the way out,
+    // and recomputed rather than stored so it cannot disagree with the points.
+    double measurement() const;
+
+    // The label as drawn: the override, or the measurement formatted with the
+    // prefix its kind wants.
+    std::string label() const;
+
+    // The drawn form: lines, SOLID arrowheads and one TEXT. Appended to `out`.
+    //
+    // The single source for the viewport and for the DXF block, which is the
+    // whole design. Callers own the result.
+    void regenerate(std::vector<EntityPtr>& out) const;
+
+    EntityPtr clone() const override;
+    void transform(const Mat4& m) override;
+    BBox bbox() const override;
+    void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
+    void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
+
+private:
+    DimKind kind_{DimKind::Linear};
+    Vec3 definition_{};
+    Vec3 first_{};
+    Vec3 second_{};
+    double rotation_{0.0};
+    std::string text_;
+
+    // Captured from DIMTXT, DIMASZ, DIMEXO and DIMEXE, already multiplied by
+    // DIMSCALE. Defaults are R12's own, so a dimension built without a style
+    // still looks like one.
+    double text_height_{2.5};
+    double arrow_size_{2.5};
+    double ext_offset_{0.625};
+    double ext_beyond_{1.25};
+};
+
 // One DXF group: a code and its value, kept as text.
 //
 // Text rather than parsed, because a proxy's whole job is to give back exactly

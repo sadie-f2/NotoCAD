@@ -174,7 +174,7 @@ file is not misleading by omission:
 - **The remaining previews** — POINT, SOLID, INSERT, BREAK, TRIM.
 - **CHANGE/CHPROP.**
 - **History recording for scripting**, which pairs with `--script` above.
-- **DIM**, deferred deliberately and now on the roadmap rather than out of scope.
+- **Angular dimensions**, and baseline/continue, which are cheap now that linear exists.
 - **Writing DXF versions later than R12.** Reading them is built.
 
 ---

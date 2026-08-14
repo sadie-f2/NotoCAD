@@ -560,10 +560,12 @@ TEST_CASE("commands: abbreviations resolve, exact names win") {
     CHECK(resolve_command_name("LI").name == "LIST");
     CHECK(resolve_command_name("LIN").name == "LINE");
 
-    // D used to mean DXFOUT, when that was the only command starting with it.
-    // DIST changed that, and the shortest-wins rule hands D to DIST -- which is
-    // also what a user typing one letter most likely wants.
-    CHECK(resolve_command_name("D").name == "DIST");
+    // D used to mean DXFOUT, when that was the only command starting with it,
+    // then DIST, and now DIM -- each time because a shorter name arrived and
+    // shortest-wins handed the letter over. The fourth move of this
+    // abbreviation, and still the rule working rather than failing.
+    CHECK(resolve_command_name("D").name == "DIM");
+    CHECK(resolve_command_name("DIS").name == "DIST");
     // DX used to mean DXFOUT. DXFIN made it ambiguous, and shortest-wins hands
     // it to the shorter name. This is the third abbreviation the growing
     // command set has moved, and it is the rule working rather than failing --

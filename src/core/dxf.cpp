@@ -5,6 +5,7 @@
 
 #include "ncad/database.hpp"
 #include "ncad/ecs.hpp"
+#include "ncad/entities.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -129,6 +130,7 @@ const char* primary_subclass(const char* type_name) {
         {"POLYLINE", "AcDb2dPolyline"}, {"VERTEX", "AcDbVertex"},
         {"INSERT", "AcDbBlockReference"}, {"ELLIPSE", "AcDbEllipse"},
         {"SPLINE", "AcDbSpline"},     {"MTEXT", "AcDbMText"},
+        {"DIMENSION", "AcDbDimension"},
     };
     for (const Map& m : kMap) {
         if (std::strcmp(type_name, m.type) == 0) return m.subclass;
@@ -276,6 +278,23 @@ void DxfWriter::write_header() {
 
     code(9, "$INSBASE");
     point(10, db_.sysvars().get_point(Sysvar::InsBase));
+
+    // The dimension style. Written because a dimension records only WHAT it
+    // measures -- the sizes it was drawn at are baked into the entity and never
+    // reach the file, so without these a drawing reopened elsewhere annotates
+    // itself at whatever that reader's defaults happen to be.
+    code(9, "$DIMSCALE");
+    code(40, db_.sysvars().get_real(Sysvar::DimScale));
+    code(9, "$DIMTXT");
+    code(40, db_.sysvars().get_real(Sysvar::DimTxt));
+    code(9, "$DIMASZ");
+    code(40, db_.sysvars().get_real(Sysvar::DimAsz));
+    code(9, "$DIMEXO");
+    code(40, db_.sysvars().get_real(Sysvar::DimExo));
+    code(9, "$DIMEXE");
+    code(40, db_.sysvars().get_real(Sysvar::DimExe));
+    code(9, "$DIMTAD");
+    code(70, db_.sysvars().get_int(Sysvar::DimTad));
 
     // The current UCS, exactly as DXF carries it: three points in world terms
     // plus a name and a flag. This is the header half of the split -- named
@@ -549,7 +568,64 @@ void DxfWriter::write_blocks() {
         subclass("AcDbBlockEnd");
     }
 
+    // Every dimension's drawn geometry, each into its own anonymous block.
+    //
+    // R12's own arrangement: the DIMENSION record says what is measured, and a
+    // `*D<n>` block holds the line work, so a reader that does not regenerate
+    // dimensions still draws the right thing. Ours is generated here from the
+    // same regenerate() the viewport uses, which is what stops the file and the
+    // screen disagreeing.
+    //
+    // The block exists ONLY in this file. Nothing in the database knows about
+    // it -- see DxfWriter::dimension_block.
+    dimension_blocks_.clear();
+    int dim_index = 0;
+    for (const Handle h : db_.order()) {
+        const Entity* e = db_.get(h);
+        if (!e || e->type() != EntityType::Dimension) continue;
+
+        const std::string name = "*D" + std::to_string(++dim_index);
+        dimension_blocks_[h] = name;
+
+        code(0, "BLOCK");
+        if (dxf_requires_handles(version_)) {
+            code(5, next_handle());
+            code(330, model_space_owner_);
+            subclass("AcDbEntity");
+        }
+        code(8, "0");
+        subclass("AcDbBlockBegin");
+        code(2, name);
+        // Bit 1 is R12's "anonymous", which is what keeps these out of a block
+        // list a user is offered.
+        code(70, 1);
+        point(10, Vec3{0.0, 0.0, 0.0});
+        code(3, name);
+        if (dxf_requires_handles(version_)) code(1, "");
+
+        std::vector<EntityPtr> parts;
+        static_cast<const Dimension*>(e)->regenerate(parts);
+        for (const EntityPtr& part : parts) {
+            if (part) part->dxf_write(*this);
+        }
+
+        code(0, "ENDBLK");
+        if (dxf_requires_handles(version_)) {
+            code(5, next_handle());
+            code(330, model_space_owner_);
+            subclass("AcDbEntity");
+        }
+        code(8, "0");
+        subclass("AcDbBlockEnd");
+    }
+
     end_section();
+}
+
+const std::string& DxfWriter::dimension_block(Handle h) const {
+    static const std::string kNone;
+    const auto it = dimension_blocks_.find(h);
+    return it == dimension_blocks_.end() ? kNone : it->second;
 }
 
 void DxfWriter::write_entities() {

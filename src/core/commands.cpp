@@ -2802,6 +2802,307 @@ Step TrimCommand::next(CommandContext& ctx, const InputValue& value) {
     return Step::failed("internal state error");
 }
 
+// --- DIMENSIONS ---------------------------------------------------------------
+
+namespace {
+
+// The DIM variables, applied to a dimension as it is made.
+//
+// Read ONCE, here, and baked into the entity: `draw()` is handed no database
+// and could not read them later, and R12 behaves the same way -- a dimension
+// keeps the style it was drawn with until UPDATE re-applies the current one.
+void apply_dim_style(CommandContext& ctx, Dimension& d) {
+    const Sysvars& sv = ctx.db.sysvars();
+    const double s = sv.get_real(Sysvar::DimScale);
+    d.apply_style(sv.get_real(Sysvar::DimTxt) * s, sv.get_real(Sysvar::DimAsz) * s,
+                  sv.get_real(Sysvar::DimExo) * s, sv.get_real(Sysvar::DimExe) * s);
+}
+
+}  // namespace
+
+Step DimLinearCommand::start(CommandContext&) {
+    if (angle_first_) {
+        state_ = State::RotationAngle;
+        Prompt p;
+        p.kind = PromptKind::Angle;
+        p.message = "Dimension line angle";
+        return Step::ask(p);
+    }
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "First extension line origin";
+    return Step::ask(p);
+}
+
+Step DimLinearCommand::place(CommandContext& ctx, const Vec3& at) {
+    auto dim = std::make_unique<Dimension>();
+    dim->props() = ctx.db.current_props();
+    dim->props().normal = construction_normal(ctx);
+    dim->set_kind(aligned_ ? DimKind::Aligned : DimKind::Linear);
+    dim->set_points(first_, second_);
+    dim->set_definition(at);
+    if (!text_.empty()) dim->set_text_override(text_);
+
+    if (!aligned_) {
+        double rotation = rotation_;
+        if (!forced_) {
+            // Which distance was meant, read off where the dimension line was
+            // put: above or below the two points means the horizontal one, to
+            // the side means the vertical one. Measured in the construction
+            // plane, so a UCS turns the whole question with it.
+            //
+            // The test is how far OUTSIDE the pair the location falls on each
+            // axis, not how far from their midpoint. Distance from the midpoint
+            // counts displacement ALONG the span, which says nothing about
+            // intent -- putting a horizontal dimension below the left-hand
+            // point is half a span to the side and still obviously horizontal,
+            // and reading it the other way is what made this measure nothing.
+            const Basis b = arbitrary_axis(dim->props().normal);
+            const Vec3 mid = (first_ + second_) * 0.5;
+            const Vec3 off = at - mid;
+            const Vec3 half = (second_ - first_) * 0.5;
+
+            const double out_u = std::abs(dot(off, b.ax)) - std::abs(dot(half, b.ax));
+            const double out_v = std::abs(dot(off, b.ay)) - std::abs(dot(half, b.ay));
+            rotation = std::max(out_v, 0.0) >= std::max(out_u, 0.0) ? 0.0
+                                                                    : std::numbers::pi / 2.0;
+        }
+        dim->set_rotation(rotation);
+    }
+
+    apply_dim_style(ctx, *dim);
+
+    const double measured = dim->measurement();
+    if (measured < kEps) return Step::failed("those points measure nothing in that direction");
+
+    ctx.db.add(std::move(dim));
+    return Step::done(fmt(measured));
+}
+
+Step DimLinearCommand::next(CommandContext& ctx, const InputValue& value) {
+    switch (state_) {
+        case State::First:
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            first_ = value.point;
+            state_ = State::Second;
+            {
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Second extension line origin";
+                p.base = first_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+
+        case State::Second:
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            second_ = value.point;
+            state_ = State::Location;
+            {
+                Prompt p;
+                p.kind = PromptKind::Point;
+                p.message = "Dimension line location";
+                p.base = (first_ + second_) * 0.5;
+                p.has_base = true;
+                p.keywords.push_back("Text");
+                if (!aligned_) p.keywords.push_back("Rotated");
+                return Step::ask(p);
+            }
+
+        case State::Location: {
+            if (keyword_is(value, "TEXT")) {
+                state_ = State::TextValue;
+                Prompt p;
+                p.kind = PromptKind::String;
+                p.message = "Dimension text <" + fmt(length(second_ - first_)) + ">";
+                p.allow_empty = true;
+                return Step::ask(p);
+            }
+            if (!aligned_ && keyword_is(value, "ROTATED")) {
+                state_ = State::RotationAngle;
+                Prompt p;
+                p.kind = PromptKind::Angle;
+                p.message = "Dimension line angle";
+                p.base = first_;
+                p.has_base = true;
+                return Step::ask(p);
+            }
+            if (value.kind != InputKind::Point) return Step::failed("a point is required");
+            return place(ctx, value.point);
+        }
+
+        case State::RotationAngle: {
+            double radians = 0.0;
+            if (!angle_from(value, first_, radians)) return Step::failed("an angle is required");
+            force_rotation(radians);
+
+            // Asked before the points, so the points are what comes next.
+            if (angle_first_) {
+                state_ = State::First;
+                Prompt first;
+                first.kind = PromptKind::Point;
+                first.message = "First extension line origin";
+                return Step::ask(first);
+            }
+
+            state_ = State::Location;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Dimension line location";
+            p.base = (first_ + second_) * 0.5;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+
+        case State::TextValue: {
+            // Enter keeps the measurement, which is what the prompt offered.
+            if (value.kind == InputKind::String) text_ = value.text;
+            state_ = State::Location;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "Dimension line location";
+            p.base = (first_ + second_) * 0.5;
+            p.has_base = true;
+            return Step::ask(p);
+        }
+    }
+    return Step::failed("internal state error");
+}
+
+Step DimRadialCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Entity;
+    p.message = "Select arc or circle";
+    return Step::ask(p);
+}
+
+Step DimRadialCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (state_ == State::Entity) {
+        if (value.kind != InputKind::Entity) return Step::failed("an entity is required");
+        const Entity* e = ctx.db.get(value.entity);
+        if (e == nullptr) return Step::failed("no such entity");
+
+        if (e->type() == EntityType::Circle) {
+            const auto* c = static_cast<const Circle*>(e);
+            centre_ = c->center();
+            radius_ = c->radius();
+        } else if (e->type() == EntityType::Arc) {
+            const auto* a = static_cast<const Arc*>(e);
+            centre_ = a->center();
+            radius_ = a->radius();
+        } else {
+            return Step::failed("not an arc or circle");
+        }
+        normal_ = e->props().normal;
+
+        state_ = State::Location;
+        Prompt p;
+        p.kind = PromptKind::Point;
+        p.message = "Dimension line location";
+        p.base = centre_;
+        p.has_base = true;
+        return Step::ask(p);
+    }
+
+    if (value.kind != InputKind::Point) return Step::failed("a point is required");
+
+    // The pick names a direction, not a distance: the leader runs from the
+    // centre toward wherever was pointed and stops on the curve, so pointing
+    // anywhere along a radius gives the same dimension.
+    const Vec3 n = normalize(normal_);
+    const Vec3 rel = value.point - centre_;
+    const Vec3 in_plane = rel - n * dot(rel, n);
+    const Vec3 dir = is_zero(in_plane) ? arbitrary_axis(n).ax : normalize(in_plane);
+
+    auto dim = std::make_unique<Dimension>();
+    dim->props() = ctx.db.current_props();
+    dim->props().normal = n;
+    dim->set_kind(diameter_ ? DimKind::Diameter : DimKind::Radius);
+    dim->set_definition(centre_);
+    dim->set_points(centre_ + dir * radius_, Vec3{});
+    apply_dim_style(ctx, *dim);
+
+    const std::string label = dim->label();
+    ctx.db.add(std::move(dim));
+    return Step::done(label);
+}
+
+// --- DIM, the mode ------------------------------------------------------------
+
+Step DimCommand::start(CommandContext& ctx) { return ask_option(ctx); }
+
+Step DimCommand::ask_option(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = note_.empty() ? "Dim" : note_;
+    note_.clear();
+    p.allow_empty = true;  // Enter leaves, as eXit does
+    p.keywords = {"Horizontal", "Vertical", "Aligned", "Rotated",
+                  "Radius",     "Diameter", "Undo",    "eXit"};
+    return Step::ask(p);
+}
+
+Step DimCommand::begin_sub(CommandContext& ctx, CommandPtr sub) {
+    sub_ = std::move(sub);
+    const Step first = sub_->start(ctx);
+    if (first.kind != StepKind::Prompt) sub_.reset();
+    return first;
+}
+
+Step DimCommand::next(CommandContext& ctx, const InputValue& value) {
+    // A subcommand is running: everything goes to it until it finishes, and
+    // then the hub comes back. This is the whole of how DIM avoids owning any
+    // dimension logic of its own.
+    if (sub_) {
+        const Step s = sub_->next(ctx, value);
+        if (s.kind == StepKind::Prompt) return s;
+
+        sub_.reset();
+        note_ = s.message;
+        if (s.kind == StepKind::Done && ctx.db.last() != kNullHandle) {
+            made_.push_back(ctx.db.last());
+        }
+        if (once_) return Step::done(note_);
+        return ask_option(ctx);
+    }
+
+    if (value.kind == InputKind::None || keyword_is(value, "EXIT")) {
+        return Step::done(made_.empty() ? std::string()
+                                        : std::to_string(made_.size()) + " dimensioned");
+    }
+
+    if (keyword_is(value, "UNDO")) {
+        if (made_.empty()) return Step::failed("nothing to undo");
+        ctx.db.erase(made_.back());
+        made_.pop_back();
+        note_ = "Dimension removed";
+        return ask_option(ctx);
+    }
+
+    if (keyword_is(value, "HORIZONTAL") || keyword_is(value, "VERTICAL") ||
+        keyword_is(value, "ROTATED")) {
+        auto sub = std::make_unique<DimLinearCommand>(false);
+        // HOR and VER fix the direction; ROTATED asks for it, which the linear
+        // command already knows how to do.
+        if (keyword_is(value, "HORIZONTAL")) sub->force_rotation(0.0);
+        if (keyword_is(value, "VERTICAL")) sub->force_rotation(std::numbers::pi / 2.0);
+        // R12 asks ROTated for its angle first, before the two points.
+        if (keyword_is(value, "ROTATED")) sub->ask_rotation_first();
+        return begin_sub(ctx, std::move(sub));
+    }
+    if (keyword_is(value, "ALIGNED")) {
+        return begin_sub(ctx, std::make_unique<DimLinearCommand>(true));
+    }
+    if (keyword_is(value, "RADIUS")) {
+        return begin_sub(ctx, std::make_unique<DimRadialCommand>(false));
+    }
+    if (keyword_is(value, "DIAMETER")) {
+        return begin_sub(ctx, std::make_unique<DimRadialCommand>(true));
+    }
+
+    return Step::failed("unknown option");
+}
+
 // --- OFFSET -----------------------------------------------------------------
 
 Prompt OffsetCommand::select_prompt() const {
@@ -3375,10 +3676,24 @@ Step ExplodeCommand::next(CommandContext& ctx, const InputValue& value) {
     for (Handle h : ctx.selection.handles()) {
         const Entity* e = ctx.db.get(h);
         if (!e) continue;
+        // A dimension explodes into precisely what it draws, which it already
+        // knows how to produce. R12 does the same and it is a one-way trip:
+        // what comes back is line work that no longer knows what it measured.
+        if (e->type() == EntityType::Dimension) {
+            std::vector<EntityPtr> parts;
+            static_cast<const Dimension&>(*e).regenerate(parts);
+            for (EntityPtr& part : parts) {
+                if (part) ctx.db.add(std::move(part));
+            }
+            ctx.db.erase(h);
+            ++exploded;
+            continue;
+        }
+
         if (e->type() != EntityType::Insert) {
-            // R12 also explodes polylines into lines and arcs, and dimensions
-            // into their parts. Not built: polyline explosion is the inverse of
-            // PEDIT Join and belongs beside it, and dimensions do not exist.
+            // R12 also explodes polylines into lines and arcs. Not built:
+            // polyline explosion is the inverse of PEDIT Join and belongs
+            // beside it.
             ++skipped;
             continue;
         }
@@ -6005,6 +6320,17 @@ Step ListCommand::next(CommandContext& ctx, const InputValue& value) {
                 out += "\n  Length = " + fmt(l->length());
                 break;
             }
+            case EntityType::Dimension: {
+                const Dimension* d = static_cast<const Dimension*>(e);
+                static const char* const kKind[] = {"rotated", "aligned", "", "diameter",
+                                                    "radius"};
+                out += std::string("\n  ") + kKind[static_cast<int>(d->kind())];
+                out += "\n  measures " + fmt(d->measurement());
+                out += "\n  text " + d->label();
+                if (!d->text_override().empty()) out += "  (overridden)";
+                break;
+            }
+
             case EntityType::Circle: {
                 const Circle* c = static_cast<const Circle*>(e);
                 out += "\n  center  " + fmt_point(c->center());
@@ -6210,6 +6536,12 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "MINSERT") return std::make_unique<InsertCommand>(true);
     if (upper == "WBLOCK") return std::make_unique<WblockCommand>();
     if (upper == "OFFSET") return std::make_unique<OffsetCommand>();
+    if (upper == "DIMLINEAR") return std::make_unique<DimLinearCommand>(false);
+    if (upper == "DIMALIGNED") return std::make_unique<DimLinearCommand>(true);
+    if (upper == "DIMRADIUS") return std::make_unique<DimRadialCommand>(false);
+    if (upper == "DIMDIAMETER") return std::make_unique<DimRadialCommand>(true);
+    if (upper == "DIM") return std::make_unique<DimCommand>(false);
+    if (upper == "DIM1") return std::make_unique<DimCommand>(true);
     if (upper == "FILLET") return std::make_unique<FilletCommand>(false);
     if (upper == "CHAMFER") return std::make_unique<FilletCommand>(true);
     if (upper == "COPYCLIP") return std::make_unique<CopyClipCommand>(false);
@@ -6241,7 +6573,8 @@ const std::vector<std::string>& command_names() {
         "MEASUREGEOM", "ORTHO", "OSNAP", "SETVAR", "SPLINE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
         "ID", "OPEN", "COPYCLIP", "CUTCLIP", "PASTECLIP",
         "LIMITS", "LTSCALE",
-        "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "OFFSET", "FILLET", "CHAMFER", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
+        "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "OFFSET", "FILLET", "CHAMFER",
+        "DIM", "DIM1", "DIMLINEAR", "DIMALIGNED", "DIMRADIUS", "DIMDIAMETER", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
         "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;
@@ -6278,6 +6611,10 @@ const std::vector<CommandAlias>& command_aliases() {
         {"X", "EXPLODE"},
         {"W", "WBLOCK"},
         {"O", "OFFSET"},
+        {"DLI", "DIMLINEAR"},
+        {"DAL", "DIMALIGNED"},
+        {"DRA", "DIMRADIUS"},
+        {"DDI", "DIMDIAMETER"},
         {"F", "FILLET"},
         {"CHA", "CHAMFER"},
         {"SO", "SOLID"},

@@ -494,6 +494,45 @@ EntityPtr Reader::build(const EntityGroups& g, GroupStream& in, int& pending_cod
         return e;
     }
 
+    if (g.name == "DIMENSION") {
+        auto e = std::make_unique<Dimension>();
+        apply_common(*e, g);
+
+        // Group 70's low bits are the kind; the rest are flags about how the
+        // record was built, and none of them change what is measured.
+        const int flags = to_int(g.text(70, "0"));
+        switch (flags & 7) {
+            case 1: e->set_kind(DimKind::Aligned); break;
+            case 3: e->set_kind(DimKind::Diameter); break;
+            case 4: e->set_kind(DimKind::Radius); break;
+            default: e->set_kind(DimKind::Linear); break;
+        }
+
+        e->set_definition(g.point(10));
+        if (e->radial()) {
+            // Group 15 is where the leader meets the curve.
+            e->set_points(g.point(15), Vec3{});
+        } else {
+            e->set_points(g.point(13), g.point(14));
+            e->set_rotation(g.real(50) * kDegToRad);
+        }
+        if (!g.text(1).empty()) e->set_text_override(g.text(1));
+
+        // The style comes from the header, which the HEADER pass has already
+        // read into the sysvars -- the entity carries only what it measures.
+        const Sysvars& sv = db_.sysvars();
+        const double s = sv.get_real(Sysvar::DimScale);
+        e->apply_style(sv.get_real(Sysvar::DimTxt) * s, sv.get_real(Sysvar::DimAsz) * s,
+                       sv.get_real(Sysvar::DimExo) * s, sv.get_real(Sysvar::DimExe) * s);
+
+        // THE BLOCK IS IGNORED, deliberately. A dimension generates its own
+        // geometry here, so the `*D<n>` block the file carries is redundant and
+        // keeping it would mean the drawing held the measurement twice, able to
+        // disagree. AutoCAD regenerates for the same reason. What this costs is
+        // another program's styling, which we could not have reproduced anyway.
+        return e;
+    }
+
     // Everything else survives as itself.
     auto p = std::make_unique<Proxy>();
     p->set_dxf_name(g.name);
@@ -774,6 +813,24 @@ DxfReadResult Reader::run(std::string text) {
                 result_.version = value;
                 // AC1009 is R12. Anything higher is newer.
                 result_.newer_version = (value > "AC1009");
+            }
+            continue;
+        }
+
+        // The dimension style. A dimension records only what it measures, so
+        // without these the sizes it is redrawn at would come from this
+        // reader's defaults rather than from the drawing.
+        if (code == 9 && value.size() > 4 && value.compare(0, 4, "$DIM") == 0) {
+            const std::string which = value.substr(1);
+            if (in.next(code, value)) {
+                const SysvarDef* def = find_sysvar(which);
+                if (def != nullptr) {
+                    if (def->type == SysvarType::Real) {
+                        db_.sysvars().set_real(def->id, to_double(value));
+                    } else if (def->type == SysvarType::Int) {
+                        db_.sysvars().set_int(def->id, to_int(value));
+                    }
+                }
             }
             continue;
         }

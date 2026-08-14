@@ -81,6 +81,7 @@ const char* entity_type_name(EntityType t) {
         case EntityType::Solid: return "SOLID";
         case EntityType::Face3d: return "3DFACE";
         case EntityType::Insert: return "INSERT";
+        case EntityType::Dimension: return "DIMENSION";
         case EntityType::Proxy: return "PROXY";
     }
     return "UNKNOWN";

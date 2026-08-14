@@ -66,6 +66,9 @@ enum class EntityType : std::uint8_t {
     // A placed copy of a block definition. MINSERT is the same entity with a
     // row and column count, which is how R12 spells it too.
     Insert,
+    // A measurement the drawing carries. Non-associative, as R12's are, and it
+    // generates its own line work rather than storing any -- see entities.hpp.
+    Dimension,
     // Anything read from DXF that has no class here. Holds the groups it was
     // read from and writes them back unchanged, so opening and saving a drawing
     // cannot quietly destroy what this program does not understand.

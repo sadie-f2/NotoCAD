@@ -77,6 +77,21 @@ constexpr SysvarDef kTable[] = {
     // something silently reverts to R12 -- which is exactly the surprise it
     // caused before this comment existed.
     {"DXFVERSION", Sysvar::DxfVersionVar, SysvarType::String, false, false, 0, 0, 0, 0.0, "R12", {}},
+    // The dimension style. R12's defaults, and saved in the drawing because
+    // they describe how THIS drawing is annotated rather than how this
+    // installation behaves -- two drawings at different plot scales want
+    // different DIMSCALE, and neither wants the other's.
+    //
+    // Reals get no range check -- Sysvars::set_real does not do one -- so a
+    // zero or negative size can be set. Dimension::apply_style guards against
+    // the ones that would draw nothing rather than trusting the value.
+    {"DIMSCALE", Sysvar::DimScale, SysvarType::Real, false, true, 0, 0, 0, 1.0, "", {}},
+    {"DIMTXT", Sysvar::DimTxt, SysvarType::Real, false, true, 0, 0, 0, 2.5, "", {}},
+    {"DIMASZ", Sysvar::DimAsz, SysvarType::Real, false, true, 0, 0, 0, 2.5, "", {}},
+    {"DIMEXO", Sysvar::DimExo, SysvarType::Real, false, true, 0, 0, 0, 0.625, "", {}},
+    {"DIMEXE", Sysvar::DimExe, SysvarType::Real, false, true, 0, 0, 0, 1.25, "", {}},
+    {"DIMTAD", Sysvar::DimTad, SysvarType::Int, false, true, 0, 0, 1, 0.0, "", {}},
+
     // Defaults on, because the window is where a person is; `ncad` has no
     // dialog to offer and ignores it, which is the same answer FILEDIA 0 gives.
     {"FILEDIA", Sysvar::FileDia, SysvarType::Int, false, false, 1, 0, 1, 0.0, "", {}},
