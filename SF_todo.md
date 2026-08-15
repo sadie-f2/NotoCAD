@@ -184,16 +184,42 @@ them, because the reason a thing is wanted is the most perishable part of wantin
       we opened -- and the exception recorded above disappears rather than being
       defended. Remove on clean exit; leave it on a crash, as AutoCAD does.
 
-      Two things to settle at the machine before the format can be written, and Sadie
-      is the one positioned to check them (steps 3-6 of the list she was working
-      through; 1 and 2 are done and are what `examples/acad-locks/` records):
+      **WHOHAS is the test that matters**, and naming it reframes the goal. These files
+      feed AutoCAD's WHOHAS command, which reports who has a drawing open. So the
+      question is not only "will AutoCAD refuse" but "will AutoCAD SEE us" -- and
+      appearing in WHOHAS is real interoperation even if it never blocks. That is
+      probably the honest target, because modern AutoCAD is reported to leave actual
+      exclusion to the operating system and keep these files informational.
 
-      - **Does AutoCAD honour a lock it did not write?** Hand-write a `.dwl` with
-        another user name and open the drawing in AutoCAD. This is what decides whether
-        ours is real mutual exclusion or one-way politeness -- and therefore whether
-        matching the byte format exactly is worth anything.
-      - **What does it do about its own stale lock**, and does it still leave one on a
-        force-quit? Believed yes, possibly changed.
+      That report needs checking rather than believing, and it has a macOS wrinkle: OS
+      file locking on Windows is mandatory via share modes, while Unix has no such
+      thing, so "AutoCAD relies on the OS" cannot mean the same thing on Sadie's Mac as
+      it does on a PC. If it is true, mutual exclusion is not available to us at all
+      and the lock is a courtesy -- which is fine, and worth building, but should be
+      built knowing that is what it is.
+
+      To settle at the machine, in order of what it changes:
+
+      - **Run WHOHAS against a drawing WE locked.** Write a `.dwl` and `.dwl2` in the
+        measured formats, hidden flag set, then ask AutoCAD. If it reports our session,
+        matching the bytes exactly has paid for itself.
+      - **Does AutoCAD warn on opening a lock it did not write?** Hand-write a `.dwl`
+        with another user name and open the drawing. Warn, refuse, or ignore?
+      - **Does it still leave one on a force-quit**, and does it overwrite its own
+        stale lock silently on the next open? Reported to be yes to both -- and if so,
+        that IS our stale-lock policy: overwrite, do not agonise.
+
+      One correction already earned: the files are **flagged hidden** (`UF_HIDDEN` on
+      macOS, so `ls` alone does not show them). Checked because it looked doubtful, and
+      it held up. A writer has to set it or our locks are clutter beside a drawing
+      where AutoCAD's are invisible.
+
+      Not confirmed, and contradicted by the bytes we have: that `.dwl` and `.dwl2`
+      track two concurrent sessions or processes. Both files in the captured pair hold
+      the SAME user, machine and timestamp, and `.dwl2` adds only an empty
+      `<fullname>`. One session recorded twice, in two formats -- which is what the two
+      different ENCODINGS suggest as well: a newer UTF-8 file written alongside the
+      legacy CP1252 one for compatibility.
 
       One asymmetry worth stating: a `.dwl` AutoCAD honours means OUR crash blocks
       Sadie's AutoCAD, and this program has segfaulted twice this month. That is an
