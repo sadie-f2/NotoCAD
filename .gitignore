@@ -9,6 +9,11 @@ compile_commands.json
 # Scratch AutoLISP scripts and their output -- not yet a repo deliverable.
 /scripts/
 
+# Loose working files: sample drawings, screenshots, crash reports, output from
+# other CAD applications. Ignored so they have somewhere to live that is not the
+# working root, where `git add -A` finds them.
+/examples/
+
 # macOS Finder metadata and editor backups. Here because a `git add -A` swept
 # them into a commit once; they are noise on one of the two platforms this
 # builds on and never a deliverable on either.
