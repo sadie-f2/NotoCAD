@@ -42,6 +42,31 @@ void write_file(const std::string& path, const std::string& contents) {
     out << contents;
 }
 
+// A real `.dwl`, byte for byte, from AutoCAD 2026 holding a .dxf open.
+// Specimens and notes in examples/acad-locks. Three lines, NO trailing newline,
+// a trailing SPACE on the machine line, and CP1252 -- the apostrophe in
+// "Sadie's MacBook Pro" is the single byte 0x92.
+const char kRealDwl[] =
+    "sadie\n"
+    "Sadie\x92s MacBook Pro \n"
+    "Friday, August 14, 2026  19:52:45 Eastern Daylight Time";
+
+// And the matching `.dwl2`. Same fields, UTF-8 this time -- the same character
+// is three bytes here -- and the declaration is MALFORMED: no closing `?`, so
+// a real XML parser rejects the whole file.
+const char kRealDwl2[] =
+    "<?xml version=\"1.0\" encoding=\"UTF-8\">\n"
+    "<whprops>\n"
+    "<username>sadie</username>\n"
+    "<machinename>Sadie\xe2\x80\x99s MacBook Pro </machinename>\n"
+    "<fullname></fullname>\n"
+    "<datetime>Friday, August 14, 2026  19:52:45 Eastern Daylight Time</datetime>\n"
+    "</whprops>";
+
+// The machine name as it should come back from either: UTF-8, trailing space
+// trimmed.
+const char kMachine[] = "Sadie\xe2\x80\x99s MacBook Pro";
+
 // A drawing on disk with no lock beside it.
 std::string fresh_drawing(const char* leaf) {
     const std::string path = temp_path(leaf);
@@ -86,8 +111,74 @@ TEST_CASE("lock: no sibling means no lock") {
     CHECK(describe_lock(lock).empty());
 }
 
+TEST_CASE("lock: a real .dwl, byte for byte, in CP1252") {
+    // The encoding is not a detail. AutoCAD writes .dwl in CP1252, and macOS
+    // names a machine "Sadie's MacBook Pro" with a curly apostrophe -- so the
+    // very first real lock file on this platform carries a high byte. Stripping
+    // it, which is what this did before a real pair was measured, silently
+    // gives "Sadies MacBook Pro".
+    const std::string path = temp_path("real-dwl.dxf");
+    std::filesystem::remove(lock_path_for(path, ".dwl2"));
+    write_file(lock_path_for(path, ".dwl"), kRealDwl);
+
+    const DrawingLock lock = read_drawing_lock(path);
+    CHECK(lock.present);
+    CHECK(lock.owner == "sadie");
+    CHECK(lock.machine == kMachine);
+
+    std::filesystem::remove(lock_path_for(path, ".dwl"));
+}
+
+TEST_CASE("lock: a real .dwl2, byte for byte, in UTF-8") {
+    // The SAME character, three bytes this time. Two files, two encodings, and
+    // nothing anywhere says so -- which is why the bytes are sniffed rather
+    // than the extension trusted.
+    const std::string path = temp_path("real-dwl2.dxf");
+    std::filesystem::remove(lock_path_for(path, ".dwl"));
+    write_file(lock_path_for(path, ".dwl2"), kRealDwl2);
+
+    const DrawingLock lock = read_drawing_lock(path);
+    CHECK(lock.present);
+    CHECK(lock.owner == "sadie");
+    CHECK(lock.machine == kMachine);
+
+    std::filesystem::remove(lock_path_for(path, ".dwl2"));
+}
+
+TEST_CASE("lock: the malformed XML declaration does not stop the scan") {
+    // `<?xml version="1.0" encoding="UTF-8">` has no closing `?`, so every real
+    // XML parser rejects the file. Handing it to one is the mistake this pins.
+    const std::string path = temp_path("malformed.dxf");
+    std::filesystem::remove(lock_path_for(path, ".dwl"));
+    write_file(lock_path_for(path, ".dwl2"), kRealDwl2);
+
+    CHECK(std::string(kRealDwl2).find("UTF-8\">") != std::string::npos);
+    CHECK(std::string(kRealDwl2).find("UTF-8\"?>") == std::string::npos);
+    CHECK(read_drawing_lock(path).owner == "sadie");
+
+    std::filesystem::remove(lock_path_for(path, ".dwl2"));
+}
+
+TEST_CASE("lock: both files together read the same as either alone") {
+    // AutoCAD writes both. Whichever survives, the answer must not change.
+    const std::string path = temp_path("bothfiles.dxf");
+    write_file(lock_path_for(path, ".dwl"), kRealDwl);
+    write_file(lock_path_for(path, ".dwl2"), kRealDwl2);
+
+    const DrawingLock lock = read_drawing_lock(path);
+    CHECK(lock.owner == "sadie");
+    CHECK(lock.machine == kMachine);
+    // .dwl is the one named, because it is the one a user hunting a stale lock
+    // will look for.
+    CHECK(path_filename(lock.lock_path) == "bothfiles.dwl");
+
+    std::filesystem::remove(lock_path_for(path, ".dwl"));
+    std::filesystem::remove(lock_path_for(path, ".dwl2"));
+}
+
 TEST_CASE("lock: a .dwl names who holds it, and when") {
     const std::string path = temp_path("held.dxf");
+    std::filesystem::remove(lock_path_for(path, ".dwl2"));
     write_file(lock_path_for(path, ".dwl"), "sadieforbes\r\n");
 
     const DrawingLock lock = read_drawing_lock(path);
@@ -104,6 +195,21 @@ TEST_CASE("lock: a .dwl names who holds it, and when") {
     CHECK(said.find("held.dwl") != std::string::npos);
 
     std::filesystem::remove(lock_path_for(path, ".dwl"));
+}
+
+TEST_CASE("lock: the machine is reported, not just the user") {
+    // Over a shared folder this is the field that matters: "sadie" on this box
+    // and "sadie" on another are very different situations, and the user name
+    // alone cannot tell them apart.
+    const std::string path = temp_path("whichbox.dxf");
+    std::filesystem::remove(lock_path_for(path, ".dwl"));
+    write_file(lock_path_for(path, ".dwl2"), kRealDwl2);
+
+    const std::string said = describe_lock(read_drawing_lock(path));
+    CHECK(said.find("by sadie") != std::string::npos);
+    CHECK(said.find(std::string("on ") + kMachine) != std::string::npos);
+
+    std::filesystem::remove(lock_path_for(path, ".dwl2"));
 }
 
 TEST_CASE("lock: a .dwl2 on its own is still a lock") {
@@ -123,13 +229,33 @@ TEST_CASE("lock: a .dwl2 on its own is still a lock") {
 TEST_CASE("lock: an unreadable lock is still reported") {
     // The existence is the fact that matters. A lock whose contents we cannot
     // make sense of must not become no lock at all.
+    //
+    // "Unreadable" means CONTROL bytes, and only those. A high byte is not
+    // garbage -- it is somebody's name, which is the whole lesson of 0x92 in a
+    // real .dwl: an earlier version of this test asserted that 0xFF produced no
+    // owner, and the fix that made "Sadie's MacBook Pro" come back correctly
+    // rightly broke it.
     const std::string path = temp_path("binary.dxf");
-    write_file(lock_path_for(path, ".dwl"), std::string("\x00\x01\x02\xff", 4));
+    std::filesystem::remove(lock_path_for(path, ".dwl2"));
+    write_file(lock_path_for(path, ".dwl"), std::string("\x00\x01\x02\x03", 4));
 
     const DrawingLock lock = read_drawing_lock(path);
     CHECK(lock.present);
     CHECK(lock.owner.empty());
     CHECK(!describe_lock(lock).empty());
+
+    std::filesystem::remove(lock_path_for(path, ".dwl"));
+}
+
+TEST_CASE("lock: a high byte is a name, not garbage") {
+    // The other half of the same point, stated positively.
+    const std::string path = temp_path("latin1.dxf");
+    std::filesystem::remove(lock_path_for(path, ".dwl2"));
+    write_file(lock_path_for(path, ".dwl"), "bj\xf6rn\nDESKTOP\n");
+
+    const DrawingLock lock = read_drawing_lock(path);
+    // 0xF6 is Latin-1 o-umlaut in CP1252 too, so it round-trips to UTF-8.
+    CHECK(lock.owner == "bj\xc3\xb6rn");
 
     std::filesystem::remove(lock_path_for(path, ".dwl"));
 }

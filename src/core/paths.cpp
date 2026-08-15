@@ -8,6 +8,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 
 namespace ncad {
 namespace {
@@ -98,34 +99,119 @@ std::string path_filename(const std::string& path) {
 
 namespace {
 
-// The first line of a lock file, with control characters and surrounding space
-// removed.
-//
-// Defensive on purpose. `.dwl` is plain text holding a user name and that much
-// is well established; what any given AutoCAD release puts after it is not, and
-// neither is `.dwl2`'s layout. So this takes the first legible line and stops,
-// rather than pretending to a parse it cannot justify -- a lock reported with
-// no name is still a lock reported.
-std::string first_text_line(const std::filesystem::path& p) {
+std::string read_whole(const std::filesystem::path& p) {
     std::ifstream in(p, std::ios::binary);
     if (!in) return {};
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
 
-    std::string line;
-    if (!std::getline(in, line)) return {};
-
+std::string trimmed(std::string s) {
+    // Control characters go, which also removes the CR of a CRLF and the
+    // trailing space `.dwl`'s machine-name line actually carries.
     std::string out;
-    for (const char c : line) {
-        // Printable ASCII only. A UTF-16 `.dwl2` would otherwise come back as a
-        // name with a null byte in it, which is worse than coming back empty.
-        if (static_cast<unsigned char>(c) >= 0x20 && static_cast<unsigned char>(c) < 0x7f) {
-            out += c;
-        }
+    for (const char c : s) {
+        if (static_cast<unsigned char>(c) >= 0x20 || c == '\t') out += c;
     }
-
     const std::size_t first = out.find_first_not_of(" \t");
     if (first == std::string::npos) return {};
-    const std::size_t last = out.find_last_not_of(" \t");
-    return out.substr(first, last - first + 1);
+    return out.substr(first, out.find_last_not_of(" \t") - first + 1);
+}
+
+// Whether the bytes are already valid UTF-8.
+//
+// The two lock files disagree about their encoding -- `.dwl` is CP1252 and
+// `.dwl2` is UTF-8 -- so rather than hard-code which is which and be wrong the
+// first time a different writer produces one, the bytes are asked.
+bool is_utf8(const std::string& s) {
+    for (std::size_t i = 0; i < s.size();) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        std::size_t extra = 0;
+        if (c < 0x80) {
+            ++i;
+            continue;
+        }
+        if ((c & 0xE0) == 0xC0) extra = 1;
+        else if ((c & 0xF0) == 0xE0) extra = 2;
+        else if ((c & 0xF8) == 0xF0) extra = 3;
+        else return false;
+
+        if (i + extra >= s.size()) return false;
+        for (std::size_t k = 1; k <= extra; ++k) {
+            if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) return false;
+        }
+        i += extra + 1;
+    }
+    return true;
+}
+
+// CP1252's 0x80..0x9F, which is the whole of where it differs from Latin-1 --
+// and where the character that actually turns up lives: macOS names a machine
+// "Sadie's MacBook Pro" with a curly apostrophe, byte 0x92.
+constexpr char32_t kCp1252High[32] = {
+    0x20AC, 0xFFFD, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+    0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0xFFFD, 0x017D, 0xFFFD,
+    0xFFFD, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+    0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0xFFFD, 0x017E, 0x0178,
+};
+
+void append_utf8(std::string& out, char32_t cp) {
+    if (cp < 0x80) {
+        out += static_cast<char>(cp);
+    } else if (cp < 0x800) {
+        out += static_cast<char>(0xC0 | (cp >> 6));
+        out += static_cast<char>(0x80 | (cp & 0x3F));
+    } else {
+        out += static_cast<char>(0xE0 | (cp >> 12));
+        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (cp & 0x3F));
+    }
+}
+
+// Whatever the file holds, as UTF-8 -- which is what both front ends display.
+//
+// Stripping the high bytes instead, which is what this did before a real pair
+// of lock files was measured, turns "Sadie's MacBook Pro" into "Sadies MacBook
+// Pro". Not wrong enough to notice, and wrong.
+std::string to_utf8(const std::string& s) {
+    if (is_utf8(s)) return s;
+
+    std::string out;
+    for (const char ch : s) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        if (c < 0x80) out += ch;
+        else if (c < 0xA0) append_utf8(out, kCp1252High[c - 0x80]);
+        else append_utf8(out, c);  // 0xA0..0xFF is Latin-1 in both
+    }
+    return out;
+}
+
+// The text between `<tag>` and `</tag>`.
+//
+// A scan and not a parse, deliberately: `.dwl2`'s declaration is malformed --
+// `<?xml version="1.0" encoding="UTF-8">` with no closing `?` -- so every real
+// XML parser rejects the file. See examples/acad-locks.
+std::string tag_value(const std::string& xml, const std::string& tag) {
+    const std::string open = "<" + tag + ">";
+    const std::string close = "</" + tag + ">";
+    const std::size_t a = xml.find(open);
+    if (a == std::string::npos) return {};
+    const std::size_t b = xml.find(close, a + open.size());
+    if (b == std::string::npos) return {};
+    return trimmed(to_utf8(xml.substr(a + open.size(), b - a - open.size())));
+}
+
+// `.dwl`'s three lines: user, machine, datetime. The third is a long localised
+// form we do not read -- see modified_at for why.
+void read_dwl(const std::string& text, std::string& owner, std::string& machine) {
+    std::size_t start = 0;
+    for (int line = 0; line < 2 && start <= text.size(); ++line) {
+        std::size_t end = text.find('\n', start);
+        if (end == std::string::npos) end = text.size();
+        std::string value = trimmed(to_utf8(text.substr(start, end - start)));
+        if (line == 0) owner = value;
+        else machine = value;
+        start = end + 1;
+    }
 }
 
 // The file's modification time, formatted for a person.
@@ -173,19 +259,37 @@ DrawingLock read_drawing_lock(const std::string& drawing) {
     DrawingLock lock;
     if (drawing.empty()) return lock;
 
-    // `.dwl` first because it is the one whose contents are documented. Either
-    // being present means somebody has the drawing open, so `.dwl2` alone is
-    // still a lock -- just one we may be able to say less about.
-    for (const char* ext : {".dwl", ".dwl2"}) {
-        const std::string candidate = lock_path_for(drawing, ext);
-        std::error_code ec;
-        if (!std::filesystem::is_regular_file(candidate, ec) || ec) continue;
+    // Either file present means somebody has the drawing open. AutoCAD writes
+    // both, but a lock is a lock whichever survives -- so presence is taken
+    // from either and the FIELDS are read from whichever can supply them.
+    const std::string dwl = lock_path_for(drawing, ".dwl");
+    const std::string dwl2 = lock_path_for(drawing, ".dwl2");
 
-        lock.present = true;
-        lock.lock_path = candidate;
-        lock.owner = first_text_line(candidate);
-        lock.since = modified_at(candidate);
-        if (!lock.owner.empty()) break;  // a named holder is the better answer
+    std::error_code ec;
+    const bool has_dwl = std::filesystem::is_regular_file(dwl, ec) && !ec;
+    ec.clear();
+    const bool has_dwl2 = std::filesystem::is_regular_file(dwl2, ec) && !ec;
+    if (!has_dwl && !has_dwl2) return lock;
+
+    lock.present = true;
+    // `.dwl` is the one named, because it is the one people know and the one a
+    // user reaching for a stale lock will look for. We never delete either.
+    lock.lock_path = has_dwl ? dwl : dwl2;
+    lock.since = modified_at(lock.lock_path);
+
+    // `.dwl2` is read FIRST despite being the newer file, because it is UTF-8
+    // and tagged: what it gives is unambiguous, where `.dwl` has to be sniffed
+    // for its encoding and counted by line.
+    if (has_dwl2) {
+        const std::string xml = read_whole(dwl2);
+        lock.owner = tag_value(xml, "username");
+        lock.machine = tag_value(xml, "machinename");
+    }
+    if (has_dwl && (lock.owner.empty() || lock.machine.empty())) {
+        std::string owner, machine;
+        read_dwl(read_whole(dwl), owner, machine);
+        if (lock.owner.empty()) lock.owner = owner;
+        if (lock.machine.empty()) lock.machine = machine;
     }
     return lock;
 }
@@ -195,6 +299,10 @@ std::string describe_lock(const DrawingLock& lock) {
 
     std::string s = "open in another session";
     if (!lock.owner.empty()) s += " by " + lock.owner;
+    // The machine matters over a shared folder: "sadie" on this box and "sadie"
+    // on another are very different situations and the name alone cannot tell
+    // them apart.
+    if (!lock.machine.empty()) s += " on " + lock.machine;
     if (!lock.since.empty()) s += " since " + lock.since;
     // Named so the user can go and look at it, and delete it themselves when
     // they know the session it belonged to is gone. We do not clear it for

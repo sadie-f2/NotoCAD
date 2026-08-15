@@ -136,22 +136,69 @@ them, because the reason a thing is wanted is the most perishable part of wantin
       about a lock, so suppressing it in the GUI would silently remove the entire
       warning on the front end most likely to meet it.
 
-      Parsing is defensive. `.dwl` is plain text holding a user name and that much is
-      well established; what a given release puts after it is not, and `.dwl2`'s layout
-      is not documented anywhere we can rely on. So the owner is the first legible line
-      and nothing more, and the timestamp comes from the FILESYSTEM rather than from
-      inside the file -- certain, and the same answer. **An unreadable lock is still a
-      lock**: the existence is the fact that matters, and a lock we cannot parse must
-      not become no lock at all.
+      **The formats were then MEASURED**, from a real pair AutoCAD 2026 left beside a
+      `.dxf` -- which settles the premise as well: modern AutoCAD does lock DXF, not
+      only DWG. Specimens and notes are in `examples/acad-locks/`. Three things there
+      are not guessable and one is not even valid:
 
-- [ ] **Writing our own locks is still not done**, and it is the half that needs a
-      decision rather than code. What is a stale lock, and who may clear one? This
-      program has segfaulted twice this month, and a lock left by a dead process is
-      exactly the case that has to be answered before writing one is an improvement.
-      A pid plus a hostname lets a later session recognise its own dead lock; it does
-      not help across machines, which is exactly where shared folders live. Note also
-      that we never clear somebody else's lock today -- the message names the file so
-      the user can delete it themselves once they know the session is gone.
+      - `.dwl` is three lines -- user, machine, datetime -- in **CP1252**. The
+        apostrophe in "Sadie's MacBook Pro" is the single byte `0x92`.
+      - `.dwl2` carries the same fields as tags in **UTF-8**, where that character is
+        three bytes. Two files, two encodings, and nothing anywhere says so.
+      - `.dwl2` is **not well-formed XML**: its declaration is
+        `<?xml version="1.0" encoding="UTF-8">` with no closing `?`, so a real parser
+        rejects the file outright. It is scanned for tags instead.
+
+      Neither ends in a newline and `.dwl`'s machine line has a trailing space. The
+      encoding is SNIFFED rather than taken from the extension, so a writer that
+      differs does not silently produce mojibake.
+
+      This mattered immediately rather than theoretically: macOS names a machine
+      "Sadie's MacBook Pro" with a curly apostrophe, so the very first real lock file
+      on this platform carries a high byte. The earlier version stripped non-ASCII and
+      would have reported "Sadies MacBook Pro" -- not wrong enough to notice, and
+      wrong. A test asserting that `0xFF` produced no owner was itself wrong for the
+      same reason and was corrected: a high byte is somebody's NAME, not garbage.
+      Only control bytes are unreadable.
+
+      The machine name is now reported beside the user, which is the field that matters
+      over a shared folder -- "sadie" on this box and "sadie" on another are very
+      different situations and the user name alone cannot tell them apart.
+
+      The timestamp still comes from the FILESYSTEM rather than from inside the file.
+      AutoCAD writes a long localised form -- "Friday, August 14, 2026  19:52:45
+      Eastern Daylight Time", two spaces before the time, timezone spelled out -- which
+      `strftime` has no portable way to produce, and the modification time is both
+      certain and the same answer. **An unreadable lock is still a lock**: the existence
+      is the fact that matters.
+
+- [ ] **Writing our own locks.** Sadie's guidance settles the shape: **be led by what
+      AutoCAD does**, because interoperating with it is the whole point. That also
+      dissolves what had been recorded here as a blocker -- "who may clear a stale
+      lock" is answered the way AutoCAD answers it, which is that nobody clears it
+      automatically and the user deletes the file. Our message already names it.
+
+      So: `O_CREAT|O_EXCL` at open time, which makes the check and the take ONE
+      syscall and removes the race the present QSAVE prompt is papering over. Then
+      QSAVE goes back to writing silently -- our own lock is proof nobody took it since
+      we opened -- and the exception recorded above disappears rather than being
+      defended. Remove on clean exit; leave it on a crash, as AutoCAD does.
+
+      Two things to settle at the machine before the format can be written, and Sadie
+      is the one positioned to check them (steps 3-6 of the list she was working
+      through; 1 and 2 are done and are what `examples/acad-locks/` records):
+
+      - **Does AutoCAD honour a lock it did not write?** Hand-write a `.dwl` with
+        another user name and open the drawing in AutoCAD. This is what decides whether
+        ours is real mutual exclusion or one-way politeness -- and therefore whether
+        matching the byte format exactly is worth anything.
+      - **What does it do about its own stale lock**, and does it still leave one on a
+        force-quit? Believed yes, possibly changed.
+
+      One asymmetry worth stating: a `.dwl` AutoCAD honours means OUR crash blocks
+      Sadie's AutoCAD, and this program has segfaulted twice this month. That is an
+      argument for fixing the crashes, not for a different locking model -- but it is
+      why the crash items above are worth more now than they were.
 
 - [ ] **A leader's note cannot be edited after it is drawn.** Not specific to leaders --
       there is no DDEDIT or CHANGE for a `Text` either -- but it is more visible here,

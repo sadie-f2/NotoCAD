@@ -68,13 +68,32 @@ std::string path_filename(const std::string& path);
 // left behind by a dead process is exactly the case that has to be answered
 // before writing one is an improvement. See SF_todo.
 
+// The two files AutoCAD writes, MEASURED from a real pair rather than assumed.
+// Specimens and the full notes are in `examples/acad-locks/`. Three details
+// here are not guessable and one of them is not even valid:
+//
+//   - `.dwl` is three lines -- user, machine, datetime -- in **CP1252**. The
+//     apostrophe in "Sadie's MacBook Pro" is the single byte 0x92.
+//   - `.dwl2` carries the same fields as tags, in **UTF-8**, where that same
+//     character is three bytes. Two files, two encodings.
+//   - `.dwl2` is NOT well-formed XML: its declaration is
+//     `<?xml version="1.0" encoding="UTF-8">` with no closing `?`, so a parser
+//     rejects the file outright. Scan for tags instead.
+//
+// Neither file ends in a newline, and `.dwl`'s machine line has a trailing
+// space. Everything is read defensively anyway: a lock we cannot make sense of
+// is still a lock, and its EXISTENCE is the fact that matters.
 struct DrawingLock {
     bool present{false};
 
-    // From `.dwl`, which is plain text holding the user name. Empty when the
-    // file could not be read or held nothing legible -- in which case the lock
-    // is still reported, because its EXISTENCE is the fact that matters.
+    // Who holds it. Empty when nothing legible could be read -- the lock is
+    // still reported in that case.
     std::string owner;
+
+    // Which machine holds it, which is the field that matters over a shared
+    // folder: "sadie" on your own box and "sadie" on somebody else's are very
+    // different situations, and the user name alone cannot tell them apart.
+    std::string machine;
 
     // Which file was found, so the message can name something the user can go
     // and look at (or delete, when they know the session is gone).
