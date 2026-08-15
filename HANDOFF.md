@@ -1,181 +1,179 @@
-# Handoff — session ending 2026-07-31 (Linux → macOS)
+# Handoff — session ending 2026-08-14
 
 Session-scoped and disposable. `CLAUDE.md` holds settled rules, `SF_todo.md` the
 roadmap and the reasoning, `features.md` capabilities not yet built, and
 `SF_strategy.md` the long horizon. **This file is only the bridge.** Delete or
 rewrite it rather than letting it rot.
 
-**Written for a macOS instance to pick up**, because this one can design but
-cannot compile for that platform. The port is phase 15 and has never been
-attempted.
-
 ## Where things stand
 
-- On **`main`**. **1019 tests, 0 failed.** Version **0.1.58** — the patch number
-  is the command count, and no commands were added this session.
-- **R2000 (AC1015) output is CONFIRMED IN AUTOCAD 2026** for 43 of the 44
-  entities in the conformance drawing. That was the session's main work.
-- **MINSERT is the one unsolved record.** Held out of the drawing by
-  `*cf-minsert*`. See below.
-- The `noto` namespace, headers and library targets are now **`ncad`**
-  throughout. `include/ncad/`, `ncad_core`, `ncad_lisp`, `ncad_app`,
-  `ncad_gui_lib` — the GUI library carries the `_lib` suffix because
-  `ncad_gui` is the executable.
+**0.2.72**, 1112 tests, sanitizer clean, `main` level with `origin/main`.
 
-## FIRST: push, or the Mac sees none of this
+This session added: the geometry clipboard (COPYCLIP/CUTCLIP/PASTECLIP as DXF
+text), OFFSET/FILLET/CHAMFER, toolbars with drawn-not-shipped icons, native file
+dialogs behind FILEDIA, a macOS `.app` bundle pipeline, drawings openable from
+the command line, sticky toolbar placement — and **dimensioning**: linear,
+aligned, radius, diameter and angular, with R12's `DIM` mode over the same
+command objects.
 
-At the time of writing there are **15 unpushed commits**, which is normal for
-this project but blocking here — a fresh clone would predate the rename, the
-R2000 fixes and the conformance drawing. Push before starting the Mac instance.
+A `build-asan-gui` exists now; the Qt shell had never been sanitized before.
 
-## What happened this session
+Three tasks below, in the order Sadie gave them. The first is explicitly **not**
+first priority.
 
-**The `noto` → `ncad` rename.** Namespace, header directory, every CMake target,
-the `NCAD_*` options, `NCAD_IPERL`. Verified with a from-scratch configure and
-build, headless and with `NCAD_BUILD_GUI=ON`.
+---
 
-**iperl is no longer machine-specific.** The `--pipe` patch is committed in
-`~/src/iperl` (it was uncommitted for weeks), and `script_path()` now searches
-`NCAD_IPERL`, then `~/src/iperl/iperl.pl` and `~/iperl.pl`, then **PATH**. A
-checkout still beats an installed copy so that working on iperl tests the copy
-being worked on.
+## 1. A macOS 13 machine refused the .app  (low priority)
 
-**The R2000 conformance drawing.** `tests/acad/r2000_conformance.lsp` builds ten
-labelled stations holding one of every entity type reachable;
-`tests/acad/gen_conformance.sh` writes it to the NAS share under a
-serial-numbered name and prints the md5. Six faults came out of it, every one
-structure rather than geometry, and each is pinned by a test in
-`tests/test_dxf.cpp`. `SF_todo.md` has the table.
+A build handed to a friend about a week ago reports the app is incompatible with
+their OS. They are on **macOS 13.x**. We believe the toolchain targets 12.
 
-**Two rules worth carrying**, both learned the expensive way:
+**Most likely answer, and check it before anything else: the build predates the
+fix.** `b6d981c` (2026-08-10) is what moved bundling onto the official Qt 6.8.3
+LTS and set `CMAKE_OSX_DEPLOYMENT_TARGET=12.0`. Before it, bundles were built
+against **Homebrew Qt 6.11**, whose bottles are compiled per-OS-release for the
+machine that pours them — so a bundle made on this Sequoia machine carried
+`minos 15.x` in every Qt framework and refuses to launch on anything older. That
+is exactly the failure reported, and a build "about a week ago" is very plausibly
+on the wrong side of that date.
 
-- **The shape of a record must not depend on its content.** An optional group
-  omitted immediately before a class separator leaves the reader inside the
-  parent class. TEXT's group 73 and an INSERT's scale and rotation are written
-  unconditionally at R2000 because of this.
-- **Presence is not the property; position is.** AutoCAD accepted a misplaced
-  subclass marker on a LINE and refused the identical mistake on a TEXT.
-
-**Point input fixes.** `1, 1, 1` is now one point rather than three answers — a
-comma joins across spaces, which changes the meaning of no valid line because a
-token ending in a comma cannot be a complete answer. And `=` is now
-**per-coordinate**, so `=$pi,=$pi,1` works while `=join(",",3,4)` stays one
-expression.
-
-## macOS: what to actually do
-
-Nothing has ever been built on macOS. The core is POSIX and standard C++20, so
-the expectation is that it mostly works and the interesting output is the list of
-what does not.
+**Diagnose in this order.** Get the actual bundle they were sent, not a fresh one:
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build build
-./build/tests/ncad_tests
+otool -l NotoCAD.app/Contents/MacOS/NotoCAD | grep -A3 LC_BUILD_VERSION   # want minos 12.0
+lipo -archs NotoCAD.app/Contents/MacOS/NotoCAD                            # see below
+find NotoCAD.app/Contents/Frameworks -type f -perm +111 -exec sh -c \
+  'printf "%s " "$1"; otool -l "$1" | awk "/^ *minos/{print \$2; exit}"' _ {} \;
 ```
 
-Then the GUI, which is the part with a real dependency:
+`scripts/mac_bundle.sh` now fails the build if any Mach-O in the bundle demands
+newer than the target, so a bundle produced by the current script cannot have
+this problem. A bundle produced before it easily could.
 
-```sh
-brew install qt ninja
-cmake -S . -B build-gui -G Ninja -DNCAD_BUILD_GUI=ON \
-      -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
-cmake --build build-gui
+**The other candidate, and it is a real one: we build arm64 only.** Nothing sets
+`CMAKE_OSX_ARCHITECTURES`, so the binary matches whatever machine built it. If
+the friend's machine is an **Intel** Mac, macOS 13 is entirely plausible on it
+and the app will be refused no matter what the deployment target says. `lipo
+-archs` settles this in one line. The fix is one line too — build universal:
+
+```cmake
+set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
 ```
 
-**Qt must be dynamically linked.** `src/gui/CMakeLists.txt` aborts the configure
-if it finds a static Qt, on purpose: the BSD-3 core must not acquire LGPLv3
-relinking obligations. Homebrew's Qt is shared, so this should pass — if it
-fires, that is the guard working, not a bug to route around.
+The official Qt frameworks in `~/Qt` are already universal, so only our own code
+needs the flag. Worth doing regardless, since "runs only on Apple Silicon" is not
+a property anyone will guess from a dmg.
 
-### Known risk points, in the order I would check them
+**Do not conclude the target is broken until the actual artifact is inspected.**
+A fresh bundle from today's script should be verifiably 12.0, and if it is, the
+answer is simply that the friend has an old copy.
 
-1. **`std::numbers`** (`<numbers>`) is used in the geometry and DXF code. Needs a
-   recent libc++; Xcode 14 or newer. The most likely hard failure.
-2. **`tests/test_save.cpp:205`** writes to `/proc/definitely/not/writable.dxf` to
-   prove an unwritable path leaves the drawing dirty. macOS has no `/proc`, so it
-   should still fail to open and the test should still pass — but for a different
-   reason than intended. If it passes, it passes by luck; consider a path that is
-   unwritable on both.
-3. **`-Wconversion` is on** and warnings are meant to stay quiet. AppleClang
-   warns in places GCC does not, so expect noise that is real rather than
-   spurious.
-4. **iperl** shells out via `execlp("perl", ...)`. macOS ships perl, and the PATH
-   lookup added this session should find an installed `iperl`/`iperl.pl`. If it
-   is absent the calculator degrades politely and three tests skip — that is by
-   design, not a failure.
-5. **`tests/acad/gen_conformance.sh`** already falls back from `md5sum` to
-   `md5 -q`, so it should run as-is. It falls back to `/tmp` when the NAS share
-   is not mounted.
-6. `sys/stat.h`, `sys/wait.h`, `unistd.h`, `fork`/`pipe`/`waitpid`,
-   `mkdtemp`, `SIGPIPE` — all POSIX and all expected to be fine.
+---
 
-There is **no** Linux-specific API in the core: no inotify, no epoll, no
-`/proc` outside that one test path.
+## 2. Read and respect AutoCAD lock files
 
-### codegraph across platforms
+In preparation for writing our own. Sadie's view: locks are worth having now.
 
-The database is **gitignored** — `.codegraph/.gitignore` ignores everything but
-itself — so the Mac will not receive it through git and will want
-`codegraph init` regardless.
+**What AutoCAD does.** With `plan.dwg` open it creates `plan.dwl` and
+`plan.dwl2` beside it. `.dwl` is plain text holding the user name; `.dwl2`
+carries more — user, machine, and when it was opened. They sit next to the
+drawing, not in a system directory, which is what makes them work over a shared
+network folder and also what makes them stale when a process dies. They are
+**advisory**: nothing in the OS enforces them, and AutoCAD itself will let you
+past with a warning.
 
-If the cross-platform read is worth testing deliberately, the `.db` has to be
-copied by hand through the NAS share. One encouraging data point measured here:
-**no absolute `/home/sadie` paths are interned in the database**, so a copy is
-not obviously doomed. Check `codegraph status` reports the expected file count
-before trusting it, and re-index if anything looks thin.
+**Read side first**, which is this task. On `OPEN` and on `ncad file.dxf`, look
+for a sibling lock, and if one is there say who holds it and when. The question
+Sadie should decide before this is written:
 
-## Open, and needing Sadie rather than code
+- **Warn and continue** — closest to AutoCAD, and honest about an advisory lock
+  being advisory.
+- **Warn and open read-only** — safer, but the drawing then needs a read-only
+  mode, which does not exist and is a much larger change (every command that
+  mutates has to be refused, and SAVE has to know).
+- **Warn and refuse** — simplest to build and the most annoying of the three.
 
-**MINSERT at R2000.** AutoCAD refuses it with `Class separator for class
-AcDbMInsertBlock expected`, and has refused **all three** placements of that
-separator: before the array fields; before them with every parent field written
-out first; and after them at the end of the record. Each attempt was reasoning
-rather than evidence and produced none. **What it needs is a MINSERT saved as
-R2000 by AutoCAD itself**, to match byte for byte. Then flip `*cf-minsert*` to
-`T`. Guessing has cost three rounds; stop guessing.
+Recommend the first for the read side, with the answer recorded, because it
+needs no new concept anywhere in the database.
 
-**A point from LISP is world; the same point typed is UCS.** Deferred, leaning
-toward matching AutoLISP — the UI convenience does not extend to the API, and
-that split is AutoLISP's own and coherent. Station 9 of the conformance drawing
-is the standing test. Note the correction recorded in `SF_todo.md`: `polar`,
-`distance` and `angle` are frame-agnostic, so this is a smaller job than the
-section originally implied.
+**Write side after.** Creating our own means deciding what a stale lock is and
+who may clear one — a process that segfaults leaves its lock behind, and this
+program has segfaulted twice this month. A pid plus a hostname in the file lets
+a later session recognise its own dead lock; it does not help across machines,
+which is exactly where shared folders live.
 
-**SPLINE group 74.** Omitting the fit points would make the curve exact in every
-reader *and* cut about 36% of each record, at the cost of forgetting which points
-the user picked. A decision for when SPLINE editing is on the table.
+**Where it goes.** `src/core/paths.hpp` already owns filename handling and is
+where both front ends agree about what a name means; the lock path belongs
+beside `ensure_extension` and `same_file`. The commands that would consult it are
+`DxfInCommand` (OPEN and DXFIN) and `SaveCommand`, all in `commands.cpp`. Note
+that `ncad`'s startup path opens through the OPEN command deliberately, so
+wiring it into the command covers both front ends and the command line at once.
 
-## Traps
+---
 
-Carried forward and still true:
+## 3. DIM needs a LEAder
 
-- **`Mat4::from_basis(origin, ax, ay, az)` builds world-TO-basis** — axes in the
-  rows.
-- **A positive bulge arcs BELOW a left-to-right chord.** `test_polyline.cpp:116`.
-- **A test calling `InputValue::of_point()` bypasses UCS conversion** — and so
-  does the LISP path, which is the open question above.
-- **`ncad_gui` cannot be launched from the Linux box** (X11 over SSH). It may
-  well be launchable on the Mac, which would be the first time anyone has seen
-  the viewport outside a forwarded session.
-- **Commit straight to `main`.** No branches.
+Confirmed absent. `DIM`'s keywords today are Horizontal, Vertical, Aligned,
+Rotated, ANgular, Radius, Diameter, Undo, eXit — see `commands.cpp` around the
+`DimCommand::ask_option` hub.
 
-New this session:
+**The design question to settle first: a leader is not a dimension.** It
+measures nothing. Everything in `Dimension` is built around `measurement()`
+being the truth the entity holds and the label being derived from it, and a
+leader has no such number — it has a note somebody typed. Three ways to place it:
 
-- **Everything we know about AC1015 is what AutoCAD 2026 demands**, not what the
-  format requires. There is no R2000-era reference here. Matching a current
-  AutoCAD is right — it is the reader files must satisfy — but it licenses no
-  claim of spec conformance, and another reader could be strict in a direction
-  we have not seen.
-- **`add_one_of_each()` in `tests/test_dxf.cpp` had no polyline**, so every
-  structural R2000 test walked past the VERTEX and SEQEND records, which had no
-  handles at all. The same blind spot that hid the R12 handle bug, where
-  `gen_sample` had no polylines either. It has one now — keep it that way.
-- **`load` does not exist** in this AutoLISP. A positional argument to `ncad` is
-  a LISP file: `ncad script.lsp -e "(conform)" -i`.
-- **`entmake` cannot make MTEXT** despite what `features.md` implies. The
-  conformance script writes a DXF fragment and reads it back, first, because
-  DXFIN clears the entities while leaving the tables.
-- **`LAYER Color <n>` takes its own name list.** `"Color" "1" "Ltype" "DASHED"`
-  reads `Ltype` as a layer name and fails one argument later with
-  `LAYER: unknown option`, pointing at the wrong place entirely.
+- **A `DimKind::Leader`** whose measurement is always zero and whose label is
+  always the override. Cheapest, reuses the whole pipeline including the
+  writer-synthesised block — but it makes `measurement()` lie for one kind, and
+  every switch over `DimKind` grows a case that does nothing.
+- **A separate `Leader` entity.** Honest, and the vtable work is now well
+  understood — see the impact list in SF_todo and `git show 644fa79`. More code,
+  and a second thing that generates arrowheads.
+- **Plain geometry at creation**, i.e. lines plus text and no entity. R12 is
+  closer to this than to either of the above, and it is what `EXPLODE` produces
+  anyway. Loses the ability to edit the note afterwards.
+
+Recommend the second if leaders are going to carry annotation the drawing cares
+about, the third if they are throwaway callouts. Sadie should pick.
+
+**R12's prompt sequence**, whichever is chosen: `Leader start` (the arrow end),
+then `To point` repeatedly until Enter, then `Dimension text <measurement>`.
+The last segment is conventionally horizontal — a shoulder — and the text sits
+at its far end. DXF R13+ has a real `LEADER` entity; at R12 it degrades to the
+block-and-lines form the dimensions already use, which is a path that now exists.
+
+---
+
+## Also open, carried from SF_todo
+
+- **`%%D` and `%%C` render literally.** Correct DXF — AutoCAD draws ° and ⌀ —
+  but our ASCII Hershey font has no such glyphs, so every angular dimension
+  reads `90.0000%%D` on screen. One fix in the font layer for TEXT generally.
+  More visible now that angular exists.
+- **Radial leaders run centre-to-rim**, where AutoCAD's come in from outside the
+  curve. A different shape, not a wrong number. Found in the AutoCAD comparison.
+- **TRIM and EXTEND cannot be driven from LISP** — they need a pick point the
+  terminal cannot supply. FILLET and CHAMFER work around it with a midpoint
+  stand-in; those two have no fallback.
+- **`c:` functions are not dispatched as commands.**
+- **`?` listings only print when the command exits**, because `Step::ask`
+  cannot carry output.
+- **The SizeAllCursor crash.** Two crashes, both on that one cursor shape,
+  mitigated by not asking for it. Untested on Linux, where a crash would mean
+  the cursor correlation was coincidence and the fault is ours.
+- **Baseline and continue dimensions**, cheap now the families exist.
+
+## Traps worth knowing
+
+- **`DimKind`'s values are DXF's and are not contiguous** (Angular is 5). A
+  table indexed by the enum is read off its end — that shipped once already.
+- **`entity_subrs.cpp`'s `entget` converter has a `default:`**, so a new entity
+  type compiles and silently returns nothing from LISP. It is the site missed
+  for ELLIPSE and the one to check first when adding a type.
+- **`sysvar.cpp`'s static_assert catches a wrong COUNT, not a wrong ORDER.**
+  The enum and the table are matched by position.
+- **The AutoCAD comparison is worth more than any test we write.** It found the
+  duplicated `*Model_Space`, and it found dimension text drawn aligned when R12
+  draws it horizontal. Diff against the SOURCE though, not against AutoCAD's
+  output — the pwm boards showed AutoCAD *adding* a stray zero-length line and
+  an orphaned block that we correctly did not.
