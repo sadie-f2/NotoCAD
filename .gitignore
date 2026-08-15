@@ -8,3 +8,9 @@ compile_commands.json
 
 # Scratch AutoLISP scripts and their output -- not yet a repo deliverable.
 /scripts/
+
+# macOS Finder metadata and editor backups. Here because a `git add -A` swept
+# them into a commit once; they are noise on one of the two platforms this
+# builds on and never a deliverable on either.
+.DS_Store
+*~
