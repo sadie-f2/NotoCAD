@@ -41,6 +41,20 @@ them, because the reason a thing is wanted is the most perishable part of wantin
       (Angular is 5), so a five-entry table indexed by the enum was read off its end by
       exactly one kind. A switch now, and a test walks every kind.
 
+      Text orientation was wrong on import, found by opening a dimensioned AutoCAD
+      drawing beside AutoCAD's own view of it. Every measurement, line and arrow matched;
+      the LABELS did not. Two causes, both now fixed. We drew text aligned to the
+      dimension line, but R12's DIMTIH and DIMTOH default to ON -- HORIZONTAL text
+      whatever angle the line runs at -- which is what AutoCAD renders for a file that
+      does not say otherwise. And aligned text was not kept readable, so a line running
+      right-to-left put its digits upside down. Aligned is still available with DIMTIH 0
+      and is now clamped to a quarter turn either way, which is what every drafting
+      standard requires.
+
+      Still open from that comparison: our radial leader runs centre-to-rim while
+      AutoCAD's comes in from outside the curve, which is a different shape rather than
+      a wrong number.
+
       Baseline and continue are next, and cheap. Known cosmetic gap:
       a diameter label is written `%%C50.0000`, which is correct R12 -- AutoCAD renders
       the diameter sign -- while our stroke font shows the escape literally, since the

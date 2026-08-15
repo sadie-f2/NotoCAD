@@ -2816,6 +2816,7 @@ void apply_dim_style(CommandContext& ctx, Dimension& d) {
     const double s = sv.get_real(Sysvar::DimScale);
     d.apply_style(sv.get_real(Sysvar::DimTxt) * s, sv.get_real(Sysvar::DimAsz) * s,
                   sv.get_real(Sysvar::DimExo) * s, sv.get_real(Sysvar::DimExe) * s);
+    d.set_text_horizontal(sv.get_int(Sysvar::DimTih) != 0);
 }
 
 }  // namespace

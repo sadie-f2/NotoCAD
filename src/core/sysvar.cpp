@@ -91,6 +91,13 @@ constexpr SysvarDef kTable[] = {
     {"DIMEXO", Sysvar::DimExo, SysvarType::Real, false, true, 0, 0, 0, 0.625, "", {}},
     {"DIMEXE", Sysvar::DimExe, SysvarType::Real, false, true, 0, 0, 0, 1.25, "", {}},
     {"DIMTAD", Sysvar::DimTad, SysvarType::Int, false, true, 0, 0, 1, 0.0, "", {}},
+    // Both default ON, which is R12's default and not ISO's: R12 draws dimension
+    // text HORIZONTAL whatever angle the dimension line runs at. Aligned text is
+    // the more modern look and is what this program drew first -- which is why a
+    // drawing imported from AutoCAD came back with half its labels rotated and
+    // several of them upside down.
+    {"DIMTIH", Sysvar::DimTih, SysvarType::Int, false, true, 1, 0, 1, 0.0, "", {}},
+    {"DIMTOH", Sysvar::DimToh, SysvarType::Int, false, true, 1, 0, 1, 0.0, "", {}},
 
     // Defaults on, because the window is where a person is; `ncad` has no
     // dialog to offer and ignores it, which is the same answer FILEDIA 0 gives.

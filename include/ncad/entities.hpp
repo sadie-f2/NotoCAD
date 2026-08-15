@@ -890,6 +890,12 @@ public:
     // DIM variables once.
     void apply_style(double text_height, double arrow_size, double ext_offset,
                      double ext_beyond);
+    // DIMTIH: text horizontal in the drawing rather than turned to follow the
+    // dimension line. R12's default, and baked in with the sizes for the same
+    // reason -- draw() cannot read a variable.
+    void set_text_horizontal(bool on) { text_horizontal_ = on; }
+    bool text_horizontal() const { return text_horizontal_; }
+
     double text_height() const { return text_height_; }
     double arrow_size() const { return arrow_size_; }
     double ext_offset() const { return ext_offset_; }
@@ -940,6 +946,7 @@ private:
     double arrow_size_{2.5};
     double ext_offset_{0.625};
     double ext_beyond_{1.25};
+    bool text_horizontal_{true};
 };
 
 // One DXF group: a code and its value, kept as text.

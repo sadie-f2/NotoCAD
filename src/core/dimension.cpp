@@ -68,6 +68,23 @@ EntityPtr arrowhead(const Vec3& tip, const Vec3& back, const Vec3& normal, doubl
     return head;
 }
 
+// How far the label is turned, in the entity's plane.
+//
+// Horizontal is R12's default (DIMTIH) and is what AutoCAD draws for a file
+// that does not say otherwise. Aligned text follows the dimension line, and
+// then it must be kept READABLE: a line running right-to-left would otherwise
+// put the digits upside down, which is how an imported drawing came back with
+// half its labels mirrored. Every drafting standard says the same thing --
+// text reads left to right, or bottom to top, and never the other way.
+double label_rotation(bool horizontal, double along_angle) {
+    if (horizontal) return 0.0;
+
+    double a = along_angle;
+    while (a <= -kFullTurn * 0.25) a += kFullTurn * 0.5;
+    while (a > kFullTurn * 0.25) a -= kFullTurn * 0.5;
+    return a;
+}
+
 EntityPtr segment(const Vec3& a, const Vec3& b, const EntityProps& props) {
     auto line = std::make_unique<Line>(a, b);
     line->props() = props;
@@ -207,7 +224,8 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
         const Vec3 along = tangent(half);
 
         auto text = std::make_unique<Text>(anchor, label(), text_height_);
-        text->set_rotation(std::atan2(dot(along, b.ay), dot(along, b.ax)));
+        text->set_rotation(
+            label_rotation(text_horizontal_, std::atan2(dot(along, b.ay), dot(along, b.ax))));
         text->set_align(TextHAlign::Center, TextVAlign::Middle);
         text->set_align_point(anchor);
         text->props() = props_;
@@ -236,7 +254,9 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
         const Vec3 mid = (tail + first_) * 0.5;
         auto text = std::make_unique<Text>(mid + perp * (text_height_ * kTextGap), label(),
                                            text_height_);
-        text->set_rotation(std::atan2(dot(dir, arbitrary_axis(n).ay), dot(dir, arbitrary_axis(n).ax)));
+        text->set_rotation(label_rotation(
+            text_horizontal_,
+            std::atan2(dot(dir, arbitrary_axis(n).ay), dot(dir, arbitrary_axis(n).ax))));
         text->set_align(TextHAlign::Center, TextVAlign::Middle);
         text->set_align_point(mid + perp * (text_height_ * kTextGap));
         text->props() = props_;
@@ -307,7 +327,8 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
 
     const Vec3 anchor = fits ? mid : mid + perp * (text_height_ * (0.5 + kTextGap));
     auto text = std::make_unique<Text>(anchor, caption, text_height_);
-    text->set_rotation(std::atan2(dot(along, basis.ay), dot(along, basis.ax)));
+    text->set_rotation(
+        label_rotation(text_horizontal_, std::atan2(dot(along, basis.ay), dot(along, basis.ax))));
     text->set_align(TextHAlign::Center, TextVAlign::Middle);
     text->set_align_point(anchor);
     text->props() = props_;
@@ -327,6 +348,7 @@ EntityPtr Dimension::clone() const {
     copy->arrow_size_ = arrow_size_;
     copy->ext_offset_ = ext_offset_;
     copy->ext_beyond_ = ext_beyond_;
+    copy->text_horizontal_ = text_horizontal_;
     copy_common_to(*copy);
     return copy;
 }

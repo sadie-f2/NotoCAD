@@ -115,6 +115,8 @@ enum class Sysvar : std::uint16_t {
     DimExo,    // how far an extension line stands off the geometry
     DimExe,    // how far it overshoots the dimension line
     DimTad,    // 0 text in the dimension line, 1 above it
+    DimTih,    // text inside the extension lines horizontal rather than aligned
+    DimToh,    // the same for text that ends up outside them
 
     // Whether a file prompt is answered by a dialog or by typing. R12's, and
     // for R12's reason: a script or a LISP routine that drives OPEN must not

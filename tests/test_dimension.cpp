@@ -513,3 +513,58 @@ TEST_CASE("dimension: LIST names every kind, including the one past the end") {
         CHECK(e.message().find(c.word) != std::string::npos);
     }
 }
+
+// --- text orientation -----------------------------------------------------------
+
+namespace {
+
+double label_angle(const Dimension& d) {
+    std::vector<EntityPtr> parts;
+    d.regenerate(parts);
+    for (const EntityPtr& e : parts) {
+        if (e && e->type() == EntityType::Text) return static_cast<const Text*>(e.get())->rotation();
+    }
+    return -99.0;
+}
+
+}  // namespace
+
+TEST_CASE("dimension: text is horizontal by default, whatever way the line runs") {
+    // R12's DIMTIH, and what AutoCAD draws for a file that does not say
+    // otherwise. Found by importing a dimensioned drawing from AutoCAD and
+    // getting half the labels turned and several of them upside down.
+    for (const double angle : {0.0, 1.0, 2.0, 3.0, 4.0, 5.0}) {
+        Dimension d;
+        d.set_kind(DimKind::Aligned);
+        d.set_points(Vec3{0, 0, 0}, Vec3{50 * std::cos(angle), 50 * std::sin(angle), 0});
+        d.set_definition(Vec3{60 * std::cos(angle), 60 * std::sin(angle), 0});
+        CHECK(std::abs(label_angle(d)) < 1e-12);
+    }
+}
+
+TEST_CASE("dimension: aligned text stays readable rather than going upside down") {
+    // With DIMTIH off the label follows the dimension line -- but never past a
+    // quarter turn either way, because text that reads right-to-left is wrong
+    // in every drafting standard there is.
+    for (int i = 0; i < 16; ++i) {
+        const double angle = i * kFullTurn / 16.0;
+        Dimension d;
+        d.set_kind(DimKind::Aligned);
+        d.set_text_horizontal(false);
+        d.set_points(Vec3{0, 0, 0}, Vec3{50 * std::cos(angle), 50 * std::sin(angle), 0});
+        d.set_definition(Vec3{60 * std::cos(angle), 60 * std::sin(angle), 0});
+
+        const double r = label_angle(d);
+        CHECK(r > -kFullTurn * 0.25 - 1e-9);
+        CHECK(r <= kFullTurn * 0.25 + 1e-9);
+    }
+}
+
+TEST_CASE("dimension: DIMTIH rides in the header, so an import keeps its own look") {
+    Database db;
+    db.sysvars().set_int(Sysvar::DimTih, 0);  // this drawing wants aligned text
+
+    Database back;
+    REQUIRE(read_dxf_text(back, write_dxf_text(db, DxfVersion::R12)).ok);
+    CHECK(back.sysvars().get_int(Sysvar::DimTih) == 0);
+}

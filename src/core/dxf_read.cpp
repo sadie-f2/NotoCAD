@@ -532,6 +532,7 @@ EntityPtr Reader::build(const EntityGroups& g, GroupStream& in, int& pending_cod
         const double s = sv.get_real(Sysvar::DimScale);
         e->apply_style(sv.get_real(Sysvar::DimTxt) * s, sv.get_real(Sysvar::DimAsz) * s,
                        sv.get_real(Sysvar::DimExo) * s, sv.get_real(Sysvar::DimExe) * s);
+        e->set_text_horizontal(sv.get_int(Sysvar::DimTih) != 0);
 
         // THE BLOCK IS IGNORED, deliberately. A dimension generates its own
         // geometry here, so the `*D<n>` block the file carries is redundant and

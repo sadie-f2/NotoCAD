@@ -295,6 +295,10 @@ void DxfWriter::write_header() {
     code(40, db_.sysvars().get_real(Sysvar::DimExe));
     code(9, "$DIMTAD");
     code(70, db_.sysvars().get_int(Sysvar::DimTad));
+    code(9, "$DIMTIH");
+    code(70, db_.sysvars().get_int(Sysvar::DimTih));
+    code(9, "$DIMTOH");
+    code(70, db_.sysvars().get_int(Sysvar::DimToh));
 
     // The current UCS, exactly as DXF carries it: three points in world terms
     // plus a name and a flag. This is the header half of the split -- named
