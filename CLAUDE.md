@@ -210,6 +210,14 @@ is embedded in the binary so there is no runtime data path. An SHX parser, which
 would let a drawing use the user's own AutoCAD fonts, sits behind the same interface
 later — the same layering as DXF-first with DWG optional.
 
+R12's `%%` control codes resolve in the font layer, at **layout** time and never at
+read time: the entity keeps the raw string, so DXF still carries the escape AutoCAD
+expects. `decode_text` is shared by `StrokeFont::width` and `draw_text_line` — two
+copies is how the measured width and the drawn width come to disagree, which is
+justification that is wrong for exactly the strings that contain a code. The degree,
+diameter and plus-minus glyphs are drawn rather than vendored, the same argument the
+toolbar icons make.
+
 **MTEXT is held exactly and degrades to a run of TEXT records.** AC1009 has TEXT
 only — one line per entity, no wrapping, no inline formatting — so a modern
 drawing's annotation, which is nearly all MTEXT, used to arrive as Proxy and draw

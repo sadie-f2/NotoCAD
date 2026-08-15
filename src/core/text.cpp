@@ -150,13 +150,54 @@ void draw_text_line(const std::string& text, const Vec3& origin, const Vec3& alo
     // the baseline does not move, so obliqued text still sits on its line.
     const double shear = std::tan(oblique);
 
+    // One place that turns font units into world space, used by the glyphs and
+    // by the %%u / %%o rules alike -- so a rule under obliqued text leans with
+    // it instead of sitting square beneath a slanted word.
+    const auto place = [&](double x, double y) {
+        return origin + along * ((x + y * shear) * width_factor * height) + up * (y * height);
+    };
+
+    // `%%d` and friends resolve here, through the same decoder `width()` uses.
+    std::vector<TextCell> cells;
+    decode_text(text, cells);
+
+    // A rule is one polyline per RUN, not one per character: `%%u` underlines a
+    // phrase, and drawing it per glyph would put a visible seam at every side
+    // bearing and give hit-testing a row of stubs to reason about.
+    double under_start = 0.0;
+    double over_start = 0.0;
+    bool under_open = false;
+    bool over_open = false;
+
+    std::vector<Vec3> pts;
+    double pen = 0.0;
+
+    const auto rule = [&](double x0, double x1, double y) {
+        if (x1 <= x0) return;
+        const Vec3 seg[2] = {place(x0, y), place(x1, y)};
+        r.polyline(seg, 2, false);
+    };
+
     // Glyph coordinates arrive with the baseline at y = 0 and the cap height at
     // y = 1, so `height` scales them directly and text height means cap height,
     // exactly as R12 says.
-    std::vector<Vec3> pts;
-    double pen = 0.0;
-    for (const char ch : text) {
-        const Glyph g = font.glyph(static_cast<unsigned char>(ch));
+    for (const TextCell& cell : cells) {
+        if (cell.underscore && !under_open) {
+            under_start = pen;
+            under_open = true;
+        } else if (!cell.underscore && under_open) {
+            rule(under_start, pen, kUnderscoreY);
+            under_open = false;
+        }
+        if (cell.overscore && !over_open) {
+            over_start = pen;
+            over_open = true;
+        } else if (!cell.overscore && over_open) {
+            rule(over_start, pen, kOverscoreY);
+            over_open = false;
+        }
+
+        const Glyph g = font.glyph(cell.code);
 
         for (std::uint32_t s = 0; s < g.stroke_count; ++s) {
             const std::uint32_t first = g.stroke_begin[s];
@@ -166,8 +207,7 @@ void draw_text_line(const std::string& text, const Vec3& origin, const Vec3& alo
             pts.reserve(last - first);
             for (std::uint32_t k = first; k < last; ++k) {
                 const Vec3& p = g.points[k];
-                const double x = (pen + p.x + p.y * shear) * width_factor * height;
-                pts.push_back(origin + along * x + up * (p.y * height));
+                pts.push_back(place(pen + p.x, p.y));
             }
 
             // A one-point stroke is a dot in the source data and nothing on
@@ -178,6 +218,12 @@ void draw_text_line(const std::string& text, const Vec3& origin, const Vec3& alo
 
         pen += g.advance;
     }
+
+    // A run left open by the end of the string is closed here rather than
+    // dropped: `%%u` with no closing `%%u` underlines to the end of the line,
+    // which is what R12 does and what the author plainly meant.
+    if (under_open) rule(under_start, pen, kUnderscoreY);
+    if (over_open) rule(over_start, pen, kOverscoreY);
 }
 
 void Text::draw(const DrawContext&, Renderer& r) const {

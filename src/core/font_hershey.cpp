@@ -20,6 +20,7 @@
 
 #include "ncad/font.hpp"
 
+#include <cmath>
 #include <cstddef>
 
 namespace ncad {
@@ -209,14 +210,90 @@ StrokeFont::StrokeFont(const char* jhf) {
     }
 
     descender_ = deepest;
+
+    // After the descender is measured, deliberately: the symbols are drawn to
+    // sit on or above the baseline, and letting them into that measurement
+    // would move every Bottom-justified string in every drawing.
+    build_symbols();
 }
 
-Glyph StrokeFont::glyph(unsigned char c) const {
+void StrokeFont::build_symbols() {
+    // Strokes are appended to the same pools the parse filled, so a symbol's
+    // Glyph is an ordinary one -- same point array, same offsets, same rules.
+    auto begin_stroke = [this](Entry& e) {
+        stroke_begin_.push_back(static_cast<std::uint32_t>(points_.size()));
+        ++e.stroke_count;
+    };
+    auto put = [this](double x, double y) { points_.push_back(Vec3{x, y, 0.0}); };
+
+    // A circle as a closed run of segments. Sixteen is enough that a degree
+    // sign at annotation size shows no facets, and these are drawn once.
+    auto circle = [&](Entry& e, double cx, double cy, double r) {
+        constexpr int kSegments = 16;
+        begin_stroke(e);
+        for (int i = 0; i <= kSegments; ++i) {
+            const double t = 2.0 * 3.14159265358979323846 * static_cast<double>(i) /
+                             static_cast<double>(kSegments);
+            put(cx + r * std::cos(t), cy + r * std::sin(t));
+        }
+    };
+    auto segment = [&](Entry& e, double x0, double y0, double x1, double y1) {
+        begin_stroke(e);
+        put(x0, y0);
+        put(x1, y1);
+    };
+
+    // Each entry records where its strokes start before any are added, and the
+    // pool is closed after, exactly as the parse loop does.
+    auto open = [this](Entry& e) {
+        e = Entry{};
+        e.first_stroke = static_cast<std::uint32_t>(stroke_begin_.size());
+    };
+    auto close = [this]() {
+        stroke_begin_.push_back(static_cast<std::uint32_t>(points_.size()));
+    };
+
+    // Degree: a small ring riding at cap height, narrow because it follows a
+    // number and must not read as a zero.
+    Entry& deg = symbols_[kSymbolDegree - kSymbolDegree];
+    open(deg);
+    deg.advance = 0.50;
+    circle(deg, 0.25, 0.80, 0.15);
+    close();
+
+    // Diameter: a ring the size of a digit with a slash running clear of it on
+    // both sides, which is what distinguishes it from a zero at a glance.
+    Entry& dia = symbols_[kSymbolDiameter - kSymbolDegree];
+    open(dia);
+    dia.advance = 0.95;
+    circle(dia, 0.48, 0.50, 0.36);
+    segment(dia, 0.08, 0.10, 0.88, 0.90);
+    close();
+
+    // Plus-minus: the plus sits high and the bar below it, so the pair reads as
+    // one symbol rather than as a plus followed by a hyphen.
+    Entry& pm = symbols_[kSymbolPlusMinus - kSymbolDegree];
+    open(pm);
+    pm.advance = 1.00;
+    segment(pm, 0.50, 0.34, 0.50, 0.86);
+    segment(pm, 0.24, 0.60, 0.76, 0.60);
+    segment(pm, 0.24, 0.10, 0.76, 0.10);
+    close();
+}
+
+Glyph StrokeFont::glyph(std::uint16_t code) const {
     Glyph g;
     if (glyphs_.empty()) return g;
 
-    const std::size_t idx = static_cast<std::size_t>(c) - kFontFirstChar;
-    if (c < kFontFirstChar || idx >= glyphs_.size()) {
+    const Entry* e = nullptr;
+    if (code >= kSymbolDegree && code <= kSymbolPlusMinus) {
+        e = &symbols_[code - kSymbolDegree];
+    } else if (code >= kFontFirstChar) {
+        const std::size_t idx = static_cast<std::size_t>(code) - kFontFirstChar;
+        if (idx < glyphs_.size()) e = &glyphs_[idx];
+    }
+
+    if (e == nullptr) {
         // Unmappable: no ink, but keep the space's advance so that the rest of
         // the line does not shift left. A gap is an honest way to say "this
         // byte is not in the font"; dropping it silently is not.
@@ -224,18 +301,95 @@ Glyph StrokeFont::glyph(unsigned char c) const {
         return g;
     }
 
-    const Entry& e = glyphs_[idx];
     g.points = points_.data();
-    g.stroke_begin = stroke_begin_.data() + e.first_stroke;
-    g.stroke_count = e.stroke_count;
-    g.advance = e.advance;
+    g.stroke_begin = stroke_begin_.data() + e->first_stroke;
+    g.stroke_count = e->stroke_count;
+    g.advance = e->advance;
     return g;
 }
 
 double StrokeFont::width(const std::string& text) const {
+    std::vector<TextCell> cells;
+    decode_text(text, cells);
+
     double w = 0.0;
-    for (const char ch : text) w += glyph(static_cast<unsigned char>(ch)).advance;
+    for (const TextCell& c : cells) w += glyph(c.code).advance;
     return w;
+}
+
+void decode_text(const std::string& text, std::vector<TextCell>& out) {
+    out.clear();
+    out.reserve(text.size());
+
+    bool over = false;
+    bool under = false;
+
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        // A code is `%%` and one more character, so a trailing `%%` at the very
+        // end of the string is just two per-cent signs.
+        if (text[i] == '%' && i + 2 < text.size() && text[i + 1] == '%') {
+            const char raw = text[i + 2];
+            const char c = (raw >= 'A' && raw <= 'Z') ? static_cast<char>(raw - 'A' + 'a') : raw;
+
+            std::uint16_t code = 0;
+            bool emit = true;
+            bool consumed = true;
+
+            switch (c) {
+                case 'd': code = kSymbolDegree; break;
+                case 'c': code = kSymbolDiameter; break;
+                case 'p': code = kSymbolPlusMinus; break;
+                case '%': code = '%'; break;
+
+                // Toggles change the state of what FOLLOWS and draw nothing of
+                // their own, which is why they produce no cell.
+                case 'o':
+                    over = !over;
+                    emit = false;
+                    break;
+                case 'u':
+                    under = !under;
+                    emit = false;
+                    break;
+
+                default:
+                    if (c >= '0' && c <= '9') {
+                        // Up to three digits, greedily. R12 documents exactly
+                        // three; taking fewer as well means `%%9` is a
+                        // character rather than silently swallowing the text
+                        // after it looking for digits that never come.
+                        unsigned value = 0;
+                        std::size_t j = i + 2;
+                        std::size_t digits = 0;
+                        while (digits < 3 && j < text.size() && text[j] >= '0' && text[j] <= '9') {
+                            value = value * 10 + static_cast<unsigned>(text[j] - '0');
+                            ++j;
+                            ++digits;
+                        }
+                        // `%%nnn` names a byte, so anything past 255 names
+                        // nothing. Code 0 is below the table and draws the same
+                        // honest gap any unmappable byte does.
+                        code = value <= 255 ? static_cast<std::uint16_t>(value) : 0;
+                        out.push_back(TextCell{code, over, under});
+                        i = j - 1;
+                        continue;
+                    }
+                    // Not a code we know. Leave it literal rather than guess at
+                    // how much of the string it was supposed to eat.
+                    consumed = false;
+                    break;
+            }
+
+            if (consumed) {
+                if (emit) out.push_back(TextCell{code, over, under});
+                i += 2;
+                continue;
+            }
+        }
+
+        out.push_back(TextCell{static_cast<std::uint16_t>(static_cast<unsigned char>(text[i])),
+                               over, under});
+    }
 }
 
 const StrokeFont& StrokeFont::romans() {

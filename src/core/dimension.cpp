@@ -141,6 +141,10 @@ double Dimension::measurement() const {
         return angular_span(from, sweep) ? sweep : 0.0;
     }
     switch (kind_) {
+        // Answered above, and named here only so that adding a kind produces a
+        // warning rather than a silent zero. DimKind is the enum the traps note
+        // in HANDOFF is about: its values are DXF's and are not contiguous.
+        case DimKind::Angular: break;
         case DimKind::Radius: return length(first_ - definition_);
         case DimKind::Diameter: return 2.0 * length(first_ - definition_);
         case DimKind::Aligned: return length(second_ - first_);
@@ -161,9 +165,9 @@ std::string Dimension::label() const {
 
     switch (kind_) {
         case DimKind::Radius: return "R" + fmt_measure(measurement());
-        // R12's escape for the diameter sign, which AutoCAD renders as a
-        // circle-and-slash. Our stroke font has no such glyph and shows the
-        // escape literally -- see SF_todo on control codes.
+        // R12's escape for the diameter sign. The label KEEPS the escape --
+        // that is what goes to DXF and what AutoCAD expects -- and the font
+        // layer resolves it when the string is laid out. See `decode_text`.
         case DimKind::Diameter: return "%%C" + fmt_measure(measurement());
         // Degrees, and R12's escape for the sign -- the same bargain %%C takes.
         case DimKind::Angular:

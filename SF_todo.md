@@ -55,11 +55,41 @@ them, because the reason a thing is wanted is the most perishable part of wantin
       AutoCAD's comes in from outside the curve, which is a different shape rather than
       a wrong number.
 
-      Baseline and continue are next, and cheap. Known cosmetic gap:
-      a diameter label is written `%%C50.0000`, which is correct R12 -- AutoCAD renders
-      the diameter sign -- while our stroke font shows the escape literally, since the
-      Hershey set is ASCII and has no such glyph. R12's control codes (%%C, %%D, %%P)
-      would fix it in the font layer for TEXT generally, not just for dimensions.
+      Baseline and continue are next, and cheap.
+
+- [x] **R12's `%%` control codes, in the font layer.** Every angular dimension read
+      `90.0000%%D` on screen and every diameter `%%C50.0000` -- correct R12 in the file,
+      since AutoCAD renders those escapes, but the Hershey set is ASCII and has no such
+      glyph. Fixed for TEXT generally rather than for dimensions: `%%d`, `%%c`, `%%p`,
+      `%%%`, `%%nnn`, and the `%%o`/`%%u` overscore and underscore toggles.
+
+      **Decoding happens at LAYOUT time, never at read time** -- the same rule MTEXT
+      already follows for its inline codes, and for the same reason. The entity keeps the
+      raw string, so what goes back out to DXF is still the escape AutoCAD expects rather
+      than a character R12 has no way to name, and opening a drawing and saving it cannot
+      quietly rewrite what the author typed.
+
+      `decode_text` is shared by `StrokeFont::width` and `draw_text_line`, which is the
+      load-bearing part. Two copies is how the measured width and the drawn width come to
+      disagree, and that shows up as justification that is subtly wrong for exactly the
+      strings containing a code -- that is, for every dimension label. It was already
+      wrong that way: `text_width()` counted ten characters where eight were drawn, so a
+      centred angular dimension sat off-centre by an escape.
+
+      The three symbols are DRAWN, not vendored -- the same argument `command_icons.cpp`
+      makes. Hershey does have them, but only in faces we do not carry, and a whole `.jhf`
+      for three shapes brings its own attribution and its own parse for nothing. They are
+      appended to the same point pool the parse fills, so a symbol's `Glyph` is
+      indistinguishable from a parsed one and the render path needs no branch. Built after
+      the descender is measured, deliberately: letting them into that measurement would
+      move every Bottom-justified string in every drawing.
+
+      An unrecognised `%%x` is left literal. Unlike MTEXT's codes these carry no
+      terminator, so there is no way to tell how much of what follows was meant as an
+      argument, and guessing wrong deletes the user's text. A rule is one polyline per
+      RUN rather than per glyph, so hit-testing sees an underline and not a row of stubs.
+      Positions (`kUnderscoreY`, `kOverscoreY`) are chosen to clear the letterforms and
+      are NOT from the R12 manual.
 
 Not design questions, just things caught in use that should not wait behind phase order.
 

@@ -49,6 +49,48 @@ struct Glyph {
     double advance{0.0};
 };
 
+// R12's text control codes name three symbols that have no byte in ASCII, so
+// they get glyph codes above the table instead. `%%d` is the reason this exists
+// at all -- every angular dimension's label ends in one.
+//
+// The glyphs are DRAWN rather than vendored. The Hershey set does contain them,
+// but only in faces we do not carry, and adding a whole `.jhf` for three shapes
+// would bring its own attribution and its own parse for no gain. This is the
+// same argument `command_icons.cpp` makes: a symbol that is a few strokes costs
+// less as strokes than as data.
+inline constexpr std::uint16_t kSymbolDegree = 256;
+inline constexpr std::uint16_t kSymbolDiameter = 257;
+inline constexpr std::uint16_t kSymbolPlusMinus = 258;
+
+// One character of a string after R12's control codes have been resolved: the
+// glyph that draws it, and whether the overscore and underscore runs are open
+// across it. `%%o` and `%%u` produce no cell of their own -- they are toggles,
+// so what they change is the state of the cells that follow.
+struct TextCell {
+    std::uint16_t code{0};
+    bool overscore{false};
+    bool underscore{false};
+};
+
+// Expands `%%d`, `%%c`, `%%p`, `%%%`, `%%nnn`, `%%o` and `%%u`.
+//
+// **Decoding happens at LAYOUT time and never at read time.** The entity keeps
+// the raw string, exactly as MTEXT keeps its inline codes, so opening a drawing
+// and saving it cannot quietly rewrite what the author typed -- and so what we
+// write to DXF stays the control code AutoCAD expects rather than a character
+// R12 has no way to name.
+//
+// Shared by `StrokeFont::width` and `draw_text_line` rather than written twice.
+// Two copies is how the measured width and the drawn width come to disagree,
+// which shows up as justification that is subtly wrong for exactly the strings
+// that contain a code -- that is, for every dimension label.
+//
+// An unrecognised `%%x` is left LITERAL. Unlike MTEXT's codes these carry no
+// terminator, so there is no way to tell how much of what follows was meant as
+// an argument; consuming it would be guessing, and guessing wrong deletes the
+// user's text.
+void decode_text(const std::string& text, std::vector<TextCell>& out);
+
 class StrokeFont {
 public:
     // Hershey Roman Simplex, the ancestor of R12's `romans`. Parsed once on
@@ -57,14 +99,17 @@ public:
     // tests need no fixtures.
     static const StrokeFont& romans();
 
-    // ASCII 32..126. Anything outside the table draws nothing but still
-    // advances, so an unmappable byte leaves a gap rather than shifting the rest
-    // of the line -- the same choice DXF read makes with Proxy, for the same
-    // reason: do not silently destroy what we do not understand.
-    Glyph glyph(unsigned char c) const;
+    // ASCII 32..126, plus the three `kSymbol*` codes above it. Anything else
+    // draws nothing but still advances, so an unmappable code leaves a gap
+    // rather than shifting the rest of the line -- the same choice DXF read
+    // makes with Proxy, for the same reason: do not silently destroy what we do
+    // not understand.
+    Glyph glyph(std::uint16_t code) const;
 
-    // Summed advances. EXACT, not a nominal -- which is why justification, the
-    // bounding box and TEXT's Aligned and Fit modes can all rely on it.
+    // Summed advances, over the string's DECODED cells -- so `%%d` measures one
+    // degree sign wide and not three characters. EXACT, not a nominal, which is
+    // why justification, the bounding box and TEXT's Aligned and Fit modes can
+    // all rely on it.
     double width(const std::string& text) const;
 
     // How far below the baseline the deepest descender reaches, as a positive
@@ -87,20 +132,33 @@ private:
         double advance{0.0};
     };
 
+    // The three `%%` symbols, appended to the same point pool the parse fills so
+    // that a `Glyph` handed out for one is indistinguishable from a parsed one
+    // and the render path needs no branch.
+    void build_symbols();
+
     std::vector<Vec3> points_;
     std::vector<std::uint32_t> stroke_begin_;
     std::vector<Entry> glyphs_;
+    Entry symbols_[3];
     double descender_{0.0};
 };
 
 class Renderer;
+
+// Where `%%u` and `%%o` put their rules, in cap heights off the baseline. Both
+// are chosen to clear the letterforms rather than taken from the R12 manual --
+// the underscore does cross a descender, which is what SHX text does too.
+inline constexpr double kUnderscoreY = -0.25;
+inline constexpr double kOverscoreY = 1.18;
 
 // Emits one line of text as world-space polylines through `r`.
 //
 // Shared by TEXT and MTEXT rather than written twice, because two copies of the
 // glyph placement is how the two would come to disagree about what oblique or a
 // width factor means -- and MTEXT's whole degrade rests on its layout matching
-// what a run of TEXT entities would draw.
+// what a run of TEXT entities would draw. `%%` control codes are resolved here
+// for the same reason, through the one decoder `width()` also uses.
 //
 // `origin` is the baseline start, `along` and `up` the line's own axes.
 void draw_text_line(const std::string& text, const Vec3& origin, const Vec3& along, const Vec3& up,
