@@ -494,6 +494,30 @@ Value build_entity_alist(Context& ctx, const Database& db, const Entity& ent) {
             if (!dim.radial()) items.push_back(pair_real(ctx, 50, dim.rotation()));
             break;
         }
+        case EntityType::Leader: {
+            // The site the impact list exists for, answered rather than missed
+            // -- see the note on Dimension above. R13's group codes, which is
+            // what the entity is shaped on: 10 repeated for the path, 40 the
+            // text height, 71 whether there is an arrowhead.
+            const Leader& lead = static_cast<const Leader&>(ent);
+            for (const Vec3& v : lead.vertices()) {
+                items.push_back(pair_point(ctx, 10, v));
+            }
+            items.push_back(pair_real(ctx, 40, lead.text_height()));
+            items.push_back(pair_int(ctx, 71, 1));
+            // Group 340 is a hard pointer to the annotation in R13, and there
+            // is no handle to give: the note is OWNED here, deliberately, so
+            // what LISP is handed is the note's TEXT rather than an ename it
+            // could not then look up. See entities.hpp.
+            if (const Entity* a = lead.annotation()) {
+                if (a->type() == EntityType::Text) {
+                    items.push_back(pair_str(ctx, 1, static_cast<const Text*>(a)->value()));
+                } else if (a->type() == EntityType::MText) {
+                    items.push_back(pair_str(ctx, 1, static_cast<const MText*>(a)->text()));
+                }
+            }
+            break;
+        }
         default:
             break;
     }

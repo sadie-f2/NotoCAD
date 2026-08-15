@@ -83,7 +83,7 @@ TEST_CASE("registry: the command count is what we think it is") {
     // the drawing, so prompt.cpp handles it beside EXIT and it owns no Command.
     // That is why `?` lists 73 names while the registry holds 72, which is
     // confusing enough to be worth saying once.
-    CHECK(command_names().size() == 72);
+    CHECK(command_names().size() == 73);
     if (command_names().size() != 72) {
         std::printf("       registry holds %zu commands\n", command_names().size());
     }

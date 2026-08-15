@@ -69,6 +69,11 @@ enum class EntityType : std::uint8_t {
     // A measurement the drawing carries. Non-associative, as R12's are, and it
     // generates its own line work rather than storing any -- see entities.hpp.
     Dimension,
+    // An arrow, a path and a note. R12 reached it through DIM's LEader
+    // subcommand and stored it in the dimension family; this is R13's shape
+    // instead, where the annotation is an entity the leader CARRIES rather than
+    // geometry baked into a block. See entities.hpp for why.
+    Leader,
     // Anything read from DXF that has no class here. Holds the groups it was
     // read from and writes them back unchanged, so opening and saving a drawing
     // cannot quietly destroy what this program does not understand.

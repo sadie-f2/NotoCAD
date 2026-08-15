@@ -57,6 +57,54 @@ them, because the reason a thing is wanted is the most perishable part of wantin
 
       Baseline and continue are next, and cheap.
 
+- [x] **LEADER, on R13's design.** 0.2.73. Sadie's call between the three options the
+      handoff laid out, and the decisive argument is that a leader MEASURES NOTHING:
+      a `DimKind::Leader` would make `measurement()` lie for one kind and grow a
+      do-nothing case in every switch over the enum, while plain geometry at creation
+      -- closest to R12 -- loses the ability to edit the note afterwards.
+
+      So the annotation is an ENTITY the leader carries, which is R13's split and what
+      makes an MText note possible without touching `Leader` at all. It is OWNED rather
+      than referenced by handle: R13 uses a hard pointer (group 340) to a separate
+      database entity, and nothing in this program holds a handle to another entity --
+      adding that would bring dangling references, clipboard remapping and erase
+      ordering with it. What ownership costs is that the note cannot be selected on its
+      own, which is smaller than a leader pointing at nothing.
+
+      R12's prompt sequence is kept exactly, including the part that explains why
+      leaders lived in DIM at all: the note DEFAULTS TO THE LAST DIMENSION'S
+      MEASUREMENT. That is session state, so it lives in `CommandMemory` beside
+      ROTATE3D's last axis and OFFSET's distance -- the same argument, that state
+      spanning commands belongs to whatever spans commands. The label rather than the
+      bare number, so a leader after a radius dimension offers `R25.0000`.
+
+      Two front doors over one command object, exactly as the other five dimensions
+      have: `DIM`'s `LEader` builds a `LeaderCommand` and forwards to it. The
+      horizontal shoulder is appended by the entity rather than prompted for, since
+      R12 appends it too.
+
+      **DXF degrades to line work at BOTH versions**, and that is the honest choice
+      rather than the lazy one. R13 and R2000 do have a LEADER record, but writing one
+      means a hard pointer to an annotation record that has to exist and be read back
+      as one -- and our reader does not know LEADER, so writing it would open a round
+      trip we cannot close. A file we can only half read is a worse failure than
+      degrading. Stated consequence: a leader saved and reopened comes back as loose
+      lines and a piece of text, the same bargain ELLIPSE, SPLINE and MTEXT take.
+
+      `src/core/annotation.hpp` is where the arrowhead now lives, shared by DIMENSION
+      and LEADER. The handoff named "a second thing that generates arrowheads" as the
+      cost of this option; that is the cost paid once rather than twice.
+
+      Still to do, in order of value: the real R2000 LEADER record **with a reader for
+      it**, which is one piece of work and not two; an MText note, which the entity
+      already accepts and only needs a way to ask for; and R13's spline path type.
+
+- [ ] **A leader's note cannot be edited after it is drawn.** Not specific to leaders --
+      there is no DDEDIT or CHANGE for a `Text` either -- but it is more visible here,
+      because the whole argument for R13's shape was that the annotation is a real
+      entity rather than baked line work, and nothing yet takes advantage of that. The
+      capability the design bought is not spent until something can edit it.
+
 - [x] **R12's `%%` control codes, in the font layer.** Every angular dimension read
       `90.0000%%D` on screen and every diameter `%%C50.0000` -- correct R12 in the file,
       since AutoCAD renders those escapes, but the Hershey set is ASCII and has no such

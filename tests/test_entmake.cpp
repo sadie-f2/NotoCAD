@@ -9,6 +9,7 @@
 #include "ncad/lisp/eval.hpp"
 
 #include <cmath>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -224,6 +225,27 @@ TEST_CASE("entlast, entnext and entdel walk and edit the drawing") {
     CHECK(f.db.size() == 2);
     CHECK(f.eval("(entdel (entlast))") != "nil");
     CHECK(f.db.size() == 1);
+}
+
+TEST_CASE("entget: a LEADER reports its path and its note") {
+    // The converter's switch has a `default:`, so a new entity type compiles
+    // and silently returns nothing from LISP -- the site that was missed for
+    // ELLIPSE. This is the check that it was not missed again.
+    Fixture f;
+    auto l = std::make_unique<Leader>();
+    l->apply_style(4.0, 3.0);
+    l->set_vertices({{0, 0, 0}, {20, 20, 0}});
+    auto note = std::make_unique<Text>(l->annotation_origin(), "NOTE", l->text_height());
+    l->set_annotation(std::move(note));
+    f.db.add(std::move(l));
+
+    CHECK(f.eval("(cdr (assoc 0 (entget (entlast))))") == "\"LEADER\"");
+    // The path, in order, with the arrow tip first.
+    CHECK(f.eval("(cdr (assoc 10 (entget (entlast))))") == "(0.0 0.0 0.0)");
+    CHECK(f.eval("(cdr (assoc 40 (entget (entlast))))") == "4.0");
+    // Group 340 is R13's hard pointer to the annotation, and there is no handle
+    // to give because the note is owned. What LISP gets is the note's text.
+    CHECK(f.eval("(cdr (assoc 1 (entget (entlast))))") == "\"NOTE\"");
 }
 
 TEST_CASE("entget on a deleted entity is nil rather than an error") {

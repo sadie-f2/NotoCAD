@@ -276,6 +276,15 @@ struct CommandMemory {
     double fillet_radius{0.0};
     double chamfer_a{0.0};
     double chamfer_b{0.0};
+
+    // What the last dimension measured, offered back as LEADER's default note.
+    //
+    // This is why R12 kept LEader inside DIM rather than giving it a command:
+    // you dimension something, then draw a leader, and it offers that number.
+    // The leader measures nothing itself -- the number belongs to the session,
+    // which is what makes this the right place for it.
+    std::string last_measurement;
+    bool has_last_measurement{false};
 };
 
 // What a command is allowed to touch. Still deliberately narrow: no view, no

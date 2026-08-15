@@ -1070,6 +1070,37 @@ private:
     Vec3 normal_{0.0, 0.0, 1.0};
 };
 
+// LEADER: an arrow, a path of segments, and a note at the far end.
+//
+// R12's prompt sequence, which is the part that must be what it was: `Leader
+// start` for the ARROW TIP, then `To point` until Enter, then `Dimension text`
+// -- offering the last dimension's measurement as its default, since that is
+// what makes a leader belong to DIM at all. `CommandMemory::last_measurement`
+// is where that number lives.
+//
+// The entity is R13's, though. See entities.hpp: the note is an annotation the
+// leader carries rather than line work baked into a block, and this command
+// builds a Text for it. `Leader` accepts any entity as its annotation, so an
+// MText note needs no change here beyond deciding how to ask for one.
+//
+// R12 appends the horizontal shoulder itself, so there is no prompt for it and
+// none here either -- `Leader::has_hook` decides.
+class LeaderCommand final : public Command {
+public:
+    const char* name() const override { return "LEADER"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Start, ToPoint, Text };
+
+    Step ask_to_point() const;
+    Step place(CommandContext& ctx, const std::string& note);
+
+    State state_{State::Start};
+    std::vector<Vec3> points_;
+};
+
 // DIMANGULAR: the angle between two lines, or across an arc, or three points.
 //
 // The arc location does more than place the annotation: two arms cut the plane

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
+#include "annotation.hpp"
+
 #include "ncad/dxf.hpp"
 #include "ncad/ecs.hpp"
 #include "ncad/entities.hpp"
@@ -15,10 +17,6 @@
 
 namespace ncad {
 namespace {
-
-// How far the arrow barbs open, in radians. The same spread MEASUREGEOM's ghost
-// uses, so the preview and the committed dimension look like each other.
-constexpr double kBarbSpread = 0.30;
 
 // Gap either side of the text where the dimension line is broken, as a fraction
 // of the text height.
@@ -39,35 +37,6 @@ std::string fmt_measure(double v) {
     return buf;
 }
 
-// A filled arrowhead, as a triangular SOLID.
-//
-// SOLID rather than three lines because that is what R12 puts in a dimension
-// block, and it is what makes AutoCAD draw a filled head. Our own viewport
-// draws it as an open triangle, since the renderer has no fill primitive and a
-// SOLID has always drawn as its outline here -- a known and consistent
-// difference rather than one this entity invents.
-EntityPtr arrowhead(const Vec3& tip, const Vec3& back, const Vec3& normal, double size,
-                    const EntityProps& props) {
-    auto head = std::make_unique<Face>(EntityType::Solid);
-
-    // Opened either side of `back` in the dimension's own plane. Built from the
-    // plane's axes rather than by rotating, which needs no rotation helper --
-    // the only one in the tree is private to commands.cpp.
-    const Vec3 u = normalize(back);
-    const Vec3 side_raw = cross(normal, u);
-    const Vec3 side = is_zero(side_raw) ? Vec3{} : normalize(side_raw);
-    const Vec3 b1 = tip + (u * std::cos(kBarbSpread) + side * std::sin(kBarbSpread)) * size;
-    const Vec3 b2 = tip + (u * std::cos(kBarbSpread) - side * std::sin(kBarbSpread)) * size;
-
-    // Corner 3 repeats corner 2, which is how the format spells a triangle.
-    head->set_corner(0, tip);
-    head->set_corner(1, b1);
-    head->set_corner(2, b2);
-    head->set_corner(3, b2);
-    head->props() = props;
-    return head;
-}
-
 // How far the label is turned, in the entity's plane.
 //
 // Horizontal is R12's default (DIMTIH) and is what AutoCAD draws for a file
@@ -85,13 +54,35 @@ double label_rotation(bool horizontal, double along_angle) {
     return a;
 }
 
-EntityPtr segment(const Vec3& a, const Vec3& b, const EntityProps& props) {
+}  // namespace
+
+EntityPtr make_arrowhead(const Vec3& tip, const Vec3& back, const Vec3& normal, double size,
+                         const EntityProps& props) {
+    auto head = std::make_unique<Face>(EntityType::Solid);
+
+    // Opened either side of `back` in the annotation's own plane. Built from
+    // the plane's axes rather than by rotating, which needs no rotation helper
+    // -- the only one in the tree is private to commands.cpp.
+    const Vec3 u = normalize(back);
+    const Vec3 side_raw = cross(normal, u);
+    const Vec3 side = is_zero(side_raw) ? Vec3{} : normalize(side_raw);
+    const Vec3 b1 = tip + (u * std::cos(kBarbSpread) + side * std::sin(kBarbSpread)) * size;
+    const Vec3 b2 = tip + (u * std::cos(kBarbSpread) - side * std::sin(kBarbSpread)) * size;
+
+    // Corner 3 repeats corner 2, which is how the format spells a triangle.
+    head->set_corner(0, tip);
+    head->set_corner(1, b1);
+    head->set_corner(2, b2);
+    head->set_corner(3, b2);
+    head->props() = props;
+    return head;
+}
+
+EntityPtr make_segment(const Vec3& a, const Vec3& b, const EntityProps& props) {
     auto line = std::make_unique<Line>(a, b);
     line->props() = props;
     return line;
 }
-
-}  // namespace
 
 void Dimension::apply_style(double text_height, double arrow_size, double ext_offset,
                             double ext_beyond) {
@@ -211,13 +202,13 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
             const double reach = length(arm - vertex_);
             if (reach + kEps >= r) continue;
             const Vec3 dir = normalize(arm - vertex_);
-            out.push_back(segment(vertex_ + dir * (reach + ext_offset_),
+            out.push_back(make_segment(vertex_ + dir * (reach + ext_offset_),
                                   vertex_ + dir * (r + ext_beyond_), props_));
         }
 
         // Tips on the arc, barbs trailing back along it.
-        out.push_back(arrowhead(at(from), tangent(from), n, arrow_size_, props_));
-        out.push_back(arrowhead(at(from + sweep), tangent(from + sweep) * -1.0, n, arrow_size_,
+        out.push_back(make_arrowhead(at(from), tangent(from), n, arrow_size_, props_));
+        out.push_back(make_arrowhead(at(from + sweep), tangent(from + sweep) * -1.0, n, arrow_size_,
                                 props_));
 
         // The label sits just outside the arc at its midpoint, reading along
@@ -246,10 +237,10 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
         // A radius runs centre-to-rim; a diameter runs rim-to-rim through the
         // centre. Both get an arrow where they touch the curve, pointing out.
         const Vec3 tail = kind_ == DimKind::Diameter ? definition_ - dir * r : definition_;
-        out.push_back(segment(tail, first_, props_));
-        out.push_back(arrowhead(first_, dir * -1.0, n, arrow_size_, props_));
+        out.push_back(make_segment(tail, first_, props_));
+        out.push_back(make_arrowhead(first_, dir * -1.0, n, arrow_size_, props_));
         if (kind_ == DimKind::Diameter) {
-            out.push_back(arrowhead(tail, dir, n, arrow_size_, props_));
+            out.push_back(make_arrowhead(tail, dir, n, arrow_size_, props_));
         }
 
         // Text alongside the leader rather than on it, so the line does not
@@ -302,13 +293,13 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
     // dimension placed on either side looks the same.
     const double sign1 = off1 >= 0.0 ? 1.0 : -1.0;
     const double sign2 = off2 >= 0.0 ? 1.0 : -1.0;
-    out.push_back(segment(first_ + perp * (sign1 * ext_offset_), p1 + perp * (sign1 * ext_beyond_),
+    out.push_back(make_segment(first_ + perp * (sign1 * ext_offset_), p1 + perp * (sign1 * ext_beyond_),
                           props_));
-    out.push_back(segment(second_ + perp * (sign2 * ext_offset_),
+    out.push_back(make_segment(second_ + perp * (sign2 * ext_offset_),
                           p2 + perp * (sign2 * ext_beyond_), props_));
 
-    out.push_back(arrowhead(p1, along, n, arrow_size_, props_));
-    out.push_back(arrowhead(p2, along * -1.0, n, arrow_size_, props_));
+    out.push_back(make_arrowhead(p1, along, n, arrow_size_, props_));
+    out.push_back(make_arrowhead(p2, along * -1.0, n, arrow_size_, props_));
 
     const Vec3 mid = (p1 + p2) * 0.5;
     const std::string caption = label();
@@ -323,10 +314,10 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
     const bool fits = span > half_gap * 2.0 + arrow_size_ * 2.0;
 
     if (fits) {
-        out.push_back(segment(p1, mid - along * half_gap, props_));
-        out.push_back(segment(mid + along * half_gap, p2, props_));
+        out.push_back(make_segment(p1, mid - along * half_gap, props_));
+        out.push_back(make_segment(mid + along * half_gap, p2, props_));
     } else {
-        out.push_back(segment(p1, p2, props_));
+        out.push_back(make_segment(p1, p2, props_));
     }
 
     const Vec3 anchor = fits ? mid : mid + perp * (text_height_ * (0.5 + kTextGap));

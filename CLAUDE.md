@@ -250,6 +250,32 @@ carriers, and an arc reduces to it by construction. Which of the two angles is
 meant is decided by the side the arc is placed on, so the same corner dimensions
 as 90 or as 270 and neither is a mistake.
 
+**LEADER is R13's design, and that is a deliberate divergence.** R12 had no LEADER
+command and no LEADER entity — it reached one through `DIM`'s `LEader` subcommand
+and stored the result in the dimension family. R13 gave leaders an entity of their
+own and made the annotation a separate object the leader points at, which is what
+lets a leader carry an MTEXT and lets the note be edited after it is drawn. Sadie's
+call, and the reason it is right here is that **a leader measures nothing**: folding
+it in as a `DimKind` would make `measurement()` lie for one kind and grow a
+do-nothing case in every switch over the enum.
+
+The annotation is **owned**, not referenced by handle. R13 binds it with a hard
+pointer to a separate database entity; nothing in this program holds a handle to
+another entity, and introducing that brings dangling references, clipboard
+remapping and erase ordering with it. Ownership buys the whole point of the split —
+the note is a real `Text` or `MText` — without the reference machinery.
+
+R12's prompt sequence is kept exactly, including the part that explains why leaders
+lived in DIM: the note defaults to the **last dimension's measurement**, which is
+session state and lives in `CommandMemory`. The horizontal shoulder is appended by
+the entity rather than prompted for, as R12 does it.
+
+DXF **degrades to line work at both versions**, and that is the honest choice rather
+than the lazy one: writing R13's real LEADER record means a hard pointer to an
+annotation record, and our reader does not know LEADER — so writing it would open a
+round trip we could not close. Producing a file we can only half read is worse than
+degrading. Same bargain ELLIPSE, SPLINE and MTEXT already take.
+
 ## Build
 
 ```sh

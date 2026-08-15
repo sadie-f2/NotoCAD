@@ -949,6 +949,98 @@ private:
     bool text_horizontal_{true};
 };
 
+// LEADER: an arrow, a path, and a note.
+//
+// **R13's design, not R12's, and that is a decision.** R12 had no LEADER
+// command and no LEADER entity -- it reached one through `DIM`'s `LEader`
+// subcommand, which is why its text defaults to the last measurement, and it
+// stored the result in the dimension family as a DIMENSION record plus an
+// anonymous block of line work. R13 gave leaders an entity of their own and
+// made the ANNOTATION a separate object the leader points at (group 340),
+// which is what lets a leader carry an MTEXT and lets the note be edited after
+// it is drawn.
+//
+// Sadie chose R13's, and `CLAUDE.md`'s "R12 is the starting point, not the
+// ceiling" is what licenses it. The reason it is the better shape here: a
+// leader MEASURES NOTHING. Everything in `Dimension` is built around
+// `measurement()` being the truth the entity holds and the label being derived
+// from it, and folding a leader in as a `DimKind` would make that method lie
+// for one kind and grow a do-nothing case in every switch over the enum.
+//
+// **The annotation is OWNED, not referenced by handle.** R13 binds it with a
+// hard pointer to a separate database entity; nothing in this program holds a
+// handle to another entity, and introducing that would bring dangling
+// references, clipboard remapping and erase ordering with it. Ownership buys
+// the whole point of R13's split -- the note is a real Text or MText, so a
+// leader can carry a wrapped paragraph and the annotation is not line work --
+// without the reference machinery. What it costs is that the note cannot be
+// selected on its own, which is a smaller loss than a leader pointing at
+// nothing.
+//
+// The line work is GENERATED, exactly as `Dimension`'s is: `draw()` and
+// `dxf_write()` call one `regenerate()`, so the screen and the file cannot
+// disagree. `regenerate()` emits only the leader's OWN geometry -- the arrow,
+// the segments and the hook -- because the annotation draws itself.
+//
+// The style is baked in when the leader is made, for the reason the dimension
+// section gives: `draw()` is handed no database and could not read DIMASZ back.
+class Leader final : public Entity {
+public:
+    Leader() : Entity(EntityType::Leader) {}
+
+    // The picked path. `[0]` is the ARROW TIP -- R12 asks for that end first,
+    // and every other point follows it. Fewer than two vertices draws nothing.
+    const std::vector<Vec3>& vertices() const { return vertices_; }
+    void set_vertices(std::vector<Vec3> v) { vertices_ = std::move(v); }
+
+    // The note. May be null -- a leader pointing at nothing is still a leader,
+    // and R12 lets you answer its text prompt with Enter.
+    const Entity* annotation() const { return annotation_.get(); }
+    void set_annotation(EntityPtr a) { annotation_ = std::move(a); }
+
+    // R12 appends a short horizontal shoulder at the far end and puts the text
+    // there; you do not draw it yourself. Suppressed when the last segment is
+    // already near enough horizontal, since a hook collinear with the segment
+    // it extends is not a shoulder, it is a longer segment.
+    bool has_hook() const;
+    Vec3 hook_start() const;
+    Vec3 hook_end() const;
+
+    // Where a note attached to this leader belongs, and which way it reads.
+    // Asked by whoever MAKES the note rather than answered by the leader
+    // drawing it, because in R13's shape the annotation is an entity with its
+    // own position -- but the geometry that decides where that position should
+    // be is the leader's, so it lives here and can be tested without a command.
+    Vec3 annotation_origin() const;
+    bool annotation_on_left() const;
+
+    void apply_style(double text_height, double arrow_size);
+    double text_height() const { return text_height_; }
+    double arrow_size() const { return arrow_size_; }
+
+    // The drawn form: one SOLID arrowhead and the LINEs of the path and hook.
+    // The annotation is NOT included -- it is an entity and draws itself.
+    // Callers own the result.
+    void regenerate(std::vector<EntityPtr>& out) const;
+
+    EntityPtr clone() const override;
+    void transform(const Mat4& m) override;
+    BBox bbox() const override;
+    void osnap_points(std::vector<OsnapPoint>& out) const override;
+    void grips(std::vector<Grip>& out) const override;
+    void stretch(const Vec3& delta, const GripIndex* indices, std::size_t count) override;
+    void dxf_write(DxfWriter& w) const override;
+    void draw(const DrawContext& ctx, Renderer& r) const override;
+
+private:
+    std::vector<Vec3> vertices_;
+    EntityPtr annotation_;
+
+    // Captured from DIMTXT and DIMASZ, already multiplied by DIMSCALE.
+    double text_height_{2.5};
+    double arrow_size_{2.5};
+};
+
 // One DXF group: a code and its value, kept as text.
 //
 // Text rather than parsed, because a proxy's whole job is to give back exactly

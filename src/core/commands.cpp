@@ -2819,6 +2819,16 @@ void apply_dim_style(CommandContext& ctx, Dimension& d) {
     d.set_text_horizontal(sv.get_int(Sysvar::DimTih) != 0);
 }
 
+// What LEADER will offer as its default note.
+//
+// The LABEL rather than the bare number, because that is what was just shown --
+// a leader drawn after a radius dimension offering `R25.0000` is what R12's
+// workflow means, and the prefix is part of the measurement's meaning.
+void remember_measurement(CommandContext& ctx, const Dimension& d) {
+    ctx.memory.last_measurement = d.label();
+    ctx.memory.has_last_measurement = true;
+}
+
 }  // namespace
 
 Step DimLinearCommand::start(CommandContext&) {
@@ -2876,6 +2886,7 @@ Step DimLinearCommand::place(CommandContext& ctx, const Vec3& at) {
     const double measured = dim->measurement();
     if (measured < kEps) return Step::failed("those points measure nothing in that direction");
 
+    remember_measurement(ctx, *dim);
     ctx.db.add(std::move(dim));
     return Step::done(fmt(measured));
 }
@@ -3024,6 +3035,7 @@ Step DimRadialCommand::next(CommandContext& ctx, const InputValue& value) {
     apply_dim_style(ctx, *dim);
 
     const std::string label = dim->label();
+    remember_measurement(ctx, *dim);
     ctx.db.add(std::move(dim));
     return Step::done(label);
 }
@@ -3061,6 +3073,7 @@ Step DimAngularCommand::finish(CommandContext& ctx, const Vec3& at) {
     if (dim->measurement() < kEps) return Step::failed("those arms enclose no angle");
 
     const std::string label = dim->label();
+    remember_measurement(ctx, *dim);
     ctx.db.add(std::move(dim));
     return Step::done(label);
 }
@@ -3169,6 +3182,96 @@ Step DimAngularCommand::next(CommandContext& ctx, const InputValue& value) {
 
 // --- DIM, the mode ------------------------------------------------------------
 
+// --- LEADER -------------------------------------------------------------------
+
+Step LeaderCommand::start(CommandContext&) {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    // R12's wording, and it asks for the ARROW end first because that is the
+    // end that means something -- the note is about whatever is under the tip.
+    p.message = "Leader start";
+    return Step::ask(p);
+}
+
+Step LeaderCommand::ask_to_point() const {
+    Prompt p;
+    p.kind = PromptKind::Point;
+    p.message = "To point";
+    p.base = points_.back();
+    p.has_base = true;
+    p.allow_empty = true;  // Enter ends the path, as R12 has it
+    return Step::ask(p);
+}
+
+Step LeaderCommand::place(CommandContext& ctx, const std::string& note) {
+    auto leader = std::make_unique<Leader>();
+    leader->props() = ctx.db.current_props();
+    leader->props().normal = ctx.db.construction_normal();
+    leader->set_vertices(points_);
+
+    const Sysvars& sv = ctx.db.sysvars();
+    const double s = sv.get_real(Sysvar::DimScale);
+    leader->apply_style(sv.get_real(Sysvar::DimTxt) * s, sv.get_real(Sysvar::DimAsz) * s);
+
+    if (!note.empty()) {
+        // R13's split: the note is an ENTITY the leader carries, not line work
+        // generated into a block. `Leader` accepts any entity here, so an MText
+        // note is a question of how to ask for one rather than of what to hold.
+        auto text = std::make_unique<Text>(leader->annotation_origin(), note,
+                                           leader->text_height());
+        text->props() = leader->props();
+        // Justified away from the landing, so the note reads outward from the
+        // leader whichever side the shoulder came in on.
+        text->set_align(leader->annotation_on_left() ? TextHAlign::Right : TextHAlign::Left,
+                        TextVAlign::Baseline);
+        text->set_align_point(leader->annotation_origin());
+        leader->set_annotation(std::move(text));
+    }
+
+    ctx.db.add(std::move(leader));
+    return Step::done(note.empty() ? std::string() : note);
+}
+
+Step LeaderCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (state_ == State::Start) {
+        if (value.kind != InputKind::Point) return Step::failed("a point is required");
+        points_.push_back(value.point);
+        state_ = State::ToPoint;
+        return ask_to_point();
+    }
+
+    if (state_ == State::ToPoint) {
+        if (value.kind == InputKind::Point) {
+            points_.push_back(value.point);
+            return ask_to_point();
+        }
+        if (value.kind != InputKind::None) return Step::failed("a point is required");
+
+        // A single point is an arrow pointing at nothing from nowhere. R12
+        // wants at least one segment before there is a leader to annotate.
+        if (points_.size() < 2) return Step::failed("a leader needs at least two points");
+
+        state_ = State::Text;
+        Prompt p;
+        p.kind = PromptKind::String;
+        p.allow_empty = true;
+        // The default is the last dimension's measurement -- the whole reason
+        // R12 kept LEader inside DIM. With nothing measured yet there is no
+        // default and Enter means no note, which is a leader that only points.
+        p.message = ctx.memory.has_last_measurement
+                        ? "Dimension text <" + ctx.memory.last_measurement + ">"
+                        : "Dimension text";
+        return Step::ask(p);
+    }
+
+    if (value.kind == InputKind::None) {
+        return place(ctx, ctx.memory.has_last_measurement ? ctx.memory.last_measurement
+                                                          : std::string());
+    }
+    if (value.kind != InputKind::String) return Step::failed("text is required");
+    return place(ctx, value.text);
+}
+
 Step DimCommand::start(CommandContext& ctx) { return ask_option(ctx); }
 
 Step DimCommand::ask_option(CommandContext&) {
@@ -3178,7 +3281,7 @@ Step DimCommand::ask_option(CommandContext&) {
     note_.clear();
     p.allow_empty = true;  // Enter leaves, as eXit does
     p.keywords = {"Horizontal", "Vertical", "Aligned", "Rotated", "ANgular",
-                  "Radius",     "Diameter",  "Undo",    "eXit"};
+                  "Radius",     "Diameter",  "LEader",  "Undo",    "eXit"};
     return Step::ask(p);
 }
 
@@ -3241,6 +3344,12 @@ Step DimCommand::next(CommandContext& ctx, const InputValue& value) {
     }
     if (keyword_is(value, "DIAMETER")) {
         return begin_sub(ctx, std::make_unique<DimRadialCommand>(true));
+    }
+    if (keyword_is(value, "LEADER")) {
+        // The same command object the LEADER name builds, forwarded exactly as
+        // every other subcommand is -- so the mode and the command cannot drift
+        // apart. R12 had only this door; the other one is ours.
+        return begin_sub(ctx, std::make_unique<LeaderCommand>());
     }
 
     return Step::failed("unknown option");
@@ -3828,6 +3937,23 @@ Step ExplodeCommand::next(CommandContext& ctx, const InputValue& value) {
             for (EntityPtr& part : parts) {
                 if (part) ctx.db.add(std::move(part));
             }
+            ctx.db.erase(h);
+            ++exploded;
+            continue;
+        }
+
+        // A leader explodes into its line work AND its note, which is the one
+        // place R13's split shows through: the annotation is already an entity,
+        // so exploding hands it over rather than regenerating it. One-way, as
+        // the dimension's is -- what comes back no longer points at anything.
+        if (e->type() == EntityType::Leader) {
+            const Leader& lead = static_cast<const Leader&>(*e);
+            std::vector<EntityPtr> parts;
+            lead.regenerate(parts);
+            for (EntityPtr& part : parts) {
+                if (part) ctx.db.add(std::move(part));
+            }
+            if (lead.annotation()) ctx.db.add(lead.annotation()->clone());
             ctx.db.erase(h);
             ++exploded;
             continue;
@@ -6488,6 +6614,25 @@ Step ListCommand::next(CommandContext& ctx, const InputValue& value) {
                 if (!d->text_override().empty()) out += "  (overridden)";
                 break;
             }
+            case EntityType::Leader: {
+                const Leader* l = static_cast<const Leader*>(e);
+                out += "\n  " + std::to_string(l->vertices().size()) + " points";
+                if (!l->vertices().empty()) {
+                    out += "\n  arrow at " + fmt_point(l->vertices().front());
+                }
+                // What the note IS, not just what it says: R13's whole point is
+                // that a leader carries an annotation entity, and LIST is where
+                // that stops being an implementation detail.
+                if (const Entity* a = l->annotation()) {
+                    out += std::string("\n  note is a ") + a->type_name();
+                    if (a->type() == EntityType::Text) {
+                        out += "\n  text " + static_cast<const Text*>(a)->value();
+                    }
+                } else {
+                    out += "\n  no note";
+                }
+                break;
+            }
 
             case EntityType::Circle: {
                 const Circle* c = static_cast<const Circle*>(e);
@@ -6699,6 +6844,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "DIMRADIUS") return std::make_unique<DimRadialCommand>(false);
     if (upper == "DIMDIAMETER") return std::make_unique<DimRadialCommand>(true);
     if (upper == "DIMANGULAR") return std::make_unique<DimAngularCommand>();
+    if (upper == "LEADER") return std::make_unique<LeaderCommand>();
     if (upper == "DIM") return std::make_unique<DimCommand>(false);
     if (upper == "DIM1") return std::make_unique<DimCommand>(true);
     if (upper == "FILLET") return std::make_unique<FilletCommand>(false);
@@ -6733,7 +6879,7 @@ const std::vector<std::string>& command_names() {
         "ID", "OPEN", "COPYCLIP", "CUTCLIP", "PASTECLIP",
         "LIMITS", "LTSCALE",
         "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "OFFSET", "FILLET", "CHAMFER",
-        "DIM", "DIM1", "DIMLINEAR", "DIMALIGNED", "DIMRADIUS", "DIMDIAMETER", "DIMANGULAR", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
+        "DIM", "DIM1", "DIMLINEAR", "DIMALIGNED", "DIMRADIUS", "DIMDIAMETER", "DIMANGULAR", "LEADER", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
         "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;
@@ -6774,6 +6920,7 @@ const std::vector<CommandAlias>& command_aliases() {
         {"DAL", "DIMALIGNED"},
         {"DRA", "DIMRADIUS"},
         {"DDI", "DIMDIAMETER"},
+        {"LEAD", "LEADER"},
         {"DAN", "DIMANGULAR"},
         {"F", "FILLET"},
         {"CHA", "CHAMFER"},
