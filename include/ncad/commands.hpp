@@ -1562,7 +1562,12 @@ private:
     Step ask_version(CommandContext& ctx, const std::string& path);
     Step write_to(CommandContext& ctx, const std::string& path, DxfVersion version);
 
-    enum class State { AskName, ConfirmOverwrite, AskVersion };
+    // Builds the advisory-lock question for `path`, if there is a lock. True
+    // means it asked and `out` is the prompt to return; false means there was
+    // nothing to ask about and the caller should carry on.
+    bool asks_about_lock(const std::string& path, Step& out);
+
+    enum class State { AskName, ConfirmLock, ConfirmOverwrite, AskVersion };
 
     Mode mode_{Mode::Save};
     State state_{State::AskName};
@@ -1630,7 +1635,12 @@ public:
     Step next(CommandContext& ctx, const InputValue& value) override;
 
 private:
-    enum class State { AskName, AskVersion };
+    enum class State { AskName, ConfirmLock, AskVersion };
+
+    // Same advisory-lock question SAVE asks, and for the same reason: an export
+    // over a file somebody has open in AutoCAD is the same clobber whether the
+    // command that did it called itself a save or not.
+    bool asks_about_lock(const std::string& path, Step& out);
 
     State state_{State::AskName};
     std::string pending_;

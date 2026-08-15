@@ -18,6 +18,7 @@ add_executable(ncad_tests
   test_offset.cpp
   test_dimension.cpp
   test_leader.cpp
+  test_lock.cpp
   test_command.cpp
   test_appload.cpp
   test_prompt.cpp

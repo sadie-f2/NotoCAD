@@ -6416,6 +6416,12 @@ Step SaveCommand::start(CommandContext& ctx) {
     // say nothing -- that includes not asking the version, so it stays
     // DXFVERSION as last set rather than gaining a prompt SAVE/SAVEAS get.
     if (mode_ == Mode::QSave && !current.empty()) {
+        // The ONE exception, and it is deliberate. That rule exists so QSAVE
+        // does not ask routine questions; a lock is not routine, it is somebody
+        // else's unsaved work about to be overwritten. It also cannot fire
+        // twice in a session for the same reason it fired once -- the lock has
+        // to appear between two saves.
+        if (Step ask; asks_about_lock(current, ask)) return ask;
         return write_to(ctx, current,
                          dxf_version_from_name(ctx.db.sysvars().get_string(Sysvar::DxfVersionVar)));
     }
@@ -6437,9 +6443,47 @@ Step SaveCommand::start(CommandContext& ctx) {
     return Step::ask(p);
 }
 
+// The advisory-lock question, shared by every path that is about to write.
+bool SaveCommand::asks_about_lock(const std::string& path, Step& out) {
+    const DrawingLock lock = read_drawing_lock(path);
+    if (!lock.present) return false;
+
+    pending_ = path;
+    state_ = State::ConfirmLock;
+
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = path_filename(path) + " is " + describe_lock(lock) + ". Save anyway? [Yes/No] <No>";
+    // NOT file_overwrite. That flag exists because every platform's save dialog
+    // asks about replacing a file, so the question would be asked twice -- and
+    // no dialog anywhere asks this one, so suppressing it in the GUI would
+    // silently remove the whole warning on the front end most likely to hit it.
+    p.keywords.push_back("No");
+    p.keywords.push_back("Yes");
+    p.allow_empty = true;
+    out = Step::ask(p);
+    return true;
+}
+
 Step SaveCommand::next(CommandContext& ctx, const InputValue& value) {
     if (state_ == State::AskVersion) {
         return write_to(ctx, pending_, resolve_and_store_dxf_version(ctx, value));
+    }
+
+    if (state_ == State::ConfirmLock) {
+        // Default No, as the overwrite question does it: the answer that
+        // destroys nothing is the one Enter gives.
+        const bool yes = value.kind == InputKind::Keyword && keyword_is(value, "YES");
+        if (!yes) return Step::done("Not saved");
+
+        // The lock question is strictly stronger than the overwrite one -- a
+        // locked file necessarily exists -- so answering it answers both rather
+        // than asking twice about the same file.
+        if (mode_ == Mode::QSave) {
+            return write_to(ctx, pending_, dxf_version_from_name(
+                                               ctx.db.sysvars().get_string(Sysvar::DxfVersionVar)));
+        }
+        return ask_version(ctx, pending_);
     }
 
     if (state_ == State::ConfirmOverwrite) {
@@ -6458,6 +6502,12 @@ Step SaveCommand::next(CommandContext& ctx, const InputValue& value) {
     if (typed.empty()) return Step::failed("a file name is required");
 
     const std::string path = ensure_extension(expand_user_path(typed), ".dxf");
+
+    // Asked BEFORE the overwrite question and independently of it. Saving over
+    // the drawing's own file is not an overwrite -- it is what saving means --
+    // but it is still a clobber when somebody else has that file open, which is
+    // exactly the case the lock exists to report.
+    if (Step ask; asks_about_lock(path, ask)) return ask;
 
     // Overwriting the file this drawing already came from is not a collision --
     // it is what saving means. Only a DIFFERENT existing file is a surprise.
@@ -6727,6 +6777,16 @@ Step DxfInCommand::next(CommandContext& ctx, const InputValue& value) {
                    " kept as-is (not editable, written back unchanged)";
     }
     if (r.newer_version) message += ". Warning: file is " + r.version + ", newer than R12";
+
+    // The lock is reported AFTER the read, not instead of it. It is advisory --
+    // nothing in the OS enforces it and AutoCAD itself lets you past with a
+    // warning -- and reading somebody's drawing harms nothing anyway. What it
+    // buys is that the warning has already been given by the time a save comes
+    // round, which is the case that can actually cost someone their work.
+    const DrawingLock lock = read_drawing_lock(path);
+    if (lock.present) {
+        message += ". Warning: " + path_filename(path) + " is " + describe_lock(lock);
+    }
     return Step::done(message);
 }
 
@@ -6743,7 +6803,31 @@ Step DxfOutCommand::start(CommandContext&) {
     return Step::ask(p);
 }
 
+bool DxfOutCommand::asks_about_lock(const std::string& path, Step& out) {
+    const DrawingLock lock = read_drawing_lock(path);
+    if (!lock.present) return false;
+
+    pending_ = path;
+    state_ = State::ConfirmLock;
+
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = path_filename(path) + " is " + describe_lock(lock) + ". Write anyway? [Yes/No] <No>";
+    p.keywords.push_back("No");
+    p.keywords.push_back("Yes");
+    p.allow_empty = true;
+    out = Step::ask(p);
+    return true;
+}
+
 Step DxfOutCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (state_ == State::ConfirmLock) {
+        const bool yes = value.kind == InputKind::Keyword && keyword_is(value, "YES");
+        if (!yes) return Step::done("Not written");
+        state_ = State::AskVersion;
+        return Step::ask(dxf_version_prompt(ctx));
+    }
+
     if (state_ == State::AskVersion) {
         const DxfVersion version = resolve_and_store_dxf_version(ctx, value);
         if (!write_dxf_file(ctx.db, pending_, version)) {
@@ -6760,6 +6844,8 @@ Step DxfOutCommand::next(CommandContext& ctx, const InputValue& value) {
 
     // The same treatment every other file command gives a name.
     pending_ = ensure_extension(expand_user_path(value.text), ".dxf");
+    if (Step ask; asks_about_lock(pending_, ask)) return ask;
+
     state_ = State::AskVersion;
     return Step::ask(dxf_version_prompt(ctx));
 }

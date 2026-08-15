@@ -99,6 +99,60 @@ them, because the reason a thing is wanted is the most perishable part of wantin
       it**, which is one piece of work and not two; an MText note, which the entity
       already accepts and only needs a way to ask for; and R13's spline path type.
 
+- [x] **Read and respect AutoCAD's advisory lock files.** Sadie's framing decided the
+      shape: locks are ADVISORY, and "at least one warning before clobbering a working
+      AutoCAD session" is the target -- not a mechanism nobody can override. So every
+      path reports and none refuses.
+
+      `plan.dxf` locks as `plan.dwl` / `plan.dwl2`, the extension REPLACED rather than
+      appended, because the lock is named for the drawing and not for the format it is
+      in -- append and a lock AutoCAD wrote would never be found. Beside the drawing
+      rather than in a system directory is what makes them work over a shared folder
+      and also what makes them stale when a process dies.
+
+      **Read side, OPEN and DXFIN: warn and continue**, as the handoff recommended and
+      for the reason it gave -- it needs no new concept anywhere in the database, and
+      reading somebody's drawing harms nothing. Reported AFTER the read rather than
+      instead of it.
+
+      **Write side: SAVE, SAVEAS, QSAVE and DXFOUT ask before writing.** This is the
+      half that can actually cost someone their work, and it is where "warn and
+      continue" would not be a warning at all. Default No, as the overwrite question
+      already does it. The lock question is asked BEFORE the overwrite one and
+      independently of it: saving over the drawing's own file is not an overwrite, but
+      it is still a clobber when somebody else has that file open. It is also strictly
+      stronger -- a locked file necessarily exists -- so answering it answers both
+      rather than asking twice.
+
+      **QSAVE asks too, and that is a deliberate exception to a stated rule.** QSAVE
+      must not interrupt; that rule is about ROUTINE questions, and a lock is somebody
+      else's unsaved work about to be overwritten without a word. It also cannot fire
+      twice for the same reason it fired once -- the lock has to appear BETWEEN two
+      saves. **This is the judgement call in the whole item**, and it is one line to
+      reverse if Sadie would rather QSAVE stayed silent.
+
+      The prompt is deliberately NOT marked `file_overwrite`. That flag exists because
+      every platform's save dialog asks about replacing a file; no dialog anywhere asks
+      about a lock, so suppressing it in the GUI would silently remove the entire
+      warning on the front end most likely to meet it.
+
+      Parsing is defensive. `.dwl` is plain text holding a user name and that much is
+      well established; what a given release puts after it is not, and `.dwl2`'s layout
+      is not documented anywhere we can rely on. So the owner is the first legible line
+      and nothing more, and the timestamp comes from the FILESYSTEM rather than from
+      inside the file -- certain, and the same answer. **An unreadable lock is still a
+      lock**: the existence is the fact that matters, and a lock we cannot parse must
+      not become no lock at all.
+
+- [ ] **Writing our own locks is still not done**, and it is the half that needs a
+      decision rather than code. What is a stale lock, and who may clear one? This
+      program has segfaulted twice this month, and a lock left by a dead process is
+      exactly the case that has to be answered before writing one is an improvement.
+      A pid plus a hostname lets a later session recognise its own dead lock; it does
+      not help across machines, which is exactly where shared folders live. Note also
+      that we never clear somebody else's lock today -- the message names the file so
+      the user can delete it themselves once they know the session is gone.
+
 - [ ] **A leader's note cannot be edited after it is drawn.** Not specific to leaders --
       there is no DDEDIT or CHANGE for a `Text` either -- but it is more visible here,
       because the whole argument for R13's shape was that the annotation is a real

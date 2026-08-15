@@ -51,4 +51,53 @@ std::string normalised_path(const std::string& path);
 std::string path_directory(const std::string& path);
 std::string path_filename(const std::string& path);
 
+// --- drawing locks ------------------------------------------------------------
+//
+// AutoCAD writes `plan.dwl` and `plan.dwl2` BESIDE `plan.dwg` while it has the
+// drawing open. Beside it rather than in a system directory is what makes them
+// work over a shared network folder -- and also what makes them stale when a
+// process dies, since nothing cleans up after a crash.
+//
+// They are ADVISORY. Nothing in the OS enforces them and AutoCAD itself will let
+// you past with a warning, so this reads them and says what it found; it does
+// not make anything impossible. Sadie's framing: a warning before clobbering a
+// working session is the point, not a mechanism nobody can override.
+//
+// **We do not write our own yet.** That needs deciding what a stale lock is and
+// who may clear one, and this program has segfaulted twice this month -- a lock
+// left behind by a dead process is exactly the case that has to be answered
+// before writing one is an improvement. See SF_todo.
+
+struct DrawingLock {
+    bool present{false};
+
+    // From `.dwl`, which is plain text holding the user name. Empty when the
+    // file could not be read or held nothing legible -- in which case the lock
+    // is still reported, because its EXISTENCE is the fact that matters.
+    std::string owner;
+
+    // Which file was found, so the message can name something the user can go
+    // and look at (or delete, when they know the session is gone).
+    std::string lock_path;
+
+    // When the lock was made, from the filesystem rather than parsed out of the
+    // file. `.dwl2` is said to carry a timestamp, but its layout is not
+    // documented anywhere we can rely on, and a modification time is both
+    // certain and the same answer. Empty if it could not be determined.
+    std::string since;
+};
+
+// The lock file AutoCAD would write for this drawing: the same name with the
+// extension replaced. `plan.dxf` locks as `plan.dwl`, exactly as `plan.dwg`
+// does -- the lock is named for the DRAWING, not for the format it is in.
+std::string lock_path_for(const std::string& drawing, const std::string& ext);
+
+// Looks for `.dwl`, then `.dwl2`. Both are reported the same way, since either
+// one present means somebody has the drawing open.
+DrawingLock read_drawing_lock(const std::string& drawing);
+
+// One line naming who holds it and since when, for a prompt or a message.
+// Empty when the lock is not present, so a caller can use it as the test.
+std::string describe_lock(const DrawingLock& lock);
+
 }  // namespace ncad
