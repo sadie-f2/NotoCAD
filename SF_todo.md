@@ -482,7 +482,8 @@ Not design questions, just things caught in use that should not wait behind phas
       drawing's own name should count, or whether the warning should say what it means.
 - [ ] **Crash in Qt's macOS cursor conversion. TWICE, and both times on Qt::SizeAllCursor.**
       First on 2026-08-10 while switching windows, over a toolbar handle; report kept as
-      `segfault.8-10-26`. Then again during a shift-middle ORBIT, no trace captured.
+      `examples/crashes/segfault.8-10-26` (local only -- examples/ is ignored). Then
+      again during a shift-middle ORBIT, no trace captured.
 
       Two triggers with nothing in common except the cursor shape, which is what turns
       this from a mystery into a suspect. On macOS most Qt cursors are native NSCursors,
@@ -493,7 +494,8 @@ Not design questions, just things caught in use that should not wait behind phas
       path, so the one trigger we control is gone. The toolbar handle is Qt's and stays.
       Original entry follows.
 
-      Once, on 2026-08-10, while switching windows; report kept as `segfault.8-10-26`. Not ours as
+      Once, on 2026-08-10, while switching windows; report kept as
+      `examples/crashes/segfault.8-10-26`. Not ours as
       far as the stack goes -- `QToolBar::event` -> `QWidget::setCursor` ->
       `QCocoaCursor::createCursorData` -> `QImage::toCGImage` -> `CGImageCreate` refusing
       an invalid colorspace, trapping in `CF_IS_OBJC`. Nothing in NotoCAD sets cursors;
