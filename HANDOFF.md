@@ -1,4 +1,4 @@
-# Handoff — session ending 2026-08-14
+# Handoff — session ending 2026-08-15
 
 Session-scoped and disposable. `CLAUDE.md` holds settled rules, `SF_todo.md` the
 roadmap and the reasoning, `features.md` capabilities not yet built, and
@@ -7,173 +7,107 @@ rewrite it rather than letting it rot.
 
 ## Where things stand
 
-**0.2.72**, 1112 tests, sanitizer clean, `main` level with `origin/main`.
+**0.2.73**, 1162 tests, sanitizer clean, GUI builds, `main` ahead of `origin/main`
+by three commits.
 
-This session added: the geometry clipboard (COPYCLIP/CUTCLIP/PASTECLIP as DXF
-text), OFFSET/FILLET/CHAMFER, toolbars with drawn-not-shipped icons, native file
-dialogs behind FILEDIA, a macOS `.app` bundle pipeline, drawings openable from
-the command line, sticky toolbar placement — and **dimensioning**: linear,
-aligned, radius, diameter and angular, with R12's `DIM` mode over the same
-command objects.
+Sadie picked three items and their order, then left it running unattended. All
+three are done and committed separately:
 
-A `build-asan-gui` exists now; the Qt shell had never been sanitized before.
+1. **`%%` control codes** — `%%D` drew three characters instead of a degree sign.
+2. **LEADER**, on R13's design, which was her call between the three shapes.
+3. **Advisory `.dwl` locks**, read side and a warning before writing.
 
-Three tasks below, in the order Sadie gave them. The first is explicitly **not**
-first priority.
+## Decisions taken while she was asleep
 
----
+Three of these are judgement calls she may want to look at. They are flagged in
+`SF_todo.md` where each item lives; this is the short list.
 
-## 1. A macOS 13 machine refused the .app  (low priority)
+- **QSAVE now asks when the target is locked.** That is a deliberate exception to
+  "QSAVE is the one that must not interrupt". The reasoning is that the rule is
+  about *routine* questions and a lock is somebody else's unsaved work about to
+  go — and that it cannot fire twice for the same reason it fired once, since the
+  lock has to appear *between* two saves. **One line to reverse.**
+- **LEADER's annotation is owned, not referenced by handle.** R13 binds it with a
+  hard pointer (group 340) to a separate database entity. Nothing in this program
+  holds a handle to another entity, and adding that brings dangling references,
+  clipboard remapping and erase ordering with it. Ownership buys the point of
+  R13's split — the note is a real `Text` or `MText` — without the machinery. The
+  cost is that the note cannot be selected on its own.
+- **LEADER degrades to line work at BOTH DXF versions**, not just R12. R2000 does
+  have a LEADER record, but writing one means a hard pointer to an annotation
+  record that has to exist and be read back as one — and our reader does not know
+  LEADER. Writing it would open a round trip we cannot close, and a file we can
+  only half read is worse than one that degrades honestly.
 
-A build handed to a friend about a week ago reports the app is incompatible with
-their OS. They are on **macOS 13.x**. We believe the toolchain targets 12.
+## What is worth doing next, in the order I would do it
 
-**Most likely answer, and check it before anything else: the build predates the
-fix.** `b6d981c` (2026-08-10) is what moved bundling onto the official Qt 6.8.3
-LTS and set `CMAKE_OSX_DEPLOYMENT_TARGET=12.0`. Before it, bundles were built
-against **Homebrew Qt 6.11**, whose bottles are compiled per-OS-release for the
-machine that pours them — so a bundle made on this Sequoia machine carried
-`minos 15.x` in every Qt framework and refuses to launch on anything older. That
-is exactly the failure reported, and a build "about a week ago" is very plausibly
-on the wrong side of that date.
+**1. The real R2000 LEADER record, with a reader for it.** One piece of work and
+not two — that is the whole reason it was deferred rather than half-built. It
+closes the round trip the degrade currently leaves open, and it is the only thing
+standing between the R13 entity design and its payoff in interchange.
 
-**Diagnose in this order.** Get the actual bundle they were sent, not a fresh one:
+**2. Baseline and continue dimensions.** Still cheap, still queued, and now the
+last easy thing in the dimension family.
 
-```sh
-otool -l NotoCAD.app/Contents/MacOS/NotoCAD | grep -A3 LC_BUILD_VERSION   # want minos 12.0
-lipo -archs NotoCAD.app/Contents/MacOS/NotoCAD                            # see below
-find NotoCAD.app/Contents/Frameworks -type f -perm +111 -exec sh -c \
-  'printf "%s " "$1"; otool -l "$1" | awk "/^ *minos/{print \$2; exit}"' _ {} \;
-```
+**3. Something that can edit a note.** There is no DDEDIT or CHANGE for a `Text`
+either, so this is not leader-specific — but the entire argument for R13's shape
+was that the annotation is a real entity rather than baked line work, and nothing
+yet takes advantage of that. The capability the design bought is not spent.
 
-`scripts/mac_bundle.sh` now fails the build if any Mach-O in the bundle demands
-newer than the target, so a bundle produced by the current script cannot have
-this problem. A bundle produced before it easily could.
+**4. `?` listings still only print when the command exits.** Unchanged, and still
+an API gap rather than a GUI bug: `Step::ask` cannot carry output. Two options are
+written up in `SF_todo.md`.
 
-**The other candidate, and it is a real one: we build arm64 only.** Nothing sets
-`CMAKE_OSX_ARCHITECTURES`, so the binary matches whatever machine built it. If
-the friend's machine is an **Intel** Mac, macOS 13 is entirely plausible on it
-and the app will be refused no matter what the deployment target says. `lipo
--archs` settles this in one line. The fix is one line too — build universal:
+## Still open, carried forward
 
-```cmake
-set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
-```
-
-The official Qt frameworks in `~/Qt` are already universal, so only our own code
-needs the flag. Worth doing regardless, since "runs only on Apple Silicon" is not
-a property anyone will guess from a dmg.
-
-**Do not conclude the target is broken until the actual artifact is inspected.**
-A fresh bundle from today's script should be verifiably 12.0, and if it is, the
-answer is simply that the friend has an old copy.
-
----
-
-## 2. Read and respect AutoCAD lock files
-
-In preparation for writing our own. Sadie's view: locks are worth having now.
-
-**What AutoCAD does.** With `plan.dwg` open it creates `plan.dwl` and
-`plan.dwl2` beside it. `.dwl` is plain text holding the user name; `.dwl2`
-carries more — user, machine, and when it was opened. They sit next to the
-drawing, not in a system directory, which is what makes them work over a shared
-network folder and also what makes them stale when a process dies. They are
-**advisory**: nothing in the OS enforces them, and AutoCAD itself will let you
-past with a warning.
-
-**Read side first**, which is this task. On `OPEN` and on `ncad file.dxf`, look
-for a sibling lock, and if one is there say who holds it and when. The question
-Sadie should decide before this is written:
-
-- **Warn and continue** — closest to AutoCAD, and honest about an advisory lock
-  being advisory.
-- **Warn and open read-only** — safer, but the drawing then needs a read-only
-  mode, which does not exist and is a much larger change (every command that
-  mutates has to be refused, and SAVE has to know).
-- **Warn and refuse** — simplest to build and the most annoying of the three.
-
-Recommend the first for the read side, with the answer recorded, because it
-needs no new concept anywhere in the database.
-
-**Write side after.** Creating our own means deciding what a stale lock is and
-who may clear one — a process that segfaults leaves its lock behind, and this
-program has segfaulted twice this month. A pid plus a hostname in the file lets
-a later session recognise its own dead lock; it does not help across machines,
-which is exactly where shared folders live.
-
-**Where it goes.** `src/core/paths.hpp` already owns filename handling and is
-where both front ends agree about what a name means; the lock path belongs
-beside `ensure_extension` and `same_file`. The commands that would consult it are
-`DxfInCommand` (OPEN and DXFIN) and `SaveCommand`, all in `commands.cpp`. Note
-that `ncad`'s startup path opens through the OPEN command deliberately, so
-wiring it into the command covers both front ends and the command line at once.
-
----
-
-## 3. DIM needs a LEAder
-
-Confirmed absent. `DIM`'s keywords today are Horizontal, Vertical, Aligned,
-Rotated, ANgular, Radius, Diameter, Undo, eXit — see `commands.cpp` around the
-`DimCommand::ask_option` hub.
-
-**The design question to settle first: a leader is not a dimension.** It
-measures nothing. Everything in `Dimension` is built around `measurement()`
-being the truth the entity holds and the label being derived from it, and a
-leader has no such number — it has a note somebody typed. Three ways to place it:
-
-- **A `DimKind::Leader`** whose measurement is always zero and whose label is
-  always the override. Cheapest, reuses the whole pipeline including the
-  writer-synthesised block — but it makes `measurement()` lie for one kind, and
-  every switch over `DimKind` grows a case that does nothing.
-- **A separate `Leader` entity.** Honest, and the vtable work is now well
-  understood — see the impact list in SF_todo and `git show 644fa79`. More code,
-  and a second thing that generates arrowheads.
-- **Plain geometry at creation**, i.e. lines plus text and no entity. R12 is
-  closer to this than to either of the above, and it is what `EXPLODE` produces
-  anyway. Loses the ability to edit the note afterwards.
-
-Recommend the second if leaders are going to carry annotation the drawing cares
-about, the third if they are throwaway callouts. Sadie should pick.
-
-**R12's prompt sequence**, whichever is chosen: `Leader start` (the arrow end),
-then `To point` repeatedly until Enter, then `Dimension text <measurement>`.
-The last segment is conventionally horizontal — a shoulder — and the text sits
-at its far end. DXF R13+ has a real `LEADER` entity; at R12 it degrades to the
-block-and-lines form the dimensions already use, which is a path that now exists.
-
----
-
-## Also open, carried from SF_todo
-
-- **`%%D` and `%%C` render literally.** Correct DXF — AutoCAD draws ° and ⌀ —
-  but our ASCII Hershey font has no such glyphs, so every angular dimension
-  reads `90.0000%%D` on screen. One fix in the font layer for TEXT generally.
-  More visible now that angular exists.
-- **Radial leaders run centre-to-rim**, where AutoCAD's come in from outside the
-  curve. A different shape, not a wrong number. Found in the AutoCAD comparison.
+- **The macOS 13 refusal is PARKED, at Sadie's direction**, pending the friend's
+  machine architecture. Her read is that it is probably an Intel Mac, which `lipo
+  -archs` on the bundle they were actually sent settles in one line. Do not touch
+  the deployment target until that data arrives. The universal-build line is worth
+  doing regardless once it does.
 - **TRIM and EXTEND cannot be driven from LISP** — they need a pick point the
-  terminal cannot supply. FILLET and CHAMFER work around it with a midpoint
-  stand-in; those two have no fallback.
+  terminal cannot supply. FILLET and CHAMFER work around it with a midpoint stand-in;
+  those two have no fallback. LEADER, for what it is worth, *is* LISP-drivable and
+  was checked.
 - **`c:` functions are not dispatched as commands.**
-- **`?` listings only print when the command exits**, because `Step::ask`
-  cannot carry output.
-- **The SizeAllCursor crash.** Two crashes, both on that one cursor shape,
-  mitigated by not asking for it. Untested on Linux, where a crash would mean
-  the cursor correlation was coincidence and the fault is ours.
-- **Baseline and continue dimensions**, cheap now the families exist.
+- **The SizeAllCursor crash.** Untested on Linux, where a crash would mean the
+  cursor correlation was coincidence and the fault is ours.
+- **DXFOUT leaves the drawing dirty**, so quitting still asks.
+- **Writing our own lock files.** Deliberately not started: it needs Sadie to say
+  what a stale lock is and who may clear one, and this program has segfaulted
+  twice this month. We never clear anybody else's today — the message names the
+  file so the user can delete it once they know the session is gone.
 
 ## Traps worth knowing
 
-- **`DimKind`'s values are DXF's and are not contiguous** (Angular is 5). A
-  table indexed by the enum is read off its end — that shipped once already.
+Unchanged from last time except where noted.
+
+- **`DimKind`'s values are DXF's and are not contiguous** (Angular is 5). A table
+  indexed by the enum is read off its end. `measurement()`'s switch now names
+  Angular explicitly so a new kind produces a warning rather than a silent zero.
 - **`entity_subrs.cpp`'s `entget` converter has a `default:`**, so a new entity
-  type compiles and silently returns nothing from LISP. It is the site missed
-  for ELLIPSE and the one to check first when adding a type.
+  type compiles and silently returns nothing from LISP. It is the site missed for
+  ELLIPSE. LEADER was added there and there is a test pinning it — copy that test
+  when the next type lands.
 - **`sysvar.cpp`'s static_assert catches a wrong COUNT, not a wrong ORDER.**
-  The enum and the table are matched by position.
-- **The AutoCAD comparison is worth more than any test we write.** It found the
-  duplicated `*Model_Space`, and it found dimension text drawn aligned when R12
-  draws it horizontal. Diff against the SOURCE though, not against AutoCAD's
-  output — the pwm boards showed AutoCAD *adding* a stray zero-length line and
-  an orphaned block that we correctly did not.
+- **`EntityType` has six registration sites**, and only one of them fails loudly.
+  For LEADER they were: `entity.hpp`, `entities.cpp`'s name table, the `entget`
+  converter, LIST, EXPLODE, and the entity's own file in `src/core/CMakeLists.txt`.
+- **BSD `sed` does not support `\b`.** A rename across a file with `sed -i ''
+  's/\bfoo(/bar(/g'` silently does nothing and the build then fails somewhere
+  unrelated-looking. Use `perl -pi -e` with a lookbehind.
+- **The AutoCAD comparison is worth more than any test we write.** Diff against the
+  SOURCE though, not against AutoCAD's output.
+
+## Verified by hand this session, not only by tests
+
+- The three new glyphs were rendered as ASCII art through the real font path
+  before they were trusted — I drew them blind and would not have caught a
+  degree sign at the wrong height any other way.
+- Leader geometry likewise: rightward, leftward and already-horizontal cases
+  rendered as a scene, which is what confirmed the hook picks its side from the
+  path direction and is suppressed when the last segment is already flat.
+- `LEADER` driven from the terminal, from `DIM`'s `LEader`, and from
+  `(command "LEADER" ...)` including the measurement default.
+- The lock warning on OPEN, on SAVE with both answers, on QSAVE, and on DXFOUT,
+  against real `.dwl` / `.dwl2` files in a scratch directory.
