@@ -18,7 +18,7 @@ option(NCAD_WITH_DWG   "Enable DWG import via LibreDWG"   OFF)
 option(NCAD_BUILD_TESTS "Build the test suite"            ON)
 # Off by default so a development build's binary stays at src/gui/ncad_gui.
 # ON produces NotoCAD.app instead -- the deployable shape, which macdeployqt
-# and scripts/mac_bundle.sh then make self-contained. macOS only; ignored
+# and packaging/mac_bundle.sh then make self-contained. macOS only; ignored
 # elsewhere.
 option(NCAD_MACOS_BUNDLE "Build the GUI as a macOS .app bundle" OFF)
 

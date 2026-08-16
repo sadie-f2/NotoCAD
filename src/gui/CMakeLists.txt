@@ -41,7 +41,7 @@ target_link_libraries(ncad_gui PRIVATE ncad_gui_lib ncad_flags)
 
 # The deployable shape, opted into so day-to-day builds keep their flat
 # binary path. CMake generates Contents/MacOS + Info.plist from the
-# properties below; scripts/mac_bundle.sh does the rest (Qt frameworks in,
+# properties below; packaging/mac_bundle.sh does the rest (Qt frameworks in,
 # stray Homebrew paths checked, signed, disk image). No icon yet -- when one
 # exists, MACOSX_BUNDLE_ICON_FILE names it here.
 if(APPLE AND NCAD_MACOS_BUNDLE)

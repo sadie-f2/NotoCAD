@@ -73,7 +73,7 @@ written up in `SF_todo.md`.
 
   **Gatekeeper is a separate wall.** The script signs ad-hoc by default, which
   every other Mac refuses regardless of architecture. Shipping to anyone needs a
-  Developer ID and notarisation; `scripts/mac_bundle.sh "Developer ID Application:
+  Developer ID and notarisation; `packaging/mac_bundle.sh "Developer ID Application:
   ..."` takes the identity.
 - **TRIM and EXTEND cannot be driven from LISP** — they need a pick point the
   terminal cannot supply. FILLET and CHAMFER work around it with a midpoint stand-in;

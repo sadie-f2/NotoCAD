@@ -6,7 +6,11 @@ compile_commands.json
 *.a
 *.dxf
 
-# Scratch AutoLISP scripts and their output -- not yet a repo deliverable.
+# Sadie's scratch AutoLISP and its output. Deliberately invisible to git, so
+# NOTHING the build, the tests or a release depends on may live here -- the
+# packaging script and the AutoCAD conformance fixture both started here and
+# were tracked in spite of this rule, which made the rule protect nothing and
+# set a trap for the next file added. They are in packaging/ and tests/acad/.
 /scripts/
 
 # Loose working files: sample drawings, screenshots, crash reports, output from

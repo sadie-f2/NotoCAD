@@ -353,5 +353,12 @@ src/app/             ncad: the R12 command prompt, and PromptSession, which the
                      Qt command line runs too
 src/gui/             ncad_gui: the Qt shell. The only target that sees Qt.
 tools/               gen_sample, and the sample drawing the viewer also renders
-tests/               in-tree harness + suites
+tests/               in-tree harness + suites; tests/acad/ holds the AutoLISP
+                     fixtures the AutoCAD comparison is driven from
+packaging/           mac_bundle.sh: build, verify, sign and package NotoCAD.app
 ```
+
+`scripts/` is ignored and is Sadie's scratch space for AutoLISP and its output.
+Nothing that the build, the tests or a release depends on belongs there --
+anything put there is invisible to git, which is what the ignore rule is for
+and also the trap it sets.

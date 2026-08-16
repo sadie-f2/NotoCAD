@@ -12,8 +12,8 @@
 # is what says the bundle can travel.
 #
 # Usage:
-#   scripts/mac_bundle.sh                  ad-hoc signature (local testing)
-#   scripts/mac_bundle.sh "Developer ID Application: ..."   real identity
+#   packaging/mac_bundle.sh                ad-hoc signature (local testing)
+#   packaging/mac_bundle.sh "Developer ID Application: ..."  real identity
 #
 # Output: build-bundle/NotoCAD.app and build-bundle/NotoCAD-<version>.dmg
 set -euo pipefail
