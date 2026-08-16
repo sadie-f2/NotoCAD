@@ -169,7 +169,9 @@ std::string Dimension::label() const {
 
 void Dimension::regenerate(std::vector<EntityPtr>& out) const {
     const Vec3 n = normalize(props().normal);
-    const EntityProps& props_ = props();
+    // Not `props_`: that is the member this reads, and shadowing it made every
+    // use below ambiguous to a reader even though the compiler was content.
+    const EntityProps& ep = props();
 
     if (angular()) {
         double from = 0.0;
@@ -193,7 +195,7 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
         };
 
         auto arc = std::make_unique<Arc>(vertex_, r, from, from + sweep, n);
-        arc->props() = props_;
+        arc->props() = ep;
         out.push_back(std::move(arc));
 
         // Extension lines, but only where an arm is shorter than the arc: an
@@ -203,13 +205,13 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
             if (reach + kEps >= r) continue;
             const Vec3 dir = normalize(arm - vertex_);
             out.push_back(make_segment(vertex_ + dir * (reach + ext_offset_),
-                                  vertex_ + dir * (r + ext_beyond_), props_));
+                                  vertex_ + dir * (r + ext_beyond_), ep));
         }
 
         // Tips on the arc, barbs trailing back along it.
-        out.push_back(make_arrowhead(at(from), tangent(from), n, arrow_size_, props_));
+        out.push_back(make_arrowhead(at(from), tangent(from), n, arrow_size_, ep));
         out.push_back(make_arrowhead(at(from + sweep), tangent(from + sweep) * -1.0, n, arrow_size_,
-                                props_));
+                                ep));
 
         // The label sits just outside the arc at its midpoint, reading along
         // the tangent there so it lies with the curve rather than across it.
@@ -223,7 +225,7 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
             label_rotation(text_horizontal_, std::atan2(dot(along, b.ay), dot(along, b.ax))));
         text->set_align(TextHAlign::Center, TextVAlign::Middle);
         text->set_align_point(anchor);
-        text->props() = props_;
+        text->props() = ep;
         out.push_back(std::move(text));
         return;
     }
@@ -237,10 +239,10 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
         // A radius runs centre-to-rim; a diameter runs rim-to-rim through the
         // centre. Both get an arrow where they touch the curve, pointing out.
         const Vec3 tail = kind_ == DimKind::Diameter ? definition_ - dir * r : definition_;
-        out.push_back(make_segment(tail, first_, props_));
-        out.push_back(make_arrowhead(first_, dir * -1.0, n, arrow_size_, props_));
+        out.push_back(make_segment(tail, first_, ep));
+        out.push_back(make_arrowhead(first_, dir * -1.0, n, arrow_size_, ep));
         if (kind_ == DimKind::Diameter) {
-            out.push_back(make_arrowhead(tail, dir, n, arrow_size_, props_));
+            out.push_back(make_arrowhead(tail, dir, n, arrow_size_, ep));
         }
 
         // Text alongside the leader rather than on it, so the line does not
@@ -254,7 +256,7 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
             std::atan2(dot(dir, arbitrary_axis(n).ay), dot(dir, arbitrary_axis(n).ax))));
         text->set_align(TextHAlign::Center, TextVAlign::Middle);
         text->set_align_point(mid + perp * (text_height_ * kTextGap));
-        text->props() = props_;
+        text->props() = ep;
         out.push_back(std::move(text));
         return;
     }
@@ -294,12 +296,12 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
     const double sign1 = off1 >= 0.0 ? 1.0 : -1.0;
     const double sign2 = off2 >= 0.0 ? 1.0 : -1.0;
     out.push_back(make_segment(first_ + perp * (sign1 * ext_offset_), p1 + perp * (sign1 * ext_beyond_),
-                          props_));
+                          ep));
     out.push_back(make_segment(second_ + perp * (sign2 * ext_offset_),
-                          p2 + perp * (sign2 * ext_beyond_), props_));
+                          p2 + perp * (sign2 * ext_beyond_), ep));
 
-    out.push_back(make_arrowhead(p1, along, n, arrow_size_, props_));
-    out.push_back(make_arrowhead(p2, along * -1.0, n, arrow_size_, props_));
+    out.push_back(make_arrowhead(p1, along, n, arrow_size_, ep));
+    out.push_back(make_arrowhead(p2, along * -1.0, n, arrow_size_, ep));
 
     const Vec3 mid = (p1 + p2) * 0.5;
     const std::string caption = label();
@@ -314,10 +316,10 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
     const bool fits = span > half_gap * 2.0 + arrow_size_ * 2.0;
 
     if (fits) {
-        out.push_back(make_segment(p1, mid - along * half_gap, props_));
-        out.push_back(make_segment(mid + along * half_gap, p2, props_));
+        out.push_back(make_segment(p1, mid - along * half_gap, ep));
+        out.push_back(make_segment(mid + along * half_gap, p2, ep));
     } else {
-        out.push_back(make_segment(p1, p2, props_));
+        out.push_back(make_segment(p1, p2, ep));
     }
 
     const Vec3 anchor = fits ? mid : mid + perp * (text_height_ * (0.5 + kTextGap));
@@ -326,7 +328,7 @@ void Dimension::regenerate(std::vector<EntityPtr>& out) const {
         label_rotation(text_horizontal_, std::atan2(dot(along, basis.ay), dot(along, basis.ax))));
     text->set_align(TextHAlign::Center, TextVAlign::Middle);
     text->set_align_point(anchor);
-    text->props() = props_;
+    text->props() = ep;
     out.push_back(std::move(text));
 }
 

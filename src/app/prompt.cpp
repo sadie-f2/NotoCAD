@@ -536,6 +536,20 @@ bool PromptSession::finish() {
         out_.write_error("; unexpected end of input inside an unterminated form\n");
         return false;
     }
+    // Input ran out while a command was still asking. Committed work survives,
+    // as it does for Escape -- but the command's own result does not, and in
+    // batch use that silently means "the file you asked for was never written".
+    // Exactly how a stale CLI test hid DXFOUT's second prompt: the script looked
+    // like it had run, and the exit status agreed.
+    //
+    // The standing prompt is NAMED, because which question went unanswered is
+    // the whole diagnosis -- "DXFOUT was still waiting" says nothing a reader
+    // can act on, and the prompt text says everything.
+    if (engine_.active()) {
+        out_.write_error(std::string("; unexpected end of input: ") + engine_.command_name() +
+                         " was still waiting for \"" + engine_.prompt().message + "\"\n");
+        return false;
+    }
     return true;
 }
 
