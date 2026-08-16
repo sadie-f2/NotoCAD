@@ -28,6 +28,21 @@ BUILD="$REPO/build-bundle"
 # whole installed base.
 DEPLOY_TARGET="${NCAD_DEPLOY_TARGET:-12.0}"
 
+# Which architectures the bundle carries. Universal by default, because
+# "runs only on Apple Silicon" is not a property anyone can guess from a dmg
+# and because nothing sets this at all otherwise -- CMake then builds for
+# whatever the BUILD machine happens to be, which is how an arm64-only bundle
+# reaches an Intel Mac and is refused.
+#
+# There is no runtime cost to the second slice on Apple Silicon: dyld reads the
+# fat header and maps only the matching one, so the x86_64 half is never paged
+# in and Rosetta is never involved (Rosetta translates x86_64-ONLY binaries).
+# What it costs is size on disk and roughly double the compile time.
+#
+#   NCAD_MACOS_ARCHS="arm64"          Apple Silicon only
+#   NCAD_MACOS_ARCHS="x86_64"         Intel only, cross-compiled from either
+BUNDLE_ARCHS="${NCAD_MACOS_ARCHS:-arm64;x86_64}"
+
 # Prefer the official Qt binaries (built for macOS 12+) over Homebrew's.
 # Homebrew bottles are compiled per-OS-release for THIS machine -- a bundle
 # made from them refuses to launch on any older macOS, which is how the
@@ -44,18 +59,37 @@ if [ -z "$QT_PREFIX" ]; then
 fi
 echo "Qt:     $QT_PREFIX"
 echo "min OS: $DEPLOY_TARGET"
+echo "archs:  $BUNDLE_ARCHS"
+
+# A universal bundle needs universal Qt. The official builds under ~/Qt are;
+# Homebrew's are built for the pouring machine and are single-architecture, so
+# catching it HERE beats finding out when macdeployqt silently produces a
+# bundle whose app is universal and whose frameworks are not.
+for want in ${BUNDLE_ARCHS//;/ }; do
+  qtcore="$QT_PREFIX/lib/QtCore.framework/Versions/A/QtCore"
+  if [ -f "$qtcore" ] && ! lipo -archs "$qtcore" 2>/dev/null | tr ' ' '\n' | grep -qx "$want"; then
+    echo "ERROR: Qt at $QT_PREFIX has no $want slice (it has: $(lipo -archs "$qtcore"))."
+    echo "       Install the official Qt, or set NCAD_MACOS_ARCHS to what you have."
+    exit 1
+  fi
+done
 
 echo "== configure + build (Release, bundle shape) =="
 cmake -S "$REPO" -B "$BUILD" -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
       -DCMAKE_OSX_DEPLOYMENT_TARGET="$DEPLOY_TARGET" \
+      -DCMAKE_OSX_ARCHITECTURES="$BUNDLE_ARCHS" \
       -DNCAD_BUILD_GUI=ON \
       -DNCAD_MACOS_BUNDLE=ON \
       -DNCAD_BUILD_TESTS=ON
 cmake --build "$BUILD"
 
 echo "== tests (a bundle of a broken build is a well-packaged broken build) =="
+# Runs the NATIVE slice only -- a universal test binary still executes one
+# architecture, and this machine cannot run the other any faster than Rosetta
+# would. So this proves the code, not the cross-compile. The architecture gate
+# below is what proves the cross-compile.
 "$BUILD/tests/ncad_tests" > /dev/null
 
 APP="$BUILD/src/gui/NotoCAD.app"
@@ -154,6 +188,32 @@ if [ -n "$TOO_NEW" ]; then
   exit 1
 fi
 echo "   all binaries claim macOS $DEPLOY_TARGET or older"
+
+echo "== architecture check: every binary must carry $BUNDLE_ARCHS =="
+# The gate the min-OS check did not cover, and the other half of why a bundle
+# gets refused on arrival. A missing slice is invisible here -- an arm64-only
+# bundle runs perfectly on the machine that built it -- and shows up only as
+# "the application cannot be opened" on somebody else's Intel Mac.
+WRONG_ARCH="$(
+  find "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/PlugIns" \
+      -type f \( -name '*.dylib' -o -perm +111 \) 2>/dev/null \
+  | while IFS= read -r bin; do
+      have="$(lipo -archs "$bin" 2>/dev/null || true)"
+      [ -z "$have" ] && continue
+      for want in ${BUNDLE_ARCHS//;/ }; do
+        if ! printf '%s\n' $have | grep -qx "$want"; then
+          echo "$bin lacks $want (has: $have)"
+        fi
+      done
+    done
+)"
+if [ -n "$WRONG_ARCH" ]; then
+  echo "BINARIES MISSING AN ARCHITECTURE:"
+  echo "$WRONG_ARCH"
+  echo "The bundle would be refused on machines of the missing kind."
+  exit 1
+fi
+echo "   every binary carries $BUNDLE_ARCHS"
 
 echo "== sign ($IDENTITY) =="
 codesign --deep --force --sign "$IDENTITY" "$APP"

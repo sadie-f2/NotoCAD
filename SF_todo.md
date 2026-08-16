@@ -266,6 +266,41 @@ them, because the reason a thing is wanted is the most perishable part of wantin
       Positions (`kUnderscoreY`, `kOverscoreY`) are chosen to clear the letterforms and
       are NOT from the R12 manual.
 
+- [x] **The macOS bundle is universal**, arm64 and x86_64. Nothing set
+      `CMAKE_OSX_ARCHITECTURES` at all, so CMake built for whatever the BUILD machine
+      was -- which on this M4 means an arm64-only bundle, refused outright by any Intel
+      Mac. That is one of the two candidate causes of the field refusal recorded in
+      HANDOFF, and it is now fixed regardless of which one it turns out to have been.
+
+      **Measured rather than assumed, because the intuition is wrong.** Universal looks
+      like it should double the download; it adds **1 MB**:
+
+      | | dmg | .app | build |
+      |---|---|---|---|
+      | arm64 only | 23 MB | 49 MB | 19 s |
+      | universal  | 24 MB | 50 MB | 28 s |
+
+      The reason is that Qt is 44 MB of a 50 MB bundle and the official builds under
+      `~/Qt` are **already universal** -- macdeployqt copies them whole and does not
+      thin them. So the x86_64 Qt slices are in the bundle either way. Building arm64
+      only does not avoid shipping them; it just ships an app that cannot use them.
+      That settles the "keep a separate Intel build" question: there is nothing to
+      separate, and two artifacts to confuse.
+
+      **No runtime cost on Apple Silicon.** dyld reads the fat header and maps only the
+      matching slice, so the x86_64 half is never paged in. Rosetta is not involved --
+      it translates x86_64-ONLY binaries, and a universal one never reaches it.
+
+      `NCAD_MACOS_ARCHS` overrides, for a deliberately single-architecture build.
+
+      A second gate went in beside the min-OS one, and it is the half that was missing:
+      **every Mach-O in the bundle must carry every requested architecture.** A missing
+      slice is invisible on the machine that built it -- an arm64-only bundle runs
+      perfectly here -- and surfaces only as "the application cannot be opened" on
+      somebody else's Mac. The Qt prefix is checked for the same thing before the build
+      starts, since Homebrew's bottles are single-architecture and would otherwise
+      produce a universal app with frameworks that are not.
+
 Not design questions, just things caught in use that should not wait behind phase order.
 
 - [x] **DXFOUT (and SAVE, etc.) should ask which version, not silently use DXFVERSION.**

@@ -60,11 +60,21 @@ written up in `SF_todo.md`.
 
 ## Still open, carried forward
 
-- **The macOS 13 refusal is PARKED, at Sadie's direction**, pending the friend's
-  machine architecture. Her read is that it is probably an Intel Mac, which `lipo
-  -archs` on the bundle they were actually sent settles in one line. Do not touch
-  the deployment target until that data arrives. The universal-build line is worth
-  doing regardless once it does.
+- **The macOS 13 refusal: the Intel half is now FIXED.** The bundle is universal
+  (arm64 + x86_64) and a gate refuses any bundle missing a slice, so an arm64-only
+  build cannot reach anybody again. Measured cost: 1 MB on the dmg, 9 seconds of
+  build -- Qt is 44 MB of the bundle and was already universal, so the x86_64
+  slices were being shipped either way.
+
+  **The deployment-target half is still parked**, at Sadie's direction, pending
+  `lipo -archs` on the bundle the friend was actually sent. Still do not touch the
+  target on a guess -- a bundle built before `b6d981c` carries Homebrew Qt stamped
+  `minos 15.x` and would be refused for that reason instead.
+
+  **Gatekeeper is a separate wall.** The script signs ad-hoc by default, which
+  every other Mac refuses regardless of architecture. Shipping to anyone needs a
+  Developer ID and notarisation; `scripts/mac_bundle.sh "Developer ID Application:
+  ..."` takes the identity.
 - **TRIM and EXTEND cannot be driven from LISP** — they need a pick point the
   terminal cannot supply. FILLET and CHAMFER work around it with a midpoint stand-in;
   those two have no fallback. LEADER, for what it is worth, *is* LISP-drivable and
