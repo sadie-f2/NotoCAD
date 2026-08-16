@@ -1565,7 +1565,9 @@ private:
     // Builds the advisory-lock question for `path`, if there is a lock. True
     // means it asked and `out` is the prompt to return; false means there was
     // nothing to ask about and the caller should carry on.
-    bool asks_about_lock(const std::string& path, Step& out);
+    // `ctx` only so the session's own lock can be recognised: a lock WE hold
+    // is not a reason to warn anybody about anything.
+    bool asks_about_lock(const CommandContext& ctx, const std::string& path, Step& out);
 
     enum class State { AskName, ConfirmLock, ConfirmOverwrite, AskVersion };
 
@@ -1640,7 +1642,9 @@ private:
     // Same advisory-lock question SAVE asks, and for the same reason: an export
     // over a file somebody has open in AutoCAD is the same clobber whether the
     // command that did it called itself a save or not.
-    bool asks_about_lock(const std::string& path, Step& out);
+    // `ctx` only so the session's own lock can be recognised: a lock WE hold
+    // is not a reason to warn anybody about anything.
+    bool asks_about_lock(const CommandContext& ctx, const std::string& path, Step& out);
 
     State state_{State::AskName};
     std::string pending_;

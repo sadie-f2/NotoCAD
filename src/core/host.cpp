@@ -3,9 +3,14 @@
 
 #include "ncad/host.hpp"
 
+#include <cstdlib>
+
 #if defined(__unix__) || defined(__APPLE__)
+#include <pwd.h>
+#include <sys/types.h>
 #include <unistd.h>
 #define NCAD_HAVE_GETHOSTNAME 1
+#define NCAD_HAVE_GETPWUID 1
 #endif
 
 namespace ncad {
@@ -45,6 +50,30 @@ std::string host_name() {
 #else
     return "unknown";
 #endif
+}
+
+std::string user_name() {
+    // The environment first, because that is the name the user recognises and
+    // the one a login shell set. It is also what AutoCAD's lock carries.
+    for (const char* var : {"USER", "LOGNAME"}) {
+        const char* v = std::getenv(var);
+        if (v != nullptr && *v != '\0') return std::string(v);
+    }
+
+#ifdef NCAD_HAVE_GETPWUID
+    // No environment -- a daemon, a cron job, a stripped `env`. getpwuid_r
+    // rather than getpwuid: the non-reentrant one returns a pointer into shared
+    // storage that the next caller overwrites.
+    struct passwd pw {};
+    struct passwd* result = nullptr;
+    char buf[1024];
+    if (getpwuid_r(getuid(), &pw, buf, sizeof(buf), &result) == 0 && result != nullptr &&
+        pw.pw_name != nullptr && pw.pw_name[0] != '\0') {
+        return std::string(pw.pw_name);
+    }
+#endif
+
+    return "unknown";
 }
 
 }  // namespace ncad

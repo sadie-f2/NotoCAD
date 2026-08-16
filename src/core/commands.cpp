@@ -6421,7 +6421,7 @@ Step SaveCommand::start(CommandContext& ctx) {
         // else's unsaved work about to be overwritten. It also cannot fire
         // twice in a session for the same reason it fired once -- the lock has
         // to appear between two saves.
-        if (Step ask; asks_about_lock(current, ask)) return ask;
+        if (Step ask; asks_about_lock(ctx, current, ask)) return ask;
         return write_to(ctx, current,
                          dxf_version_from_name(ctx.db.sysvars().get_string(Sysvar::DxfVersionVar)));
     }
@@ -6444,7 +6444,17 @@ Step SaveCommand::start(CommandContext& ctx) {
 }
 
 // The advisory-lock question, shared by every path that is about to write.
-bool SaveCommand::asks_about_lock(const std::string& path, Step& out) {
+bool SaveCommand::asks_about_lock(const CommandContext& ctx, const std::string& path, Step& out) {
+    // Our own lock is not somebody else's session. Once we hold the drawing,
+    // nobody took it between our opening it and this save -- which is the whole
+    // reason for taking one, and it is what lets QSAVE go back to being silent.
+    //
+    // Narrowed rather than deleted, though, and the difference matters: taking
+    // a lock can fail for reasons that are not locks at all -- a read-only
+    // directory, a share that will not accept a sibling file. Deleting the
+    // question outright would turn every one of those into a silent clobber.
+    if (ctx.locks != nullptr && ctx.locks->holds(path)) return false;
+
     const DrawingLock lock = read_drawing_lock(path);
     if (!lock.present) return false;
 
@@ -6501,13 +6511,16 @@ Step SaveCommand::next(CommandContext& ctx, const InputValue& value) {
     }
     if (typed.empty()) return Step::failed("a file name is required");
 
-    const std::string path = ensure_extension(expand_user_path(typed), ".dxf");
+    // Normalised HERE rather than in write_to, because the lock is keyed on the
+    // path: probing `./plan.dwl` while holding `/home/me/plan.dwl` would take a
+    // second lock against ourselves and report the user as their own blocker.
+    const std::string path = normalised_path(ensure_extension(expand_user_path(typed), ".dxf"));
 
     // Asked BEFORE the overwrite question and independently of it. Saving over
     // the drawing's own file is not an overwrite -- it is what saving means --
     // but it is still a clobber when somebody else has that file open, which is
     // exactly the case the lock exists to report.
-    if (Step ask; asks_about_lock(path, ask)) return ask;
+    if (Step ask; asks_about_lock(ctx, path, ask)) return ask;
 
     // Overwriting the file this drawing already came from is not a collision --
     // it is what saving means. Only a DIFFERENT existing file is a surprise.
@@ -6536,8 +6549,10 @@ Step SaveCommand::ask_version(CommandContext& ctx, const std::string& path) {
 }
 
 Step SaveCommand::write_to(CommandContext& ctx, const std::string& raw, DxfVersion version) {
-    // Normalised before it is recorded, so DWGPREFIX is a directory that can be
-    // used rather than whatever mixture of dots and tildes was typed.
+    // Already normalised by every caller -- see the note where the name is
+    // resolved. Repeated here because normalised_path is idempotent and a
+    // QSAVE reaching this with the recorded name should not depend on that
+    // having been true earlier.
     const std::string path = normalised_path(raw);
 
     if (!write_dxf_file(ctx.db, path, version)) {
@@ -6549,6 +6564,18 @@ Step SaveCommand::write_to(CommandContext& ctx, const std::string& raw, DxfVersi
     ctx.db.sysvars().set_metadata(Sysvar::DwgPrefix, SysvarValue::of_string(path_directory(path)));
     ctx.db.sysvars().set_metadata(Sysvar::DwgName, SysvarValue::of_string(path_filename(path)));
     ctx.db.journal().mark_saved();
+
+    // The drawing IS this file now, so the session lock moves with it -- taking
+    // the new one releases the old, which is what makes SAVEAS hand the previous
+    // file back to whoever else wants it.
+    //
+    // A lock we cannot take here changes nothing: the write already succeeded
+    // and the user already answered the question that guards it. Undoing a
+    // saved drawing over an advisory courtesy would be the tail wagging the dog.
+    if (ctx.locks != nullptr && !ctx.locks->holds(path)) {
+        DrawingLock existing;
+        ctx.locks->take(path, existing);
+    }
     return Step::done("Saved " + path);
 }
 
@@ -6563,18 +6590,23 @@ namespace {
 //
 // Layers, linetypes, blocks and UCS definitions survive this, as they survive
 // OPEN. That is a known limit rather than an intention -- see SF_todo.md.
-void reset_drawing(Database& db) {
-    db.clear();
-    db.journal().clear();
-    db.sysvars().set_metadata(Sysvar::DwgName, SysvarValue::of_string(""));
-    db.sysvars().set_metadata(Sysvar::DwgPrefix, SysvarValue::of_string(""));
+void reset_drawing(CommandContext& ctx) {
+    ctx.db.clear();
+    ctx.db.journal().clear();
+    ctx.db.sysvars().set_metadata(Sysvar::DwgName, SysvarValue::of_string(""));
+    ctx.db.sysvars().set_metadata(Sysvar::DwgPrefix, SysvarValue::of_string(""));
+
+    // The drawing this session held is no longer open, so the lock goes back --
+    // holding one for a file nobody is editing is exactly the stale lock this
+    // program should not be the cause of.
+    if (ctx.locks != nullptr) ctx.locks->release();
 }
 
 }  // namespace
 
 Step NewCommand::start(CommandContext& ctx) {
     if (!ctx.db.journal().dirty()) {
-        reset_drawing(ctx.db);
+        reset_drawing(ctx);
         return Step::done("New drawing");
     }
 
@@ -6594,7 +6626,7 @@ Step NewCommand::next(CommandContext& ctx, const InputValue& value) {
     const bool yes = value.kind == InputKind::Keyword && keyword_is(value, "YES");
     if (!yes) return Step::done("Drawing kept");
 
-    reset_drawing(ctx.db);
+    reset_drawing(ctx);
     return Step::done("New drawing");
 }
 
@@ -6760,6 +6792,19 @@ Step DxfInCommand::next(CommandContext& ctx, const InputValue& value) {
         // The selection named entities in a drawing that no longer exists. An
         // import leaves it alone -- those entities are all still there.
         ctx.selection.clear();
+
+        // And the session takes its lock, held from here until the drawing is
+        // closed -- which is what AutoCAD does, and what makes a second ncad
+        // find it. An import takes nothing: the drawing is not that file.
+        //
+        // The result is deliberately ignored. OPEN never refuses: if somebody
+        // holds it, the warning below already says so, and reading harms
+        // nothing. If the lock could not be taken for any other reason, that is
+        // not the user's problem at open time either.
+        if (ctx.locks != nullptr) {
+            DrawingLock existing;
+            ctx.locks->take(full, existing);
+        }
     }
 
     // What actually arrived, counted from the database rather than taken from
@@ -6803,7 +6848,17 @@ Step DxfOutCommand::start(CommandContext&) {
     return Step::ask(p);
 }
 
-bool DxfOutCommand::asks_about_lock(const std::string& path, Step& out) {
+bool DxfOutCommand::asks_about_lock(const CommandContext& ctx, const std::string& path, Step& out) {
+    // Our own lock is not somebody else's session. Once we hold the drawing,
+    // nobody took it between our opening it and this save -- which is the whole
+    // reason for taking one, and it is what lets QSAVE go back to being silent.
+    //
+    // Narrowed rather than deleted, though, and the difference matters: taking
+    // a lock can fail for reasons that are not locks at all -- a read-only
+    // directory, a share that will not accept a sibling file. Deleting the
+    // question outright would turn every one of those into a silent clobber.
+    if (ctx.locks != nullptr && ctx.locks->holds(path)) return false;
+
     const DrawingLock lock = read_drawing_lock(path);
     if (!lock.present) return false;
 
@@ -6844,7 +6899,7 @@ Step DxfOutCommand::next(CommandContext& ctx, const InputValue& value) {
 
     // The same treatment every other file command gives a name.
     pending_ = ensure_extension(expand_user_path(value.text), ".dxf");
-    if (Step ask; asks_about_lock(pending_, ask)) return ask;
+    if (Step ask; asks_about_lock(ctx, pending_, ask)) return ask;
 
     state_ = State::AskVersion;
     return Step::ask(dxf_version_prompt(ctx));

@@ -27,4 +27,12 @@ const char* host_platform();
 // The unqualified hostname, or "unknown" if the system will not say.
 std::string host_name();
 
+// The account this process is running as, or "unknown".
+//
+// Here rather than in the lock code because it is the same question host_name()
+// answers -- who and where -- and a drawing lock names both. AutoCAD's `.dwl`
+// carries the login name, not the full name, which is why there is no
+// full_name() beside this: the measured `<fullname>` tag is empty.
+std::string user_name();
+
 }  // namespace ncad

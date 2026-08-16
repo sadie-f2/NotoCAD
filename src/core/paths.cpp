@@ -3,6 +3,8 @@
 
 #include "ncad/paths.hpp"
 
+#include "cp1252.hpp"
+
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
@@ -117,70 +119,27 @@ std::string trimmed(std::string s) {
     return out.substr(first, out.find_last_not_of(" \t") - first + 1);
 }
 
-// Whether the bytes are already valid UTF-8.
-//
-// The two lock files disagree about their encoding -- `.dwl` is CP1252 and
-// `.dwl2` is UTF-8 -- so rather than hard-code which is which and be wrong the
-// first time a different writer produces one, the bytes are asked.
-bool is_utf8(const std::string& s) {
-    for (std::size_t i = 0; i < s.size();) {
-        const unsigned char c = static_cast<unsigned char>(s[i]);
-        std::size_t extra = 0;
-        if (c < 0x80) {
-            ++i;
-            continue;
-        }
-        if ((c & 0xE0) == 0xC0) extra = 1;
-        else if ((c & 0xF0) == 0xE0) extra = 2;
-        else if ((c & 0xF8) == 0xF0) extra = 3;
-        else return false;
-
-        if (i + extra >= s.size()) return false;
-        for (std::size_t k = 1; k <= extra; ++k) {
-            if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) return false;
-        }
-        i += extra + 1;
-    }
-    return true;
-}
-
-// CP1252's 0x80..0x9F, which is the whole of where it differs from Latin-1 --
-// and where the character that actually turns up lives: macOS names a machine
-// "Sadie's MacBook Pro" with a curly apostrophe, byte 0x92.
-constexpr char32_t kCp1252High[32] = {
-    0x20AC, 0xFFFD, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
-    0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0xFFFD, 0x017D, 0xFFFD,
-    0xFFFD, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
-    0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0xFFFD, 0x017E, 0x0178,
-};
-
-void append_utf8(std::string& out, char32_t cp) {
-    if (cp < 0x80) {
-        out += static_cast<char>(cp);
-    } else if (cp < 0x800) {
-        out += static_cast<char>(0xC0 | (cp >> 6));
-        out += static_cast<char>(0x80 | (cp & 0x3F));
-    } else {
-        out += static_cast<char>(0xE0 | (cp >> 12));
-        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-        out += static_cast<char>(0x80 | (cp & 0x3F));
-    }
-}
-
-// Whatever the file holds, as UTF-8 -- which is what both front ends display.
-//
-// Stripping the high bytes instead, which is what this did before a real pair
-// of lock files was measured, turns "Sadie's MacBook Pro" into "Sadies MacBook
-// Pro". Not wrong enough to notice, and wrong.
-std::string to_utf8(const std::string& s) {
-    if (is_utf8(s)) return s;
+// The three XML entities a name can legitimately contain. Symmetric with the
+// escaping the writer does -- a machine called "R&D box" has to survive the
+// round trip, and unescaping what we never escape would corrupt a literal
+// "&amp;" that AutoCAD wrote as text.
+std::string unescaped(const std::string& s) {
+    if (s.find('&') == std::string::npos) return s;
 
     std::string out;
-    for (const char ch : s) {
-        const unsigned char c = static_cast<unsigned char>(ch);
-        if (c < 0x80) out += ch;
-        else if (c < 0xA0) append_utf8(out, kCp1252High[c - 0x80]);
-        else append_utf8(out, c);  // 0xA0..0xFF is Latin-1 in both
+    for (std::size_t i = 0; i < s.size();) {
+        if (s.compare(i, 4, "&lt;") == 0) {
+            out += '<';
+            i += 4;
+        } else if (s.compare(i, 4, "&gt;") == 0) {
+            out += '>';
+            i += 4;
+        } else if (s.compare(i, 5, "&amp;") == 0) {
+            out += '&';
+            i += 5;
+        } else {
+            out += s[i++];
+        }
     }
     return out;
 }
@@ -197,17 +156,17 @@ std::string tag_value(const std::string& xml, const std::string& tag) {
     if (a == std::string::npos) return {};
     const std::size_t b = xml.find(close, a + open.size());
     if (b == std::string::npos) return {};
-    return trimmed(to_utf8(xml.substr(a + open.size(), b - a - open.size())));
+    return unescaped(trimmed(text::to_utf8(xml.substr(a + open.size(), b - a - open.size()))));
 }
 
 // `.dwl`'s three lines: user, machine, datetime. The third is a long localised
 // form we do not read -- see modified_at for why.
-void read_dwl(const std::string& text, std::string& owner, std::string& machine) {
+void read_dwl(const std::string& content, std::string& owner, std::string& machine) {
     std::size_t start = 0;
-    for (int line = 0; line < 2 && start <= text.size(); ++line) {
-        std::size_t end = text.find('\n', start);
-        if (end == std::string::npos) end = text.size();
-        std::string value = trimmed(to_utf8(text.substr(start, end - start)));
+    for (int line = 0; line < 2 && start <= content.size(); ++line) {
+        std::size_t end = content.find('\n', start);
+        if (end == std::string::npos) end = content.size();
+        std::string value = trimmed(text::to_utf8(content.substr(start, end - start)));
         if (line == 0) owner = value;
         else machine = value;
         start = end + 1;

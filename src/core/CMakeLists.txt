@@ -42,6 +42,8 @@ add_library(ncad_core STATIC
   about.cpp
   host.cpp
   paths.cpp
+  cp1252.cpp
+  drawing_lock.cpp
   input_text.cpp
 )
 

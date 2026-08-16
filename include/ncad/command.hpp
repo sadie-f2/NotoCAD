@@ -25,6 +25,7 @@
 #pragma once
 
 #include "ncad/database.hpp"
+#include "ncad/drawing_lock.hpp"
 #include "ncad/inflight.hpp"
 #include "ncad/osnap.hpp"
 #include "ncad/script_loader.hpp"
@@ -322,6 +323,15 @@ struct CommandContext {
     // ViewControl is -- the Qt shell hands over the system clipboard, `ncad`
     // an in-process one -- and null only if nobody wired one up.
     Clipboard* clipboard{nullptr};
+
+    // The session's advisory lock on the drawing currently open. Owned by the
+    // engine, like the selection and LASTPOINT, because it outlives every
+    // command that touches it -- OPEN takes it and NEW releases it, with any
+    // number of other commands in between.
+    //
+    // Null where there is no session to speak for, which is why every use is
+    // guarded rather than assumed.
+    DrawingLockHolder* locks{nullptr};
 };
 
 class Command {
@@ -385,7 +395,11 @@ enum class EngineStatus : std::uint8_t {
 class CommandEngine {
 public:
     explicit CommandEngine(Database& db)
-        : ctx_{db, selection_, previous_, memory_, nullptr} {}
+        : ctx_{db, selection_, previous_, memory_, nullptr} {
+        // Wired here rather than in the initialiser so the aggregate keeps the
+        // shape every other optional member has: named, not positional.
+        ctx_.locks = &locks_;
+    }
 
     // Not owned. Set by whatever has a display; left null by `ncad`.
     void set_view_control(ViewControl* view) { ctx_.view = view; }
@@ -463,6 +477,13 @@ public:
     CommandMemory& memory() { return memory_; }
     const CommandMemory& memory() const { return memory_; }
 
+    // The session's advisory lock on the open drawing. Readable so a front end
+    // can say what is held, and so a test can ask without going through a
+    // command. Released by ~CommandEngine, which is what covers every exit path
+    // in both `ncad` and the Qt shell without either of them knowing.
+    DrawingLockHolder& locks() { return locks_; }
+    const DrawingLockHolder& locks() const { return locks_; }
+
     // The pending one-shot osnap override, if any. Set by supplying an
     // InputValue of kind OsnapOverride, and cleared as soon as any value
     // actually answers a prompt -- an override lasts for exactly one pick,
@@ -496,6 +517,7 @@ private:
     SelectionSet selection_;
     SelectionSet previous_;
     CommandMemory memory_;
+    DrawingLockHolder locks_;
     CommandContext ctx_;
     CommandPtr command_;
 
