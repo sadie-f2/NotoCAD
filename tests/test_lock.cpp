@@ -293,6 +293,39 @@ TEST_CASE("lock: OPEN reports the lock and reads the drawing anyway") {
     std::filesystem::remove(lock_path_for(path, ".dwl"));
 }
 
+TEST_CASE("lock: OPEN does not warn about a lock this session just took") {
+    // Opening a drawing TAKES the lock, so reading it back without asking who
+    // holds it warned about the current session on every single OPEN -- "open
+    // in another session by sadie", where sadie was us a moment earlier. The
+    // guard is the one SAVE and DXFOUT already use.
+    const std::string path = fresh_drawing("selfwarn.dxf");
+
+    Database db;
+    CommandEngine engine(db);
+    engine.begin(make_command("OPEN"));
+    engine.supply(InputValue::of_string(path));
+    REQUIRE(engine.status() == EngineStatus::Finished);
+
+    CHECK(engine.message().find("another session") == std::string::npos);
+    CHECK(engine.message().find("Warning") == std::string::npos);
+}
+
+TEST_CASE("lock: OPEN still warns about somebody ELSE's lock") {
+    // The other half, so silencing our own does not silence the feature.
+    const std::string path = fresh_drawing("foreignwarn.dxf");
+    write_file(lock_path_for(path, ".dwl"), "otheruser\nOTHERBOX \n");
+
+    Database db;
+    CommandEngine engine(db);
+    engine.begin(make_command("OPEN"));
+    engine.supply(InputValue::of_string(path));
+    REQUIRE(engine.status() == EngineStatus::Finished);
+
+    CHECK(engine.message().find("otheruser") != std::string::npos);
+
+    std::filesystem::remove(lock_path_for(path, ".dwl"));
+}
+
 TEST_CASE("lock: SAVE over a locked file asks, and No leaves the file alone") {
     const std::string path = fresh_drawing("saveover.dxf");
     write_file(lock_path_for(path, ".dwl"), "otheruser\r\n");

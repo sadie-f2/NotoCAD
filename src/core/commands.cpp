@@ -6962,7 +6962,13 @@ Step DxfInCommand::next(CommandContext& ctx, const InputValue& value) {
     // warning -- and reading somebody's drawing harms nothing anyway. What it
     // buys is that the warning has already been given by the time a save comes
     // round, which is the case that can actually cost someone their work.
-    const DrawingLock lock = read_drawing_lock(path);
+    // NOT when the lock is OURS. Opening a drawing takes the lock, so reading
+    // it back here without asking who holds it warned about this very session
+    // on every single OPEN -- "open in another session by sadie", where sadie
+    // was us, a moment earlier. The guard is the one SAVE and DXFOUT already
+    // use; this site predates the write side and never learned about it.
+    const bool ours = ctx.locks != nullptr && ctx.locks->holds(path);
+    const DrawingLock lock = ours ? DrawingLock{} : read_drawing_lock(path);
     if (lock.present) {
         message += ". Warning: " + path_filename(path) + " is " + describe_lock(lock);
     }
