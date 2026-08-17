@@ -515,10 +515,57 @@ Not design questions, just things caught in use that should not wait behind phas
       that generates geometry from LISP and exports it, where quitting then warns about
       losing work that was just written out. Worth deciding whether DXFOUT to the
       drawing's own name should count, or whether the warning should say what it means.
-- [ ] **Crash in Qt's macOS cursor conversion. TWICE, and both times on Qt::SizeAllCursor.**
+- [ ] **Crash in Qt's macOS cursor conversion. THREE TIMES, all on Qt::SizeAllCursor.**
       First on 2026-08-10 while switching windows, over a toolbar handle; report kept as
       `examples/crashes/segfault.8-10-26` (local only -- examples/ is ignored). Then
       again during a shift-middle ORBIT, no trace captured.
+
+      **Third on 2026-08-17**, report at `examples/segfault`, and the stack is BYTE
+      IDENTICAL to the first apart from ASLR load addresses -- `QToolBar::event` ->
+      `QWidget::setCursor` -> `QCocoaCursor::createCursorData` -> `QImage::toCGImage` ->
+      `CGImageCreate`. Both captured traces are **Homebrew Qt 6.11**, never the LTS 6.8.3
+      the bundle ships, which remains an untried discriminator. Again on a mouse event
+      over the toolbar drag handle -- the one path the orbit mitigation deliberately left
+      alone, since that handle is Qt's own.
+
+      **What was new the third time, and it is probably a SECOND BUG rather than a clue
+      to this one.** The command line had already stopped working: every valid command
+      answered `*Cancel*`. Sadie was hovering the toolbar to try the save icon *because*
+      of that, not the other way round.
+
+      Read the wrong way first, and the correction is the point. The initial inference
+      was that a Qt cursor bug cannot corrupt command dispatch, so the two symptoms
+      together were evidence for the memory-corruption candidate below. **That is much
+      weaker once the ordering is known**: reaching for the toolbar when the command line
+      broke explains the co-occurrence by BEHAVIOUR, not by a shared cause. The crash was
+      waiting to happen on any toolbar hover.
+
+      On the command-line failure itself, traced as far as the evidence supports.
+      `PromptSession::report_finished` prints `*Cancel*` purely from
+      `engine_.status() == Cancelled`, and Cancel is manufactured in exactly three
+      places: a literal `\x1b` token (`input_text.cpp`), the literal word `CANCEL`
+      (`prompt.cpp`), and `CommandEngine::cancel()`. The last is GUI-only and Sadie was
+      not clicking, which rules out `MainWindow::run_command`. That leaves two stories:
+
+      - **The engine stuck at `Cancelled`**, with each new line re-reporting a stale
+        status -- `outcome_reported_` resets at the top of every `feed_line`, so it can
+        echo indefinitely and nothing new is actually being cancelled.
+      - **A command stuck at `Waiting`**, with each typed line swallowed as an answer to
+        a prompt that will never be satisfied -- `feed_line` tests `engine_.active()`
+        before anything else, so a stuck command eats input rather than starting a new
+        command.
+
+      **One observation separates them and costs nothing: what the prompt line says.** A
+      stuck `Waiting` command still shows its own prompt; a stuck `Cancelled` engine shows
+      the idle `Command:`. Worth noting before restarting, along with whether `?` still
+      worked and how much LISP had run -- a long session plus the arena is the other place
+      state accumulates.
+
+      **`build-asan-gui` was six days stale** (2026-08-10) when this happened, which is
+      why it discriminated nothing. Rebuilt at HEAD on 2026-08-17 and passing 1188. It is
+      the right thing to run for daily GUI work while this is open: a long session where
+      something goes wrong slowly is exactly the case it exists for, and if there is
+      corruption it fires at the write rather than at the CoreGraphics victim.
 
       Two triggers with nothing in common except the cursor shape, which is what turns
       this from a mystery into a suspect. On macOS most Qt cursors are native NSCursors,
