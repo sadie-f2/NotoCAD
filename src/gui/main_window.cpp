@@ -357,6 +357,26 @@ MainWindow::~MainWindow() {
     // deleted command_line_, which the filter dereferences on its first line.
     // Any key delivered during teardown would land in freed memory.
     qApp->removeEventFilter(this);
+
+    // And the widgets go BEFORE the things they hold references to.
+    //
+    // The ordering is otherwise inverted, and not by anyone's choice: db_ and
+    // engine_ are members, so they are destroyed when this body finishes, while
+    // the widgets are children of a QObject and are deleted later still, by
+    // ~QWidget. ViewportWidget holds `const Database&` and `CommandEngine*`, so
+    // between those two moments it is a live object pointing at dead ones.
+    //
+    // Nothing reaches it today -- ~ViewportWidget is defaulted and the only
+    // event Qt may still deliver during teardown touches neither. That is a
+    // property of the code as it stands rather than a guarantee, and any
+    // handler added to ViewportWidget that reads db_ or engine_ would make it
+    // an immediate use-after-free with no obvious cause.
+    //
+    // Deleting the central widget here takes the whole tree with it, in the one
+    // place where the order is still ours to choose.
+    delete takeCentralWidget();
+    view_ = nullptr;
+    command_line_ = nullptr;
 }
 
 void MainWindow::refresh_prompt() {
