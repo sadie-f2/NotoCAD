@@ -185,8 +185,13 @@ void ViewportWidget::push_view() {
 }
 
 void ViewportWidget::zoom_extents() {
+    // Nothing to go back TO when there is nothing to zoom to. Pushing first
+    // meant Home on an empty drawing filled the ten-deep stack with identical
+    // copies and evicted every real previous view.
+    const BBox box = db_.extents();
+    if (!box.valid()) return;
     push_view();
-    viewport_.zoom_extents(db_.extents());
+    viewport_.zoom_extents(box);
     update();
 }
 
@@ -238,10 +243,12 @@ bool ViewportWidget::zoom_previous() {
 }
 
 void ViewportWidget::pan(const Vec3& from, const Vec3& to) {
-    push_view();
+    // Projected BEFORE the view is remembered, for the same reason: a pan that
+    // bails out here must not have cost the user a stack entry.
     const ScreenPoint a = viewport_.project(from);
     const ScreenPoint b = viewport_.project(to);
     if (!std::isfinite(a.x) || !std::isfinite(b.x)) return;
+    push_view();
     viewport_.pan_pixels(b.x - a.x, b.y - a.y);
     update();
 }
@@ -488,10 +495,21 @@ void ViewportWidget::draw_ucs_icon(QPainter& painter) const {
     // vanishing the moment you pan away from it.
     QPointF anchor(kIconMargin, height() - kIconMargin);
     if (mode == 2) {
-        const QPoint op(static_cast<int>(o.x), static_cast<int>(o.y));
-        const int inset = static_cast<int>(kIconLength);
-        if (rect().adjusted(inset, inset, -inset, -inset).contains(op)) {
-            anchor = QPointF(o.x, o.y);
+        // Range-checked before the cast. o is only known to be finite, and a
+        // double outside int's range converted to int is undefined -- reachable
+        // with a UCS origin far from the model and the view zoomed in hard,
+        // since the projection scale is 1/world_per_pixel. qpainter_renderer.cpp
+        // documents the same hazard and clamps; this site did not.
+        //
+        // Out of range means far off screen, so the contains() below would be
+        // false anyway: the origin marker simply stays in its corner.
+        constexpr double kLimit = 1.0e7;
+        if (std::abs(o.x) < kLimit && std::abs(o.y) < kLimit) {
+            const QPoint op(static_cast<int>(o.x), static_cast<int>(o.y));
+            const int inset = static_cast<int>(kIconLength);
+            if (rect().adjusted(inset, inset, -inset, -inset).contains(op)) {
+                anchor = QPointF(o.x, o.y);
+            }
         }
     }
 
@@ -766,6 +784,7 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event) {
         // point as its first break point, which is R12's sequence and cannot be
         // recovered from a handle.
         engine_->supply(InputValue::of_picked_entity(r.entity, pick_point(event->pos())));
+        update_osnap();
         update();
         // The bare handle, which is exactly what could have been typed at this
         // prompt -- input_text.cpp parses a decimal handle here.
@@ -799,6 +818,11 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event) {
         engine_->supply(snap_.valid && snap_.deferred
                             ? InputValue::of_deferred_snap(p, snap_.type, snap_.entity)
                             : InputValue::of_point(p));
+        // And refreshed again AFTER, because supply() has moved the command on.
+        // Without this the repaint below draws the marker found for the prompt
+        // that was just answered -- the right glyph for the wrong question, and
+        // stale until the mouse next moves.
+        update_osnap();
         update();
         emit pointPicked(asked, QStringLiteral("%1,%2,%3")
                                     .arg(p.x, 0, 'f', 4)
@@ -847,7 +871,13 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event) {
 void ViewportWidget::mouseReleaseEvent(QMouseEvent* event) {
     if (drag_ != Drag::None && event->button() == Qt::MiddleButton) {
         drag_ = Drag::None;
-        setCursor(Qt::CrossCursor);
+        // BlankCursor, which is what the constructor set and why: the crosshair
+        // is PAINTED, against the UCS, and the window system's own cursor is
+        // screen-aligned and cannot know about it. Restoring CrossCursor here
+        // left two crosshairs on screen after a single pan, disagreeing with
+        // each other -- and disagreeing is the whole thing a UCS crosshair is
+        // for.
+        setCursor(Qt::BlankCursor);
         event->accept();
         return;
     }

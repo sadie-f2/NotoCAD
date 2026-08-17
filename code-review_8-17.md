@@ -1,6 +1,6 @@
 # Audit — 17 August 2026
 
-A whole-repository audit for crashes and memory safety, at 0.2.73. Five parallel
+A whole-repository audit for crashes and memory safety, at 0.2.74. Five parallel
 agents by subsystem, then every claim checked against the running binary rather
 than taken on the agent's word — which mattered: one reported path did not
 reproduce, and one "theoretical" finding turned out to be reachable by typing six

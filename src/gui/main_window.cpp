@@ -227,10 +227,6 @@ void MainWindow::restore_window_state() {
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     if (event->type() != QEvent::KeyPress) return QMainWindow::eventFilter(watched, event);
 
-    // The command line already has it: leave the key alone, or every character
-    // would be inserted twice and Home would stop moving the cursor.
-    if (command_line_->input_has_focus()) return QMainWindow::eventFilter(watched, event);
-
     // Re-entrancy: delivering the key below sends it to the input, which comes
     // back through here. That normally exits at the test above, but not if
     // focus refused to move -- a disabled input, or a window that is not
@@ -354,7 +350,14 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow() {
+    // Removed explicitly, because otherwise it outlives what it reads. The
+    // filter is installed on qApp and stays installed until ~QObject, which
+    // runs LAST -- after every member here is gone and after ~QWidget has
+    // deleted command_line_, which the filter dereferences on its first line.
+    // Any key delivered during teardown would land in freed memory.
+    qApp->removeEventFilter(this);
+}
 
 void MainWindow::refresh_prompt() {
     command_line_->set_prompt(QString::fromStdString(session_->current_prompt()));
@@ -435,7 +438,12 @@ void MainWindow::on_cancel_requested() {
         command_line_->append_output("*Cancel*\n");
     }
     refresh_prompt();
-    view_->update();
+    // refresh_osnap rather than a plain repaint, for the reason the typed path
+    // already does it: update_osnap clears the hit when nothing wants a point,
+    // and a repaint alone left the marker and its label painted over a drawing
+    // with no command running. Escaping out of LINE with the cursor sitting on
+    // an endpoint showed an ENDPOINT square until the mouse was jiggled.
+    view_->refresh_osnap();
     command_line_->focus_input();
 }
 
