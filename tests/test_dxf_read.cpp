@@ -570,3 +570,128 @@ TEST_CASE("dxf merge: inside a command group the whole import is one undo step")
     CHECK(db.journal().undo(db));
     CHECK(db.size() == before);  // both imported entities went, and only those
 }
+
+// --- hostile input, found by audit 2026-08-17 -------------------------------
+//
+// A DXF is untrusted: it comes from another program, a corrupt download, or a
+// truncated copy. None of the files below is exotic, and every one of them was
+// a heap-use-after-free or a silent corruption before the fix beside it.
+//
+// The four block cases share a cause. An INSERT may name a block defined later,
+// so inserts are registered unresolved and fixed up at the end -- but the
+// registration held a raw pointer, and four paths destroy the entity before the
+// fix-up runs. They are written out separately because each is a different way
+// for a file to stop early, and a future refactor could reintroduce any one.
+
+TEST_CASE("dxf read: ENDSEC inside a BLOCK does not leave a dangling insert") {
+    Database db;
+    read_dxf_text(db, dxf({"  0\nSECTION\n  2\nBLOCKS",
+                           "  0\nBLOCK\n  2\nA",
+                           "  0\nLINE\n 10\n0.0\n 20\n0.0\n 11\n1.0\n 21\n1.0",
+                           "  0\nENDBLK",
+                           "  0\nBLOCK\n  2\nB",
+                           "  0\nINSERT\n  2\nA\n 10\n0.0\n 20\n0.0",
+                           kEnd}),
+                  DxfReadMode::Replace);
+    // The assertion is that we got here at all: block B never reached ENDBLK,
+    // so its INSERT died with it while still registered for resolution.
+    CHECK(db.find_block("A") != kInvalidBlock);
+}
+
+TEST_CASE("dxf read: an entity outside any block does not leave a dangling insert") {
+    Database db;
+    read_dxf_text(db, dxf({"  0\nSECTION\n  2\nBLOCKS",
+                           "  0\nBLOCK\n  2\nA",
+                           "  0\nENDBLK",
+                           "  0\nINSERT\n  2\nA\n 10\n0.0\n 20\n0.0",
+                           kEnd}),
+                  DxfReadMode::Replace);
+    CHECK(db.find_block("A") != kInvalidBlock);
+}
+
+TEST_CASE("dxf read: a BLOCK with no name does not leave a dangling insert") {
+    Database db;
+    read_dxf_text(db, dxf({"  0\nSECTION\n  2\nBLOCKS",
+                           "  0\nBLOCK\n  2\nA",
+                           "  0\nENDBLK",
+                           "  0\nBLOCK",  // no group 2: nowhere for it to go
+                           "  0\nINSERT\n  2\nA\n 10\n0.0\n 20\n0.0",
+                           "  0\nENDBLK",
+                           kEnd}),
+                  DxfReadMode::Replace);
+    CHECK(db.find_block("A") != kInvalidBlock);
+}
+
+TEST_CASE("dxf read: input ending mid-block does not leave a dangling insert") {
+    Database db;
+    // No ENDBLK, no ENDSEC, no EOF -- a download cut short.
+    read_dxf_text(db, dxf({"  0\nSECTION\n  2\nBLOCKS",
+                           "  0\nBLOCK\n  2\nA",
+                           "  0\nLINE\n 10\n0.0\n 20\n0.0\n 11\n1.0\n 21\n1.0",
+                           "  0\nENDBLK",
+                           "  0\nBLOCK\n  2\nB",
+                           "  0\nINSERT\n  2\nA\n 10\n0.0\n 20\n0.0"}),
+                  DxfReadMode::Replace);
+    CHECK(db.find_block("A") != kInvalidBlock);
+}
+
+TEST_CASE("dxf read: a redefined block does not free an insert still registered") {
+    // R12 redefinition rewrites the definition in place, destroying what it
+    // held. Two blocks of the same name is not a corrupt file -- xref
+    // flattening emits them.
+    Database db;
+    read_dxf_text(db, dxf({"  0\nSECTION\n  2\nBLOCKS",
+                           "  0\nBLOCK\n  2\nA",
+                           "  0\nLINE\n 10\n0.0\n 20\n0.0\n 11\n1.0\n 21\n1.0",
+                           "  0\nENDBLK",
+                           "  0\nBLOCK\n  2\nDUP",
+                           "  0\nINSERT\n  2\nA\n 10\n0.0\n 20\n0.0",
+                           "  0\nENDBLK",
+                           "  0\nBLOCK\n  2\nDUP",
+                           "  0\nLINE\n 10\n0.0\n 20\n0.0\n 11\n1.0\n 21\n1.0",
+                           "  0\nENDBLK",
+                           kEnd}),
+                  DxfReadMode::Replace);
+    CHECK(db.find_block("DUP") != kInvalidBlock);
+}
+
+TEST_CASE("dxf read: nan and inf never enter the drawing") {
+    // strtod parses all three happily. A NaN coordinate then propagates through
+    // BBox::expand, so the entity is unpickable and invisible to ZOOM EXTENTS --
+    // and it used to survive DXFOUT, handing AutoCAD a file with `nan` in it.
+    Database db;
+    read_dxf_text(db, dxf({kEntitiesOpen,
+                           "  0\nLINE\n 10\nnan\n 20\n0.0\n 30\n0.0\n"
+                           " 11\ninf\n 21\n1e999\n 31\n-inf",
+                           kEnd}),
+                  DxfReadMode::Replace);
+    REQUIRE(db.size() == 1);
+    const Entity* e = db.get(db.order().front());
+    REQUIRE(e != nullptr);
+
+    const BBox box = e->bbox();
+    CHECK(box.valid());
+
+    // Substituted with zero, which is what an absent group would have given.
+    const Line* line = static_cast<const Line*>(e);
+    CHECK(line->start().x == 0.0);
+    CHECK(line->end().x == 0.0);
+    CHECK(line->end().y == 0.0);
+}
+
+TEST_CASE("dxf read: a hostile colour index is clamped at the door") {
+    // 62 = 32768 negates to itself in an int16_t, so the renderer's
+    // "off layers carry a sign" flip left it negative and indexed the palette
+    // table from -32768.
+    Database db;
+    read_dxf_text(db, dxf({kEntitiesOpen,
+                           "  0\nLINE\n 62\n32768\n 10\n0.0\n 20\n0.0\n"
+                           " 11\n1.0\n 21\n1.0",
+                           kEnd}),
+                  DxfReadMode::Replace);
+    REQUIRE(db.size() == 1);
+    const Entity* e = db.get(db.order().front());
+    REQUIRE(e != nullptr);
+    CHECK(e->props().color >= -256);
+    CHECK(e->props().color <= 256);
+}

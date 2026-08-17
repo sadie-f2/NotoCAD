@@ -7,6 +7,7 @@
 #include "ncad/ecs.hpp"
 #include "ncad/entities.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -67,7 +68,21 @@ private:
     std::size_t pos_{0};
 };
 
-double to_double(const std::string& s) { return std::strtod(s.c_str(), nullptr); }
+// A DXF is untrusted input, and strtod happily parses "nan", "-inf" and
+// "1e999". Nothing downstream rejected them: a NaN coordinate propagates
+// through BBox::expand into an invalid box, so the entity becomes unpickable
+// and invisible to ZOOM EXTENTS, and normalize() hands back the zero vector for
+// a NaN normal so the arbitrary axis algorithm quietly uses the world basis.
+// Worse, it round-tripped -- `nan` went in and `nan` came back out of DXFOUT,
+// which would hand AutoCAD a file this project's whole interchange guarantee
+// says it should not.
+//
+// Zero is the honest substitute: it is what an absent group would have given,
+// and it is a value the rest of the kernel is built to survive.
+double to_double(const std::string& s) {
+    const double v = std::strtod(s.c_str(), nullptr);
+    return std::isfinite(v) ? v : 0.0;
+}
 int to_int(const std::string& s) { return static_cast<int>(std::strtol(s.c_str(), nullptr, 10)); }
 
 // Everything gathered for one entity before it is turned into geometry.
@@ -123,8 +138,14 @@ private:
     // every definition has been read -- resolving inline would work only for
     // files that happen to be in dependency order, which nothing guarantees.
     //
-    // The raw pointers stay valid because entities are heap-allocated and only
-    // the owning unique_ptr moves.
+    // The raw pointer is valid only for as long as SOMETHING OWNS THE ENTITY,
+    // and in the BLOCKS section that is not a given: an entity outside a block
+    // is dropped, and a block abandoned without ENDBLK -- by EOF, by ENDSEC, or
+    // by a BLOCK record with no name -- takes its entities with it. This
+    // comment used to claim the pointers simply stay valid; four malformed
+    // files proved otherwise, each a heap-use-after-free in resolve_inserts.
+    //
+    // So every path that destroys an entity calls forget_pending first.
     struct PendingInsert {
         Insert* entity{nullptr};
         std::string block_name;
@@ -132,6 +153,13 @@ private:
     };
 
     void resolve_inserts();
+
+    // Drop any pending registration pointing at `e`, or at anything `def`
+    // owns, because it is about to be destroyed. Cheap in practice: a file has
+    // far fewer inserts than the loop below would suggest, and correctness here
+    // is worth more than the scan.
+    void forget_pending(const Entity* e);
+    void forget_pending(const BlockDef& def);
 
     Database& db_;
     DxfReadMode mode_{DxfReadMode::Replace};
@@ -157,7 +185,17 @@ void Reader::apply_common(Entity& e, const EntityGroups& g) {
         const LinetypeId lt = db_.find_linetype(ltype);
         if (lt != kInvalidLinetype) e.props().linetype = lt;
     }
-    if (g.has(62)) e.props().color = static_cast<std::int16_t>(to_int(g.text(62)));
+    if (g.has(62)) {
+        // Clamped to the range AutoCAD actually uses: 0 is BYBLOCK, 256 is
+        // BYLAYER, 1..255 are the palette, and a negative value is the same
+        // colour on a layer that is switched off. Anything else is a corrupt
+        // file, and 32768 in particular is a weapon -- negating it in an
+        // int16_t gives back -32768, which walks past the front of the palette
+        // table in the renderer. Guarded there too; this is the door it came in
+        // through.
+        const int raw = to_int(g.text(62));
+        e.props().color = static_cast<std::int16_t>(std::clamp(raw, -256, 256));
+    }
     if (g.has(39)) e.props().thickness = g.real(39);
     e.props().normal = g.normal();
 }
@@ -699,7 +737,11 @@ void Reader::read_blocks(GroupStream& in) {
             // Into the definition, not the drawing: a block's contents are not
             // entities of the drawing and must not get handles or an order.
             def.entities.push_back(std::move(e));
+            return;
         }
+        // Outside a block, and so about to be destroyed unowned. An INSERT here
+        // has already registered itself in pending_inserts_.
+        forget_pending(e.get());
     };
 
     for (;;) {
@@ -733,6 +775,8 @@ void Reader::read_blocks(GroupStream& in) {
         }
 
         if (value == "BLOCK") {
+            // A previous BLOCK that never reached ENDBLK is abandoned here.
+            forget_pending(def);
             def = BlockDef{};
             in_block = true;
             current = EntityGroups{};
@@ -742,14 +786,31 @@ void Reader::read_blocks(GroupStream& in) {
         }
         if (value == "ENDBLK") {
             if (in_block && !def.name.empty()) {
+                // Redefinition is R12's behaviour and add_block implements it
+                // by rewriting the existing definition IN PLACE -- which
+                // destroys the entities that definition held. Any INSERT among
+                // them is registered here, so it has to be forgotten first.
+                // A file with two same-named blocks is not exotic; xref
+                // flattening emits them.
+                if (const BlockDef* previous = db_.block(db_.find_block(def.name))) {
+                    forget_pending(*previous);
+                }
                 db_.add_block(std::move(def));
                 ++result_.blocks;
+            } else {
+                // A BLOCK with no group 2 has nowhere to go, and its entities
+                // die with `def` on the next line.
+                forget_pending(def);
             }
             def = BlockDef{};
             in_block = false;
             continue;
         }
-        if (value == "ENDSEC") return;
+        if (value == "ENDSEC") {
+            // Inside a block still: `def` is destroyed on the way out.
+            forget_pending(def);
+            return;
+        }
 
         // Anything else inside a BLOCK is one of its entities.
         current = EntityGroups{};
@@ -757,7 +818,21 @@ void Reader::read_blocks(GroupStream& in) {
         have_entity = true;
     }
 
-    // A file that ends mid-section still yields the definitions it completed.
+    // A file that ends mid-section still yields the definitions it completed --
+    // and whatever was half-collected when the input ran out is destroyed with
+    // `def`, so nothing may still be pointing into it.
+    forget_pending(def);
+}
+
+void Reader::forget_pending(const Entity* e) {
+    if (e == nullptr) return;
+    for (PendingInsert& pending : pending_inserts_) {
+        if (pending.entity == e) pending.entity = nullptr;
+    }
+}
+
+void Reader::forget_pending(const BlockDef& def) {
+    for (const EntityPtr& owned : def.entities) forget_pending(owned.get());
 }
 
 void Reader::resolve_inserts() {

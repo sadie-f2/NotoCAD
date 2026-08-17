@@ -71,7 +71,15 @@ bool clip_segment(const QRectF& rect, QPointF& a, QPointF& b) {
 }  // namespace
 
 QColor aci_color(std::int16_t index) {
-    if (index < 0) index = static_cast<std::int16_t>(-index);  // "off" layers carry a sign
+    // Widened before negating. -32768 has no positive counterpart in an
+    // int16_t, so `-index` gave back -32768, the `index < 0` guard had already
+    // been satisfied, and kAciLow[-32768] read a third of a megabyte before the
+    // table. A DXF carrying group 62 = 32768 was enough; the reader now clamps
+    // that too, but a palette lookup must not depend on its caller.
+    int i = index < 0 ? -static_cast<int>(index) : static_cast<int>(index);
+    if (i > 256) i = 256;
+    const std::int16_t safe = static_cast<std::int16_t>(i);
+    index = safe;
     if (index < 10) {
         const auto& c = kAciLow[index];
         return QColor(c.r, c.g, c.b);
