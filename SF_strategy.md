@@ -8,6 +8,12 @@ they can be revisited on purpose rather than drifted away from.
 Nothing here is scheduled. Several items are years out or may never happen. They
 are written down so that today's choices are made in view of them.
 
+**`solids.md` now carries the ENGINE DESIGN** -- the process boundary, what
+crosses it, picking, and the rule about which representation a measurement may
+trust. This file keeps the strategic decisions: whether, why, and when. Several
+items below are marked superseded by it, and are kept rather than deleted so the
+reasoning stays legible.
+
 **Sequencing, settled: ncad ships first.** Solids are a separate project — SNcad —
 and are not started until NotoCAD is released. Everything below about solids is
 therefore speculative by design, and no decision recorded here may be used to
@@ -29,8 +35,15 @@ enough to hold in one head.
 
 ## Decided: OCCT is the solids core
 
-**Open CASCADE Technology, as an optional compile-time module.** Exact B-rep with
-NURBS surfaces, exact booleans, real fillets, and STEP/IGES on the side.
+**Open CASCADE Technology.** Exact B-rep with NURBS surfaces, exact booleans,
+real fillets, and STEP/IGES on the side. The kernel choice stands; the
+*packaging* below does not.
+
+**SUPERSEDED -- "as an optional compile-time module".** `solids.md` argues for a
+separate PROCESS instead, on four grounds the module cannot answer: booleans can
+hang, OCCT throws where the core does not, isolation was what the option was
+reaching for anyway, and no OCCT-linked binary then need ever be conveyed with
+ncad at all. A linked kernel that segfaults takes the drawing with it.
 
 Two alternatives were weighed and rejected:
 
@@ -45,6 +58,31 @@ boolean result, and fillets become offsets or primitives, neither of which is go
 Sadie's call, and the deciding argument was that STL export is a solved problem
 regardless of what is behind it, so choosing the weaker representation buys nothing
 back.
+
+**But OCCT is Plan A, not the only plan.** Sadie's framing, added after the
+`solids.md` conversation. **Plan B already exists: parametric solid elements** --
+primitives described by their parameters rather than by their boundary, composed
+into the same engine. Exact by construction, no tolerance model, tessellated only
+for display; unable to boolean arbitrary curved geometry, which a great many real
+parts do not need. That is NOT the faceted core rejected above -- a parametric
+cylinder knows its radius, where a mesh one does not -- and the rejection stands
+without touching it.
+
+The consequence is a design principle rather than an absence of one: **use what
+works for the problem at hand.** The engine must not assume every solid is a
+B-rep, and the database must be able to hold both. Plan B is also where
+`programming.md` points, since OpenSCAD is parametric primitives plus CSG and the
+expression model composes with it directly.
+
+**Honest note on OCCT's robustness, because it revises what the STEP hatch is
+carrying.** Fusion uses ASM (an ACIS fork) and SolidWorks uses Parasolid; both are
+exact NURBS B-rep, so the razor edges Fusion leaves on hard sweeps are a TOLERANCE
+STRATEGY and a willingness to trim a self-intersecting sweep rather than refuse it
+-- permissiveness, not imprecision. OCCT is in the same family and is generally
+reckoned less robust than either; boolean failures on difficult geometry are a
+standing complaint wherever it is used. No architecture fixes that. It makes the
+decision below -- keep operations simple, write STEP, fillet downstream --
+load-bearing rather than a convenience.
 
 **Representation is CSG-shaped, not a feature tree.** A tree of primitives,
 transforms and operations, evaluated — not an ordered history of parametric
@@ -64,17 +102,18 @@ someone who knows what they want, that is the right way round.
 
 The same rules as DWG and Qt, for the same reasons, and they are load-bearing:
 
-- **Its own target and its own compile-time option.** The default build links no
-  OCCT and remains BSD-3. The linkage is visible in the build graph.
-- **`TopoDS_Shape` and every other OCCT type stay out of core headers.** Conversion
-  happens at the boundary, as with LibreDWG's structs.
-- **That target compiles with RTTI enabled; the core stays `-fno-rtti`.** OCCT has
-  its own type system (`Standard_Transient`, `DEFINE_STANDARD_RTTIEXT`) and does not
-  need C++ RTTI, but the island keeps the question from ever arising. Verify this
-  early — it is a build-graph fact, cheap to establish and awkward to discover late.
-- **OCCT throws; the core does not catch exceptions as control flow.** Boolean
-  failures arrive as `Standard_Failure`. They are converted to status codes at the
-  boundary, per `CLAUDE.md`.
+- **Its own target and its own compile-time option.** *Superseded: its own
+  PROCESS.* The default build links no OCCT and remains BSD-3 -- and under the
+  process boundary, no build does.
+- **`TopoDS_Shape` and every other OCCT type stay out of core headers.** *Now
+  stronger, and free: OCCT is not linked into ncad at all, so there is nothing to
+  keep out.*
+- **That target compiles with RTTI enabled; the core stays `-fno-rtti`.** *Moot.*
+  A separate process is a separate binary with no shared build constraint, so the
+  question the island existed to prevent cannot arise.
+- **OCCT throws; the core does not catch exceptions as control flow.** Still true,
+  and a process boundary converts more than exceptions: a kernel that crashes or
+  hangs is a failed request rather than a lost drawing.
 - **Licensing: LGPL-2.1 with an additional linking exception.** More permissive than
   plain LGPL and widely used commercially, but confirm the current text before any
   binary ships. Dynamic linking regardless, as with Qt.
@@ -120,18 +159,19 @@ and hit-testing all continue to work against what is drawn.
 
 ## Open questions
 
-1. **Two exact geometry systems in one database.** NotoCAD's own entities are exact,
-   and so are OCCT's solids, but they are different machines. Can a LINE osnap to a
-   solid's edge? Does a solid participate in TRIM, BREAK and INTERSECT? `decompose()`
-   in `intersect.cpp` already has no case for ELLIPSE or SPLINE; solids widen that
-   gap by a lot. **The rule about which representation an osnap or a measurement may
-   trust needs writing down before any code.**
+1. **Two exact geometry systems in one database.** *Answered in `solids.md`:*
+   tessellation is never authoritative for anything numeric, and the exact
+   DESCRIPTION of the feature under the cursor is cached so snapping stays exact
+   without a round trip per frame. The rest of the question -- whether a solid
+   participates in TRIM, BREAK and INTERSECT -- is still open, and `decompose()`
+   in `intersect.cpp` having no case for ELLIPSE or SPLINE remains the warning it
+   always was.
 
-2. **Is the CSG tree stored, or the evaluated shape?** Storing the tree keeps the
-   model editable and re-evaluable; storing the shape makes load and display cheap
-   and matches what DXF and STL want. Probably both, with the shape derived and
-   cached — which is `InFlight`'s discipline at a larger scale, and that pattern is
-   already proven here.
+2. **Is the CSG tree stored, or the evaluated shape?** *No longer ncad's
+   question.* Under the process boundary this is the kernel's private business,
+   and ncad is better for not knowing. The reasoning was right and still applies
+   over there: probably both, with the shape derived and cached, which is
+   `InFlight`'s discipline at a larger scale.
 
 3. **Where fillets live in a CSG tree — resolved by STEP export, not by solving it.**
    OCCT can fillet a shape, but a fillet is not naturally a CSG node, and applying
