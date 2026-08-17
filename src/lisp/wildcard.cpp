@@ -116,7 +116,18 @@ bool wildcard_match(std::string_view text, std::string_view pattern, bool fold_c
     // anchor at position zero rather than an operator, which is the part people
     // get wrong.
     if (!pattern.empty() && pattern[0] == '~') {
-        return !wildcard_match(text, pattern.substr(1), fold_case);
+        // Counted, then ONE recursion. Recursing per tilde meant a pattern of
+        // repeated tildes -- reachable from `(wcmatch "a" p)` with a string the
+        // script built -- put a frame on the C stack for each one and overflowed
+        // it. The parity is all the negations amount to, and stripping them
+        // first means the call below cannot re-enter this branch.
+        bool negate = false;
+        while (!pattern.empty() && pattern[0] == '~') {
+            negate = !negate;
+            pattern.remove_prefix(1);
+        }
+        const bool matched = wildcard_match(text, pattern, fold_case);
+        return negate ? !matched : matched;
     }
 
     // Comma-separated alternatives. Split here rather than inside the matcher so

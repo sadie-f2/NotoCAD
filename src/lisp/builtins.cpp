@@ -490,9 +490,19 @@ bool subr_reverse(Interp& in, const Value* a, std::size_t, Value& out) {
 }
 
 bool subr_append(Interp& in, const Value* a, std::size_t n, Value& out) {
+    // Returned here rather than left to the loop bound, which is what a
+    // conditional on the line below used to do -- and it was not enough. With
+    // `n == 0`, `n - 1` on an unsigned is SIZE_MAX, so `i > 0` held and the body
+    // read `a[SIZE_MAX - 1]`: `(append)` segfaulted. APPEND takes zero arguments
+    // by declaration (min_args 0), so nothing upstream prevented it.
+    if (n == 0) {
+        out = make_nil();
+        return true;
+    }
+
     // Copies every list but the last, which is shared -- standard behaviour and
     // the reason append is not free.
-    out = n == 0 ? make_nil() : a[n - 1];
+    out = a[n - 1];
     for (std::size_t i = n - 1; i > 0; --i) {
         const Value& lst = a[i - 1];
         if (!is_list(lst)) return bad_type(in, "append", lst);
@@ -553,6 +563,16 @@ bool subr_apply(Interp& in, const Value* a, std::size_t, Value& out) {
 }
 
 bool subr_mapcar(Interp& in, const Value* a, std::size_t n, Value& out) {
+    // COPIED, not referenced. `a` points into Interp::stack_, and every
+    // in.apply() below re-enters eval, which pushes onto that same vector and
+    // reallocates it -- so `a` dangles from the second iteration onwards.
+    //
+    // The lists were already copied into `cursors`; the FUNCTION was not, and
+    // was re-read as `a[0]` each time round. In release that read returned
+    // whatever the freed buffer now held, so `(mapcar 'f '(1 2 3))` over a
+    // defun'd f reported "no function definition" -- a wrong answer rather than
+    // a crash, which is why it survived 1188 tests.
+    const Value fn = a[0];
     const std::size_t nlists = n - 1;
     std::vector<Value> cursors(a + 1, a + n);
     for (const Value& c : cursors) {
@@ -571,7 +591,7 @@ bool subr_mapcar(Interp& in, const Value* a, std::size_t n, Value& out) {
             args[i] = car(cursors[i]);
         }
         Value r;
-        if (!in.apply(a[0], args.data(), nlists, r)) return false;
+        if (!in.apply(fn, args.data(), nlists, r)) return false;
         results.push_back(r);
         for (std::size_t i = 0; i < nlists; ++i) cursors[i] = cdr(cursors[i]);
     }

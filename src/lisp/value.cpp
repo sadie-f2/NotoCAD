@@ -28,22 +28,35 @@ std::string format_real(double x) {
     return s;
 }
 
-void print_value(const Value& v, bool readable, std::string& out);
+// How deep printing may nest before it stops descending.
+//
+// print_list and print_value recurse into each other once per level of CAR
+// nesting, so a 200k-deep list -- which is built ITERATIVELY, at eval depth 2,
+// so Interp::max_depth_ never sees it -- blew the C stack when anything tried
+// to print it. That includes the REPL echoing a result and, worse, prin1()
+// formatting a value into an ERROR MESSAGE, so a malformed call crashed instead
+// of reporting.
+//
+// Deeper than the reader's limit on purpose: a structure this program built for
+// itself is not bounded by what its reader would accept.
+constexpr std::size_t kMaxPrintDepth = 8000;
 
-void print_list(const Value& v, bool readable, std::string& out) {
+void print_value(const Value& v, bool readable, std::string& out, std::size_t depth);
+
+void print_list(const Value& v, bool readable, std::string& out, std::size_t depth) {
     out += '(';
     Value cur = v;
     bool first = true;
     while (is_cons(cur)) {
         if (!first) out += ' ';
-        print_value(cur.cons->car, readable, out);
+        print_value(cur.cons->car, readable, out, depth + 1);
         first = false;
         cur = cur.cons->cdr;
     }
     // A dotted tail: (a . b), the shape entity data arrives in.
     if (!is_nil(cur)) {
         out += " . ";
-        print_value(cur, readable, out);
+        print_value(cur, readable, out, depth + 1);
     }
     out += ')';
 }
@@ -68,7 +81,13 @@ void print_string(const Str* s, bool readable, std::string& out) {
     out += '"';
 }
 
-void print_value(const Value& v, bool readable, std::string& out) {
+void print_value(const Value& v, bool readable, std::string& out, std::size_t depth) {
+    // Too deep to descend. An ellipsis rather than an error: printing is what
+    // REPORTS errors, so it must always produce something.
+    if (depth >= kMaxPrintDepth) {
+        out += "...";
+        return;
+    }
     char buf[64];
     switch (v.type) {
         case Type::Nil: out += "nil"; break;
@@ -80,7 +99,7 @@ void print_value(const Value& v, bool readable, std::string& out) {
         case Type::Real: out += format_real(v.d); break;
         case Type::Sym: out.append(v.sym->name.data(), v.sym->name.size()); break;
         case Type::Str: print_string(v.str, readable, out); break;
-        case Type::Cons: print_list(v, readable, out); break;
+        case Type::Cons: print_list(v, readable, out, depth); break;
         case Type::Subr:
             std::snprintf(buf, sizeof(buf), "<Subr: %d>", v.subr);
             out += buf;
@@ -222,13 +241,13 @@ void Context::reset() {
 
 std::string prin1(const Value& v) {
     std::string out;
-    print_value(v, true, out);
+    print_value(v, true, out, 0);
     return out;
 }
 
 std::string princ(const Value& v) {
     std::string out;
-    print_value(v, false, out);
+    print_value(v, false, out, 0);
     return out;
 }
 

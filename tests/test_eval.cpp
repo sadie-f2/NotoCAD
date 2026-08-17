@@ -369,3 +369,93 @@ TEST_CASE("eval: quit stops evaluation without being an error") {
     f.eval("(while (< n 100) (setq n (1+ n)) (if (= n 3) (exit)))");
     CHECK(f.eval("n") == "3");
 }
+
+// --- crashes found by audit, 2026-08-17 -------------------------------------
+//
+// Every one of these segfaulted or corrupted memory before the fix beside it.
+// They are grouped because they share a cause: the evaluator has been guarded
+// against runaway recursion since it was written, and nothing else was.
+
+TEST_CASE("append: no arguments is nil, not a wild read") {
+    // `n - 1` on an unsigned zero is SIZE_MAX, so the loop ran and indexed
+    // a[SIZE_MAX - 1]. APPEND declares min_args 0, so `(append)` was typeable.
+    Fixture f;
+    CHECK(f.eval("(append)") == "nil");
+    CHECK(f.eval("(append '(1 2))") == "(1 2)");
+    CHECK(f.eval("(append '(1) '(2) '(3))") == "(1 2 3)");
+}
+
+TEST_CASE("mapcar: a user-defined function survives the stack reallocating") {
+    // mapcar's `a` points into Interp::stack_, and each apply() re-enters eval
+    // and pushes onto that same vector. Re-reading a[0] per iteration therefore
+    // read freed memory once the vector grew -- which it does on the FIRST call
+    // when the function is a lambda rather than a builtin.
+    //
+    // In release this did not crash. It returned "no function definition" for a
+    // function that was perfectly well defined.
+    Fixture f;
+    f.eval("(defun sq (x) (* x x))");
+    CHECK(f.eval("(mapcar 'sq '(1 2 3 4 5))") == "(1 4 9 16 25)");
+
+    // A builtin never reallocated the stack, which is why the bug hid.
+    CHECK(f.eval("(mapcar '1+ '(1 2 3))") == "(2 3 4)");
+
+    // Two lists, user function, enough elements to reallocate more than once.
+    f.eval("(defun pair (a b) (+ (* 10 a) b))");
+    CHECK(f.eval("(mapcar 'pair '(1 2 3) '(4 5 6))") == "(14 25 36)");
+}
+
+TEST_CASE("reader: nesting is bounded rather than blowing the C stack") {
+    // 50k nested parens segfaulted the release build. read_form and read_list
+    // recurse into each other once per level.
+    Fixture f;
+
+    std::string deep(6000, '(');
+    deep.append(6000, ')');
+    const std::string result = f.eval(deep);
+    // An error, and specifically the depth one -- not a crash, and not a
+    // spurious "malformed" that would hide the real limit.
+    CHECK(result.find("nested too deeply") != std::string::npos);
+
+    // The same shape via quote, which recurses through the same counter.
+    std::string quoted;
+    for (int i = 0; i < 6000; ++i) quoted += '\'';
+    quoted += "x";
+    CHECK(f.eval(quoted).find("nested too deeply") != std::string::npos);
+
+    // And ordinary nesting still reads.
+    CHECK(f.eval("(car '((1 2) 3))") == "(1 2)");
+}
+
+TEST_CASE("printer: a deeply nested list prints rather than crashing") {
+    // Built ITERATIVELY, so eval depth stays at 2 and max_depth_ never sees it.
+    // Printing then recursed once per level -- from the REPL echo, from (print),
+    // and from prin1 inside an error message, so a bad call crashed while trying
+    // to describe itself.
+    Fixture f;
+    f.eval("(setq x nil)");
+    f.eval("(repeat 20000 (setq x (list x)))");
+
+    const std::string printed = f.eval("(prin1 x)");
+    CHECK(!printed.empty());
+    // Truncated with an ellipsis rather than descending forever.
+    CHECK(printed.find("...") != std::string::npos);
+
+    // The error path prints too, and must survive the same structure.
+    const std::string err = f.eval("(apply x '())");
+    CHECK(err.find("<error:") != std::string::npos);
+}
+
+TEST_CASE("wcmatch: repeated negation does not recurse per tilde") {
+    Fixture f;
+    // Semantics first: each '~' flips, and they are an anchor at position zero.
+    CHECK(f.eval("(wcmatch \"abc\" \"a*\")") == "T");
+    CHECK(f.eval("(wcmatch \"abc\" \"~a*\")") == "nil");
+    CHECK(f.eval("(wcmatch \"abc\" \"~~a*\")") == "T");
+
+    // Then the crash: one C frame per tilde used to overflow the stack.
+    f.eval("(setq p \"~\")");
+    f.eval("(repeat 16 (setq p (strcat p p)))");
+    const std::string r = f.eval("(wcmatch \"a\" p)");
+    CHECK((r == "T" || r == "nil"));
+}

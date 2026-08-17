@@ -23,6 +23,7 @@ enum class ReadStatus {
     BadDottedPair,
     BadNumber,
     BadString,
+    TooDeep,          // nesting beyond kMaxReadDepth -- see reader.cpp
 };
 
 const char* read_status_message(ReadStatus s);
@@ -57,6 +58,15 @@ private:
     char peek() const { return src_[pos_]; }
     char advance();
     void skip_whitespace_and_comments();
+
+    // Nesting depth, so that a pathological file cannot blow the C stack.
+    //
+    // read_form and read_list are mutually recursive with one frame pair per
+    // level, and 50k nested parens segfaulted the release build. The evaluator
+    // has had this guard since it was written (Interp::max_depth_); the reader
+    // simply never grew one, and a generated script is exactly where deep
+    // nesting comes from.
+    std::size_t depth_{0};
 
     bool read_form(Value& out);
     bool read_list(Value& out);

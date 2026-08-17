@@ -10,6 +10,19 @@
 namespace ncad::lisp {
 namespace {
 
+// How deep a nested form may be before the reader gives up.
+//
+// Generous, because legitimate machine-generated LISP does nest -- but bounded,
+// because read_form and read_list recurse into each other once per level and
+// 50k parens segfaulted the release build. Matched to the evaluator's default
+// max_depth_ of 2000 so that the two limits tell the same story: a form this
+// program will not evaluate is one it need not read either.
+constexpr std::size_t kMaxReadDepth = 2000;
+
+}  // namespace
+
+namespace {
+
 bool is_space(char c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
@@ -54,6 +67,7 @@ const char* read_status_message(ReadStatus s) {
         case ReadStatus::BadDottedPair: return "malformed dotted pair";
         case ReadStatus::BadNumber: return "malformed number";
         case ReadStatus::BadString: return "malformed string";
+        case ReadStatus::TooDeep: return "form nested too deeply";
     }
     return "unknown error";
 }
@@ -112,10 +126,20 @@ bool Reader::read_form(Value& out) {
         return false;
     }
 
+    // Guarded here rather than in read_list so that '(((... -- quote, which
+    // also recurses -- is bounded by the same counter.
+    if (depth_ >= kMaxReadDepth) {
+        fail(ReadStatus::TooDeep);
+        return false;
+    }
+
     const char c = peek();
     if (c == '(') {
         advance();
-        return read_list(out);
+        ++depth_;
+        const bool ok = read_list(out);
+        --depth_;
+        return ok;
     }
     if (c == ')') {
         advance();
@@ -129,7 +153,10 @@ bool Reader::read_form(Value& out) {
     if (c == '\'') {
         advance();
         Value quoted;
-        if (!read_form(quoted)) return false;
+        ++depth_;
+        const bool ok = read_form(quoted);
+        --depth_;
+        if (!ok) return false;
         // 'x reads as (QUOTE x).
         out = ctx_.cons(make_sym(ctx_.sym_quote()), ctx_.cons(quoted, make_nil()));
         return true;
