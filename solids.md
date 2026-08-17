@@ -159,6 +159,75 @@ convenience; it is load-bearing.
 
 ---
 
+## Checking the kernel's work against our own (proposed)
+
+**Sadie's, and it is the practical answer to the section above** -- if OCCT will
+sometimes leave slivers and razor edges without saying so, the useful question is
+how we find out.
+
+The idea: a solid's creation also puts geometry in ncad's database, so check
+whether the two agree. Whether that is worth anything turns on ONE thing:
+
+- **Tautological if the prediction comes from the kernel.** Ask OCCT for the
+  edges, store them, then compare them to OCCT's solid, and you have compared a
+  thing to itself.
+- **A real check if the prediction comes from ncad's own knowledge.** ncad owns
+  the input profile EXACTLY -- ordinary 2D geometry it built. From that plus "the
+  operation was an extrude by V", it can predict properties of the result without
+  asking anything. Two independent computations then meet at the boundary, and
+  disagreement means something.
+
+This project already runs both idioms and knows the difference. `Dimension` shares
+one `regenerate()` **so the screen and the file cannot disagree**; rendering the
+same database two ways is kept **because the two disagreeing is a real signal**.
+This is the second kind, and the process boundary makes it honest rather than
+contrived -- profile on one side, shape on the other, no shared code quietly
+making them agree.
+
+**What is independently predictable, and cheap:**
+
+- **Euler-Poincare.** Extruding a closed N-segment profile predicts the topology
+  outright: N+2 faces, 3N edges, 2N vertices, V - E + F = 2. Compared against
+  `TopExp_Explorer` counts. Kernels already use this internally as a validity
+  check, so it is proven rather than speculative.
+- **Volume, and this is the pretty one.** A straight extrude is profile area times
+  height, and ncad already computes area -- `AREA` exists. A revolve is **Pappus's
+  centroid theorem**, V = 2*pi*rho*A with rho the centroid's distance from the
+  axis: genuinely independent mathematics, computed from the 2D profile alone and
+  checked against `BRepGProp::VolumeProperties`. The same theorem's first form
+  gives surface area from the profile's perimeter and ITS centroid.
+- **Bounding box.** The profile's box swept along the vector. Crude, free, catches
+  gross errors.
+
+**What it catches, and this is why it earns its place:** a sweep that
+self-intersects and is silently trimmed leaves extra faces and edges; a boolean
+that leaves slivers raises the face count; a degenerate input collapses it. None
+of those announce themselves -- that is the entire complaint about the failure
+mode -- but all of them move the counts off the prediction.
+
+    extrude of a 4-segment profile: expected 6 faces, 12 edges; got 9, 21
+
+Not a diagnosis. But it is the difference between finding out now and finding out
+when the part comes off the printer wrong.
+
+**The costs, honestly.** A profile with tangent-continuous arcs may correctly
+produce FEWER faces than the naive count, because the kernel merged them -- so
+either the predictor models merging or the check is asymmetric, treating extra
+faces as suspicious and fewer as possibly fine. A general sweep is NURBS-fitted to
+a tolerance, so volume agreement needs a relative epsilon, and choosing it is a
+judgement rather than a constant. And it does not extend to arbitrary booleans:
+subtracting one general solid from another has no cheap independent prediction,
+and writing one would be writing a second modeller.
+
+That last limit is not much of a limit, because the operations that DO admit a
+prediction are exactly the ones this engine starts with.
+
+**Shape: a warning, per operation, with the predictor living on ncad's side of the
+boundary and never consulting the kernel.** The moment it asks, it stops being a
+check.
+
+---
+
 ## The part that is not solved: evaluation, and parent-child
 
 **Sadie's, and the sharpest open question here.** One way or another there are
@@ -219,6 +288,10 @@ now" avoids it entirely; the moment one is stored and replayed, we own it.**
 6. **Who owns a shape's placement.** `SF_strategy` has `transform(Mat4)`
    composing into the tree "exactly as `Insert` already does". Across a process
    boundary that needs rethinking.
+7. **Whether the cross-check's predictor models face merging**, or whether the
+   check is simply asymmetric. The cheap answer is asymmetry; the right answer
+   depends on how often tangent-continuous profiles turn up in real use, which
+   nobody has measured.
 
 ## Superseded in SF_strategy
 
