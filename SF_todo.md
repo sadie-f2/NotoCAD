@@ -355,6 +355,28 @@ them, because the reason a thing is wanted is the most perishable part of wantin
       is the precedent for the switch, and `Prompt::file` with `FileIntent::Save` already
       carries the name.
 
+- [x] **DXF read cost the file's size TWICE before parsing.** Found while measuring
+      whether ASan was behind Sadie's machine running short of RAM. It was not; this was.
+
+      `read_dxf_file` fed an `ostringstream` from `rdbuf` and then called `.str()`,
+      which RETURNS A COPY -- so a 2.1 GB drawing occupied itself twice over, plus
+      whatever slack the stream's doubling had left, before a single entity existed.
+      Reading straight into one `std::string` sized from `tellg` removes the copy:
+
+      | | before | after |
+      |---|---|---|
+      | sierpinski_L9, 196 MB | 1889 MB | 1293 MB |
+      | 240k_mac, 2.1 GB | 7800 MB | 5054 MB |
+
+      A third off, and 2.7 GB back on the big one. Entity counts identical.
+
+      **Still open, and bigger:** the whole file text is held in memory for the duration
+      of the parse. A streaming reader would cut peak memory to the drawing itself, and
+      the measurement above says the drawing is the smaller half. Also worth knowing from
+      the same numbers: a line-work drawing costs about **1.3 KB of RSS per entity**,
+      which is a lot for a `Line` carrying maybe a hundred bytes of geometry, and nobody
+      has looked at where it goes.
+
 Not design questions, just things caught in use that should not wait behind phase order.
 
 - [x] **DXFOUT (and SAVE, etc.) should ask which version, not silently use DXFVERSION.**
