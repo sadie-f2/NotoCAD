@@ -96,7 +96,7 @@ and would otherwise outlive `command_line_`, which it dereferences.
 
 If this is ever revisited, the bar is a reproduction, not an argument.
 
-### 2. Destruction order is inverted — STILL OPEN
+### 2. Destruction order was inverted — fixed in `085fbf2`
 
 `main_window.hpp:127-138`. `db_` and `engine_` are members, so they are destroyed
 *before* `~QMainWindow` deletes the child widgets — and `ViewportWidget` holds
@@ -138,10 +138,14 @@ extreme zoom.
 
 ---
 
-## Verified structurally, not reproduced
+## Verified structurally, not reproduced — both since fixed
 
 Real in the code, but the entry points are `draw()` and `accumulate_bbox()`,
-which are reached from the viewport. Could not be triggered from the CLI.
+which are reached from the viewport, so neither could be triggered from the
+CLI. Both are closed in `65dc418` by refusing the input rather than by guarding
+the traversal: a cycle is cut at load and a MINSERT array is clamped, so the
+four traversal functions are safe by construction rather than each needing to
+defend itself.
 
 ### Exponential block traversal
 
@@ -164,9 +168,10 @@ frame. Combined with the cycle above, (10⁹)³².
 
 ---
 
-## Found, headless-testable, not started
+## Found, headless-testable — all now done
 
-These came from the commands audit and need no display. A natural next batch.
+These came from the commands audit and needed no display. Items 1-3 are
+described above as they were found; 4-8 followed in `65dc418` and `d4fe3a3`.
 
 1. ~~**`begin()` does not clear a running transparent command.**~~ **FIXED in
    `ba518cb`, and it was the bug from `a684f9f`.** That commit left a command
@@ -184,28 +189,28 @@ These came from the commands audit and need no display. A natural next batch.
 3. ~~**A stale crossing region misdirects the next STRETCH.**~~ **FIXED.** The
    region is now cleared in `begin()` whether or not the set was empty.
 
-4. **OPEN journals every entity as its own undo group.** `read_dxf_text` clears
+4. ~~**OPEN journals every entity as its own undo group.**~~ **FIXED in `65dc418`** — recording is suppressed for a Replace through an RAII guard. `read_dxf_text` clears
    the journal at the start, while the OPEN command's group is open, so `push()`
    runs at `depth_ == 0` and each change allocates a whole `UndoGroup` holding a
    full `Entity::clone()`. Freed at the end, so a transient ~2× memory spike
    proportional to file size rather than a leak — but unbounded, and paid on
    every OPEN.
 
-5. **NEW and OPEN leave stale handles in the selection and in `previous_`.** Not
+5. ~~**NEW and OPEN leave stale handles in the selection.**~~ **FIXED in `65dc418`.** `previous_` is deliberately left alone: it is const to commands, and 0 found is the honest answer for entities that are gone. Not
    memory-unsafe — every consumer re-looks-up and was checked. The visible effect
    is a selection count referring to a drawing that no longer exists.
 
-6. **Eight headers rely on a transitive `<cstdint>`**: `blocks`, `dash`,
+6. ~~**Eight headers rely on a transitive `<cstdint>`**~~ **FIXED in `d4fe3a3`.**: `blocks`, `dash`,
    `osnap_search`, `tables`, `commands`, `database`, `pick`, `entities`. Only
    `plot.hpp` actually broke, and it is fixed; the rest are one reordering away
    from the same thing. A tidy, not a bug.
 
-7. **Two quadratic load paths.** `apply_common` calls `find_layer` per entity and
+7. ~~**Two quadratic load paths.**~~ **FIXED in `65dc418`**, cached in the reader rather than indexed in Database, so no invariant has to survive undo. `apply_common` calls `find_layer` per entity and
    `resolve_inserts` calls `find_block` per insert, both linear scans. 10k blocks
    × 500k inserts is ~5e9 string compares at load, with no progress and no
    cancel. Not memory-unsafe; load-time DoS from a *valid* file.
 
-8. **`$UCSORG` consumes three group pairs unconditionally** (`dxf_read.cpp:855`).
+8. ~~**`$UCSORG` consumes three group pairs unconditionally**~~ **FIXED in `65dc418`** — GroupStream grew one slot of pushback. (`dxf_read.cpp:855`).
    A short one eats the following `0`/`SECTION` pair, so the whole ENTITIES
    section is skipped and the file loads "ok" and empty. Silent data loss.
 
@@ -246,9 +251,9 @@ Recorded so nobody re-audits them.
   (`spline.cpp:172`). `valid()` checks knot *count*, never ordering, so
   `domain_min() > domain_max()` is reachable via `entmake`. Technically UB;
   libstdc++ returns `hi` and nothing observable happens. Did not trip UBSan.
-- **`dash.cpp:85` has no lower bound on the pattern period.** `(setvar "LTSCALE"
-  1.0e-6)` on a 1000-unit line is ~1.3e9 iterations. Real sysvars get no range
-  validation, and group 49 from a DXF is unvalidated. Redraw path, so GUI-only.
+- ~~**`dash.cpp:85` has no lower bound on the pattern period.**~~ **FIXED in
+  `65dc418`.** Reverting it makes the test suite hang rather than fail, which is
+  the clearest statement of what it was.
 
 ---
 
@@ -268,3 +273,23 @@ cases. Rebuilding it is a few minutes:
 
 Worth considering as a tracked target rather than a scratch script, given it has
 now paid for itself twice and the seed drawing is already in the tree.
+
+---
+
+## Where it ended
+
+Every item the audit found is now either fixed, refused as not a bug, or
+recorded above as known and accepted. One remains in the last category: a
+non-monotone spline knot vector is technically UB in `std::clamp` and
+observably harmless.
+
+Twenty-two defects fixed across fourteen commits, `96239a4` to `085fbf2`. The
+suite went from 1188 cases to 1224, and every fix has a test. Three of those
+tests were checked to genuinely bite by reverting the fix under them: the undo
+one *aborts* under ASan, the DXF one is caught by the fuzz corpus, and the dash
+one *hangs* the suite.
+
+What the exercise is worth repeating for: reasoning found the defects and
+execution decided which were real. It corrected the severity in both directions
+— one item filed as theoretical turned out to be six typed commands, and the
+highest-severity finding of all turned out not to exist.
