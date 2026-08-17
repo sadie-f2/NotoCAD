@@ -157,6 +157,19 @@ EngineStatus CommandEngine::begin(CommandPtr cmd) {
         selection_.clear();
     }
 
+    // And the REGION goes whether or not there was anything in the set.
+    //
+    // A crossing box that matched nothing leaves has_region_ set with no
+    // handles, so the branch above does not run and clear() is never reached --
+    // the rectangle then survives into the next command. STRETCH consults the
+    // rectangle rather than the handles to decide which vertices move
+    // (commands.cpp, StretchCommand::build), so the next STRETCH filtered its
+    // grips against a box from a previous, unrelated selection. The entities
+    // were reported as stretched while nothing moved, or the wrong vertex did,
+    // which is precisely the shape of a feature that looks broken rather than
+    // wrong -- and SF_todo already warns about that failure mode for STRETCH.
+    selection_.clear_region();
+
     command_ = std::move(cmd);
     message_.clear();
     open_group(command_->name());

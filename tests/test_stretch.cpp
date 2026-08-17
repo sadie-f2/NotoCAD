@@ -210,3 +210,35 @@ TEST_CASE("stretch: it is one undo step") {
 TEST_CASE("stretch: S is the alias") {
     CHECK(resolve_command_name("S").name == "STRETCH");
 }
+
+TEST_CASE("stretch: a crossing box that found nothing does not steer the next one") {
+    // The stale region. A crossing box matching NOTHING leaves has_region_ set
+    // with no handles, so begin()'s "promote and clear" branch -- which only
+    // runs for a non-empty selection -- never cleared it. The rectangle then
+    // survived into the next command, and StretchCommand::build consults the
+    // rectangle rather than the handles to decide which vertices move.
+    //
+    // The visible symptom is the bad kind: the entities are reported as
+    // stretched, and nothing moves.
+    Database db;
+    CommandEngine engine(db);
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{100, 0, 0}));
+
+    // A crossing box far away from the line, over empty space. 0 found.
+    stretch_by_crossing(engine, {500, 500, 0}, {600, 600, 0}, {0, 20, 0});
+    CHECK(line_at(db, 0)->start().y == 0.0);
+    CHECK(line_at(db, 0)->end().y == 0.0);
+
+    // Now pick the line individually and stretch it. With no crossing region
+    // this is R12's documented degeneration to MOVE, so BOTH ends travel.
+    // Against a stale box 500 units away, neither would.
+    engine.begin(make_command("STRETCH"));
+    engine.supply(InputValue::of_entity(db.order().front()));
+    engine.supply(InputValue::none());
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_point({0, 7, 0}));
+    CHECK(engine.status() == EngineStatus::Finished);
+
+    CHECK_NEAR(line_at(db, 0)->start().y, 7.0, 1e-12);
+    CHECK_NEAR(line_at(db, 0)->end().y, 7.0, 1e-12);
+}

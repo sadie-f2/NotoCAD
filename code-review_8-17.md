@@ -168,24 +168,21 @@ frame. Combined with the cycle above, (10⁹)³².
 
 These came from the commands audit and need no display. A natural next batch.
 
-1. **`begin()` does not clear a running transparent command.** `command.cpp:150`
-   calls `cancel()`, which touches only `command_` — `transparent_` and
-   `outer_prompt_` survive. `supply()` then routes every value to the old
-   transparent command, and when it finishes it restores the prompt of a command
-   that was cancelled. Trigger: start LINE, pick a point, `'ZOOM`, then at the
-   zoom prompt evaluate `(command "CIRCLE" '(0 0 0) 5)`.
+1. ~~**`begin()` does not clear a running transparent command.**~~ **FIXED in
+   `ba518cb`, and it was the bug from `a684f9f`.** That commit left a command
+   line "answering *Cancel* to every valid command" with two candidate
+   explanations; this was the second of them, "a command stuck at Waiting
+   swallowing input". Sadie confirms it is what she experienced before the audit
+   began. Reproduced headlessly with
+   `LINE / 1,1 / 'ID / (command) / CIRCLE / 5,5 / 3` — ID and DIST are
+   transparent and need no view, which is what made it testable without a
+   display.
 
-2. **A transparent command is leaked on any non-`Waiting` status.**
-   `command.cpp:216` skips the transparent branch and returns `Failed` without
-   resetting `transparent_`, so the next value delivered while waiting is stolen.
+2. ~~**A transparent command is leaked on any non-`Waiting` status.**~~ **FIXED
+   in `ba518cb`**, the same mechanism reached the other way.
 
-3. **A stale crossing region misdirects the next STRETCH.** `command.cpp:155`
-   clears the selection only when it is non-empty, and `has_region_` is reset
-   only by `clear()`. A crossing box that matches nothing leaves the rectangle
-   behind. Trigger: STRETCH, crossing-box over empty space, Enter; then STRETCH
-   again picking entities individually — grips are filtered against the previous,
-   unrelated box, and entities report as stretched while nothing moves. This is
-   exactly the shape `SF_todo.md` warns about for STRETCH.
+3. ~~**A stale crossing region misdirects the next STRETCH.**~~ **FIXED.** The
+   region is now cleared in `begin()` whether or not the set was empty.
 
 4. **OPEN journals every entity as its own undo group.** `read_dxf_text` clears
    the journal at the start, while the OPEN command's group is open, so `push()`
