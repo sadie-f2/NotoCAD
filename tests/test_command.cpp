@@ -844,3 +844,70 @@ TEST_CASE("circle: the radius can be given by pointing, and D means diameter") {
     engine.supply(InputValue::of_point({3, 4, 0}));
     CHECK_NEAR(static_cast<const Circle*>(db.get(db.order().back()))->radius(), 2.5, 1e-12);
 }
+
+TEST_CASE("engine: a transparent command does not outlive the command that hosted it") {
+    // The wedge. supply() routes to `transparent_` whenever it is set and the
+    // status is Waiting, so a transparent command left installed silently eats
+    // the next value meant for whatever came after -- and apply_transparent
+    // then restores `outer_prompt_`, the question asked by a command that no
+    // longer exists. The prompt and the engine disagree about what is running,
+    // and every command after that answers the wrong question.
+    //
+    // Reachable from LISP, which is how it was found: start a command, run a
+    // transparent one at its prompt, then have (command ...) begin something
+    // else. a684f9f left "a command stuck at Waiting swallowing input" as one
+    // of two open explanations for a command line that had started failing; this
+    // is that mechanism.
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("LINE"));
+    engine.supply(InputValue::of_point({1, 1, 0}));
+    REQUIRE(engine.status() == EngineStatus::Waiting);
+
+    // ID is transparent and needs no view, which is what makes this testable
+    // without a display.
+    engine.begin_transparent(make_command("ID"));
+    REQUIRE(engine.in_transparent());
+
+    // Something else begins while the transparent command is still up.
+    engine.begin(make_command("CIRCLE"));
+    CHECK(!engine.in_transparent());
+
+    // And CIRCLE gets its own values, rather than ID eating the first one.
+    engine.supply(InputValue::of_point({5, 5, 0}));
+    engine.supply(InputValue::of_real(3.0));
+    CHECK(engine.status() == EngineStatus::Finished);
+    REQUIRE(db.size() == 1);
+    CHECK(db.get(db.order().back())->type() == EntityType::Circle);
+}
+
+TEST_CASE("engine: a value with nothing to receive it disarms the transparent command") {
+    // The other way it leaked. When supply() cannot route -- no command, or a
+    // status that is not Waiting -- it reported the failure and returned with
+    // `transparent_` still installed, so the next thing to put the engine back
+    // into Waiting had its first value stolen.
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("LINE"));
+    engine.supply(InputValue::of_point({1, 1, 0}));
+    engine.begin_transparent(make_command("ID"));
+    REQUIRE(engine.in_transparent());
+
+    engine.cancel();
+    CHECK(!engine.in_transparent());
+
+    // Nothing is running, so this is a plain error -- and it must not leave
+    // anything armed behind it.
+    engine.supply(InputValue::of_point({2, 2, 0}));
+    CHECK(engine.status() == EngineStatus::Failed);
+    CHECK(!engine.in_transparent());
+
+    // The engine still works afterwards, which is the whole point.
+    engine.begin(make_command("CIRCLE"));
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    engine.supply(InputValue::of_real(2.0));
+    CHECK(engine.status() == EngineStatus::Finished);
+    CHECK(db.size() == 1);
+}

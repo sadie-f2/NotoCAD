@@ -228,6 +228,12 @@ EngineStatus CommandEngine::supply(const InputValue& value) {
     }
 
     if (!command_ || status_ != EngineStatus::Waiting) {
+        // Nothing can be routed, so nothing may stay armed. Reaching here with
+        // a transparent command still installed is how it survived to steal a
+        // value later, once something else had put the engine back into
+        // Waiting.
+        transparent_.reset();
+        outer_prompt_ = Prompt{};
         message_ = "no command is waiting for input";
         status_ = EngineStatus::Failed;
         return status_;
@@ -271,6 +277,25 @@ EngineStatus CommandEngine::run(InputSource& src) {
 }
 
 void CommandEngine::cancel() {
+    // The transparent command goes FIRST, and unconditionally -- before the
+    // early return below, which is reached when there is no outer command but
+    // an inner one may still be installed.
+    //
+    // Leaving it behind wedges the engine. supply() routes to `transparent_`
+    // whenever it is set and the status is Waiting, so a stale one silently
+    // eats the next value meant for whatever came after -- and when it
+    // finishes, apply_transparent restores `outer_prompt_`, the question asked
+    // by a command that no longer exists. The prompt then disagrees with the
+    // engine about what is running, which is exactly the "stuck at Waiting,
+    // swallowing input" story a684f9f left open after the command line started
+    // answering every valid command with an error.
+    //
+    // Escape out of a transparent command does NOT come through here: supply()
+    // handles that case above, keeping the outer command intact, which is the
+    // behaviour worth protecting.
+    transparent_.reset();
+    outer_prompt_ = Prompt{};
+
     if (!command_) return;
     // Committed work survives Escape, as in R12 -- cancelling LINE after three
     // segments keeps them. So the group closes normally and those three
