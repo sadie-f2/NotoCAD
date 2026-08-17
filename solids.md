@@ -228,6 +228,83 @@ check.
 
 ---
 
+## Naming, and the dependency graph (proposed)
+
+**Sadie's, and it answers part of the section below rather than only preceding
+it.**
+
+The observation it came from: in Fusion, a closed figure in a sketch becomes a
+profile automatically, and if the sketch holds only one thing it is auto-selected
+for the extrude. Her FEA workflow was the opposite -- elements arrived by DXF and
+were selected and extruded explicitly. **Both build trees then depend on the
+ORDER of the elements**, and that is the fragile part in each.
+
+### Inputs are nameable; outputs are the hard part
+
+This splits the persistent-naming problem at the seam where it actually gives.
+
+- **Naming the PROFILE you extrude is tractable.** It is something the user made
+  and can therefore name.
+- **Naming the FACE the extrude produced is the unsolved one.** That face did not
+  exist before the operation, so its identity has to be DERIVED, and derivation
+  breaks when the topology changes underneath it.
+
+Solving the first is most of the practical win, because most build-tree breakage
+is inputs going stale rather than faces being renamed.
+
+### The mechanism already exists in this program
+
+`blocks.hpp`, on the block table:
+
+> It also buys R12's redefinition behaviour for free: BLOCK on an existing name
+> ... rewriting a block updates every insertion.
+
+That IS a durable name that can be redefined. Layers, linetypes, UCSs and blocks
+all share one symbol-table pattern -- `find_layer`, `find_block`, `find_ucs` -- so
+a named profile is one more kind of entry in a table people already understand,
+with semantics they have already learned from AutoCAD. **This is not a new concept
+for the database; it is the existing one applied to a new kind of symbol.**
+
+### Order-dependence splits in two, and only one half is real
+
+- **Causal order.** You cannot fillet an edge that does not exist yet. Genuine,
+  unavoidable, worth keeping.
+- **Accidental order.** Selection sequence, creation sequence, "the third face".
+  An implementation artifact leaking into the model.
+
+Sadie's proposal removes the second and keeps the first, which is the right cut.
+**A feature tree is really a DAG of named dependencies; the linear timeline in
+Fusion and SolidWorks is a presentation of it.** Where it is genuinely a list
+rather than a DAG is exactly where things break -- reorder or delete something
+early and downstream references resolve to different objects.
+
+### Automatic versus explicit has a synthesis, and R12 already wrote it
+
+Fusion's auto-select is not wrong, it is UNRECORDED. With one profile in the
+sketch the extrude picks it -- but something had to be stored, so the convenience
+was really "pick, then store an implicit reference". The sugar is at input; the
+fragility is in what got written down.
+
+So do not remove the sugar. **Resolve it to a name at creation time and show the
+name.** Auto-select, auto-name, display it, allow it to be overridden. That is
+this program's existing idiom everywhere else -- `Dimension text <2.5000>`,
+`Offset distance <2.5>` -- a default computed for you, shown explicitly, accepted
+with Enter.
+
+### The argument that makes it not optional
+
+The FEA workflow was explicit because it HAD to be: DXF in, elements chosen
+deliberately, no interactive session to lean on. That generalises. **Once the
+modeller is driven by a script or across a protocol, names stop being a
+robustness preference and become the only addressing that exists** -- "the thing
+I clicked" survives neither a pipe nor a replay.
+
+`programming.md` argues the interface should be a protocol rather than a binding.
+The moment that holds, durable naming is a prerequisite for it rather than a
+competing concern.
+
+---
+
 ## The part that is not solved: evaluation, and parent-child
 
 **Sadie's, and the sharpest open question here.** One way or another there are
@@ -248,13 +325,22 @@ thin -- but a parametric relationship *crosses* it, with the profile living in
 ncad and the shape living in the kernel. The isolation and the dependency pull
 against each other.
 
-Three shapes, none chosen:
+**The naming section above answers part of this.** Named profiles turn the
+`profile -> solid` edge from an implicit reference into a symbol-table lookup,
+which is a mechanism the database already has. What it does NOT answer is what
+happens when the named profile is ERASED, or `solid -> faces`, which is output
+naming and still the hard one.
 
-1. **The kernel owns every relationship.** ncad holds an opaque shape id and its
-   tessellation, and does not know a solid came from a profile. Cleanest, and
-   consistent with the boundary -- but erasing the profile in ncad leaves the
-   kernel referencing something gone, and somebody has to reconcile that. It is
-   the same shape of problem as two owners of a lock file.
+Three shapes, none chosen -- though the first is now the best-argued:
+
+1. **The kernel owns every relationship, keyed by NAME.** ncad holds an opaque
+   shape id and its tessellation, and does not know a solid came from a profile --
+   but the request that made it said "extrude PROFILE_A", so the dependency is
+   recorded in a form that survives a pipe and a replay. Cleanest, consistent with
+   the boundary, and it is what the naming section argues for. What it still owes
+   an answer to: erasing PROFILE_A in ncad leaves the kernel holding a name that
+   resolves to nothing, and somebody has to reconcile that. Same shape of problem
+   as two owners of a lock file.
 2. **ncad's database grows real references.** Honest, and it drags in dangling
    handles, erase ordering, undo, and clipboard remapping -- the whole list that
    `Leader` was designed to avoid.
