@@ -4,7 +4,9 @@
 #include "sample_drawing.hpp"
 
 #include "ncad/database.hpp"
+#include "ncad/blocks.hpp"
 #include "ncad/entities.hpp"
+#include "ncad/mat4.hpp"
 
 #include <memory>
 #include <numbers>
@@ -55,5 +57,52 @@ void build_sample_drawing(Database& db) {
         auto n = std::make_unique<Line>(center, center + normalize(normals[i]) * 5.0);
         n->props().layer = frame;
         db.add(std::move(n));
+    }
+
+    // A POLYLINE, with a bulged segment.
+    //
+    // Here because of what its ABSENCE cost. The README records it: the claim
+    // that "emitted DXF opens in AutoCAD" was tested on this drawing, which
+    // contained no polylines at all, so it never exercised the VERTEX and
+    // SEQEND records -- which is exactly where the bug was. A gate that does
+    // not contain a thing does not test that thing.
+    //
+    // It earned its place a second way in the audit of 2026-08-17: a DXF
+    // mutation fuzzer seeded from this drawing found nothing, because the
+    // drawing has no BLOCKS section and four use-after-frees were sitting in
+    // the block reader.
+    {
+        auto pl = std::make_unique<Polyline>();
+        pl->add({0.0, -8.0, 0.0});
+        pl->add({6.0, -8.0, 0.0}, 0.5);  // bulged: an arc segment
+        pl->add({10.0, -4.0, 0.0});
+        pl->add({0.0, -4.0, 0.0});
+        pl->set_closed(true);
+        pl->props().layer = frame;
+        db.add(std::move(pl));
+    }
+
+    // A block definition, and both an INSERT and a MINSERT of it -- so the
+    // BLOCKS section, the nested-entity path and the array path all appear in
+    // the file the correctness gate opens.
+    {
+        BlockDef def;
+        def.name = "TARGET";
+        def.base = {0, 0, 0};
+        def.entities.push_back(std::make_unique<Circle>(Vec3{0, 0, 0}, 1.0));
+        def.entities.push_back(std::make_unique<Line>(Vec3{-1.5, 0, 0}, Vec3{1.5, 0, 0}));
+        def.entities.push_back(std::make_unique<Line>(Vec3{0, -1.5, 0}, Vec3{0, 1.5, 0}));
+        const BlockId id = db.add_block(std::move(def));
+
+        if (const BlockDef* target = db.block(id)) {
+            auto one = std::make_unique<Insert>(target, Mat4::translation({-6.0, 5.0, 0.0}));
+            one->props().layer = flat;
+            db.add(std::move(one));
+
+            auto many = std::make_unique<Insert>(target, Mat4::translation({-6.0, -8.0, 0.0}));
+            many->set_array(2, 3, 4.0, 4.0);
+            many->props().layer = tilted;
+            db.add(std::move(many));
+        }
     }
 }
