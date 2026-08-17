@@ -15,6 +15,7 @@ add_library(ncad_core STATIC
   text.cpp
   mtext.cpp
   dimension.cpp
+  plot.cpp
   leader.cpp
   font_hershey.cpp
   proxy.cpp

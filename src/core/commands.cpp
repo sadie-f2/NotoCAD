@@ -3182,6 +3182,140 @@ Step DimAngularCommand::next(CommandContext& ctx, const InputValue& value) {
 
 // --- DIM, the mode ------------------------------------------------------------
 
+// --- PLOT ---------------------------------------------------------------------
+
+Step PlotCommand::start(CommandContext&) {
+    state_ = State::Area;
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Plot area [Display/Extents/Limits/Window] <Display>";
+    p.keywords = {"Display", "Extents", "Limits", "Window"};
+    p.allow_empty = true;
+    return Step::ask(p);
+}
+
+Step PlotCommand::ask_file(CommandContext& ctx) {
+    // Built here rather than at the prompt, so a failure to find an area is
+    // reported BEFORE a file name is asked for. Asking and then refusing is the
+    // shape that wastes the user's typing.
+    const Vec3 normal = ctx.db.construction_normal();
+
+    switch (area_) {
+        case PlotArea::Display:
+            if (ctx.view != nullptr) {
+                // The viewport already worked out what it can see, and its clip
+                // IS the display. Copying it beats a second way of saying the
+                // same thing -- and it means the plot frames exactly what is on
+                // screen, which is the whole of what Display promises.
+                const DrawContext dc = ctx.view->draw_context();
+                if (dc.clip_active) {
+                    view_.origin = dc.clip_origin;
+                    view_.ax = dc.clip_x;
+                    view_.ay = dc.clip_y;
+                    view_.min_x = dc.clip_min_x;
+                    view_.max_x = dc.clip_max_x;
+                    view_.min_y = dc.clip_min_y;
+                    view_.max_y = dc.clip_max_y;
+                    break;
+                }
+            }
+            // No view, or a view that clips nothing. Said plainly rather than
+            // silently plotting something else.
+            note_ = ctx.view == nullptr ? "No display here; plotting Extents. "
+                                        : "The view reports no bounds; plotting Extents. ";
+            view_ = plot_view_for_box(ctx.db.extents(), normal);
+            break;
+
+        case PlotArea::Extents: view_ = plot_view_for_box(ctx.db.extents(), normal); break;
+
+        case PlotArea::Limits: {
+            BBox box;
+            box.expand(ctx.db.sysvars().get_point(Sysvar::LimMin));
+            box.expand(ctx.db.sysvars().get_point(Sysvar::LimMax));
+            view_ = plot_view_for_box(box, normal);
+            break;
+        }
+
+        case PlotArea::Window: break;  // already built from the two picks
+    }
+
+    if (!view_.valid()) {
+        return Step::failed(std::string("nothing to plot: ") + plot_area_name(area_) +
+                            " is empty");
+    }
+
+    state_ = State::FileName;
+    Prompt p;
+    p.kind = PromptKind::String;
+    p.message = "Plot to file";
+    p.file = FileIntent::Save;
+    p.file_extension = "pdf";
+    return Step::ask(p);
+}
+
+Step PlotCommand::write(CommandContext& ctx, const std::string& raw) {
+    const std::string path = ensure_extension(expand_user_path(raw), ".pdf");
+
+    // The same advisory-lock courtesy every other write gets. A plot is not the
+    // drawing, but overwriting somebody's open file is the same act.
+    std::string error;
+    if (!write_plot_pdf(ctx.db, view_, PlotPaper{}, path, error)) {
+        return Step::failed(error);
+    }
+    return Step::done(note_ + "Plotted " + plot_area_name(area_) + " to " + path);
+}
+
+Step PlotCommand::next(CommandContext& ctx, const InputValue& value) {
+    if (state_ == State::Area) {
+        if (value.kind == InputKind::None) {
+            area_ = PlotArea::Display;  // Enter takes the offered default
+        } else if (keyword_is(value, "DISPLAY")) {
+            area_ = PlotArea::Display;
+        } else if (keyword_is(value, "EXTENTS")) {
+            area_ = PlotArea::Extents;
+        } else if (keyword_is(value, "LIMITS")) {
+            area_ = PlotArea::Limits;
+        } else if (keyword_is(value, "WINDOW")) {
+            area_ = PlotArea::Window;
+            state_ = State::WindowFirst;
+            Prompt p;
+            p.kind = PromptKind::Point;
+            p.message = "First corner";
+            return Step::ask(p);
+        } else {
+            return Step::failed("unknown plot area");
+        }
+        return ask_file(ctx);
+    }
+
+    if (state_ == State::WindowFirst) {
+        if (value.kind != InputKind::Point) return Step::failed("a point is required");
+        corner_ = value.point;
+        state_ = State::WindowSecond;
+        Prompt p;
+        p.kind = PromptKind::Point;
+        p.message = "Other corner";
+        p.base = corner_;
+        p.has_base = true;
+        p.rubber_band = RubberBand::Box;
+        return Step::ask(p);
+    }
+
+    if (state_ == State::WindowSecond) {
+        if (value.kind != InputKind::Point) return Step::failed("a point is required");
+        BBox box;
+        box.expand(corner_);
+        box.expand(value.point);
+        view_ = plot_view_for_box(box, ctx.db.construction_normal());
+        return ask_file(ctx);
+    }
+
+    if (value.kind != InputKind::String || value.text.empty()) {
+        return Step::failed("a file name is required");
+    }
+    return write(ctx, value.text);
+}
+
 // --- LEADER -------------------------------------------------------------------
 
 Step LeaderCommand::start(CommandContext&) {
@@ -6985,6 +7119,7 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "DIMRADIUS") return std::make_unique<DimRadialCommand>(false);
     if (upper == "DIMDIAMETER") return std::make_unique<DimRadialCommand>(true);
     if (upper == "DIMANGULAR") return std::make_unique<DimAngularCommand>();
+    if (upper == "PLOT") return std::make_unique<PlotCommand>();
     if (upper == "LEADER") return std::make_unique<LeaderCommand>();
     if (upper == "DIM") return std::make_unique<DimCommand>(false);
     if (upper == "DIM1") return std::make_unique<DimCommand>(true);
@@ -7020,7 +7155,7 @@ const std::vector<std::string>& command_names() {
         "ID", "OPEN", "COPYCLIP", "CUTCLIP", "PASTECLIP",
         "LIMITS", "LTSCALE",
         "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "OFFSET", "FILLET", "CHAMFER",
-        "DIM", "DIM1", "DIMLINEAR", "DIMALIGNED", "DIMRADIUS", "DIMDIAMETER", "DIMANGULAR", "LEADER", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
+        "DIM", "DIM1", "DIMLINEAR", "DIMALIGNED", "DIMRADIUS", "DIMDIAMETER", "DIMANGULAR", "LEADER", "PLOT", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
         "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;

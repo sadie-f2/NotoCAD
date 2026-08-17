@@ -301,6 +301,60 @@ them, because the reason a thing is wanted is the most perishable part of wantin
       starts, since Homebrew's bottles are single-architecture and would otherwise
       produce a universal app with frameworks that are not.
 
+- [x] **PLOT, to PDF, from the core.** 0.2.74. The gap that showed: 73 commands and no
+      way to put a drawing on paper. Sadie's scope call was **plot Display first** --
+      what she actually uses, and a good way to debug the core function.
+
+      **The writer is in the core rather than reached through Qt**, and that is the
+      decision. `QPrinter` is a `QPaintDevice`, so the existing `QPainterRenderer` would
+      have driven PDF and the system print queue unchanged -- the cheapest possible
+      path. It was rejected because it strands `ncad`, which has no Qt, and a command
+      the window alone can run is one `(command "PLOT" ...)` cannot drive. Headless
+      plotting over SSH is also the likelier case here than a printer.
+
+      **It is small because there are no fonts.** TEXT is Hershey strokes, so every mark
+      in a drawing is already a polyline, and a PDF carrying only line work needs no
+      embedding, no encoding tables, no CID maps -- the whole of what makes PDF
+      generation unpleasant. Five objects and an xref table. A direct dividend of the
+      font decision, and it changed the cost estimate by a lot.
+
+      `PdfRenderer` is a `Renderer` like any other, driven by the same `draw_database`
+      walk that feeds the screen and the DXF probes, so what plots is what is drawn.
+      `PlotView` is deliberately the same shape as `DrawContext`'s clip -- origin, two
+      unit axes, two intervals -- which makes **PLOT Display a copy of what the viewport
+      already computed** rather than a second way of saying it.
+
+      Display needs a view, so in `ncad` it says so and falls back to Extents rather
+      than pretending -- the honesty a null `ViewControl` already forces on PLAN.
+      Extents, Limits and Window are there too; each names a world rectangle and reduces
+      to `plot_view_for_box`, which takes every CORNER rather than two, since a box's
+      min and max are world-axis extremes and say nothing about a tilted frame.
+
+      Verified by rendering the output through macOS's own PDF engine and looking at it:
+      geometry, dimension arrowheads and the `%%D` degree sign all correct. The tests
+      pin what a reader cannot check for you -- that everything lands inside the margins,
+      that the fit is uniform so a square does not come out oblong, and that the xref
+      offset actually points at the xref table.
+
+      **Black line work only.** That is what a plot was in R12 -- one pen, with colour
+      meaning a pen NUMBER through the colour-to-pen table, which is where lineweight
+      came from too. `aci_color` currently lives in the GUI and returns a `QColor`;
+      sharing the palette with the core belongs with the pen table rather than ahead of
+      it.
+
+- [ ] **PLOT's second phase: scale, paper size, and the pen table.** Today it fits to A4
+      landscape and offers no choice. R12 asks "plotted units = drawing units", which
+      neatly sidesteps `UNITS` / `LUNITS` / `LUPREC` not existing here. The colour-to-pen
+      table is what gives varied lineweight and is the only way to get it. Rotation and
+      origin belong here too. **HIDE is deliberately out** -- R12's plot offers
+      hidden-line removal and this program is wireframe-only, which is an honest omission
+      rather than an oversight.
+
+- [ ] **The GUI's native print dialog.** PLOT writes a file from either front end; a
+      window should also be able to reach real printers and the system queue. `FILEDIA`
+      is the precedent for the switch, and `Prompt::file` with `FileIntent::Save` already
+      carries the name.
+
 Not design questions, just things caught in use that should not wait behind phase order.
 
 - [x] **DXFOUT (and SAVE, etc.) should ask which version, not silently use DXFVERSION.**

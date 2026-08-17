@@ -226,6 +226,24 @@ the formatting is discarded at layout time, not at read time, so opening and
 saving a file cannot quietly destroy it. Wrapping uses the font's real advance
 widths, which is why this could not exist before TEXT had a font.
 
+**PLOT writes PDF, and the writer is in the CORE.** Qt would give it nearly
+free — `QPrinter` is a `QPaintDevice`, so `QPainterRenderer` would drive it
+unchanged — but that strands `ncad`, and a command the window alone can run is
+one `(command "PLOT" ...)` cannot drive. So the PDF writer lives in the core,
+both front ends get it, and headless plotting over SSH works; the Qt shell is
+free to add the native print dialog on top, the `FILEDIA` arrangement exactly.
+
+It is small for a reason worth naming: **there are no fonts.** TEXT is drawn
+with the Hershey stroke font, so every mark is already a polyline, and a PDF of
+pure line work needs no embedding, no encoding tables, no CID maps. A direct
+dividend of the font decision. `PdfRenderer` is a `Renderer` like any other, so
+what plots is what is drawn — which makes rendering the same database a
+three-way check rather than two.
+
+Black line work only for now. That is what a plot was in R12: one pen, with
+colour meaning a pen NUMBER through the colour-to-pen table, which is also
+where lineweight came from. That table is the right second phase.
+
 **Dimensioning is built, and non-associative as R12's are.** A `Dimension` holds
 what it measures and GENERATES its line work; `draw()` and `dxf_write()` call the
 same `regenerate()`, so the screen and the file cannot disagree. On the way out it
@@ -345,7 +363,7 @@ suffixed `_lib` to avoid colliding with the `ncad_gui` executable.
 ```
 include/ncad/        vec3, mat4, ecs, bbox, osnap, entity, entities, database, dxf,
                      command, commands, font, input_text, osnap_derived,
-                     osnap_search, pick, render, scene, sysvar, viewport
+                     osnap_search, pick, plot, render, scene, sysvar, viewport
 include/ncad/lisp/   arena, value, reader, eval
 src/core/            geometry kernel, entities, database, DXF writer, commands
 src/lisp/            interpreter: arena, values, reader, eval, builtins, subrs

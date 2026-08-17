@@ -15,6 +15,7 @@
 #include "ncad/command.hpp"
 #include "ncad/dxf.hpp"
 #include "ncad/entities.hpp"
+#include "ncad/plot.hpp"
 #include "ncad/render.hpp"
 
 #include <string_view>
@@ -1068,6 +1069,35 @@ private:
     Vec3 centre_{};
     double radius_{0.0};
     Vec3 normal_{0.0, 0.0, 1.0};
+};
+
+// PLOT: the drawing on paper, as PDF.
+//
+// R12 put this behind a dialog; here it is prompts, which is what makes it
+// scriptable and what lets `(command "PLOT" ...)` drive it. See `plot.hpp` for
+// why the PDF writer is in the core rather than reached through Qt.
+//
+// **Display is the default because it is what gets used.** It plots what the
+// viewport is showing, which needs a view -- so in `ncad`, which has none, it
+// says so and falls back to Extents rather than pretending. That is the same
+// honesty `ViewControl` being null already forces on PLAN.
+class PlotCommand final : public Command {
+public:
+    const char* name() const override { return "PLOT"; }
+    Step start(CommandContext& ctx) override;
+    Step next(CommandContext& ctx, const InputValue& value) override;
+
+private:
+    enum class State : std::uint8_t { Area, WindowFirst, WindowSecond, FileName };
+
+    Step ask_file(CommandContext& ctx);
+    Step write(CommandContext& ctx, const std::string& path);
+
+    State state_{State::Area};
+    PlotArea area_{PlotArea::Display};
+    Vec3 corner_{};
+    PlotView view_{};
+    std::string note_;
 };
 
 // LEADER: an arrow, a path of segments, and a note at the far end.
