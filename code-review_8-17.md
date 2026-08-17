@@ -56,34 +56,47 @@ through a transitive include and Debug does not. The suite `CLAUDE.md` calls
 
 ---
 
-## Verified, not fixed — needs a display
+## The GUI findings, after testing
 
-All of these are in `src/gui`, all reasoned from code by the audit and **not
-observed**, because there is no display on the Linux box. They are the natural
-first batch for a macOS session.
+All six were reasoned from code and none observed, because the Linux box has no
+display. Sadie tested them over X11 from a MacBook on 17 August. Four were real
+and are fixed in `5f5bfa4`; one was **not a bug**; one remains untested and
+unfixed.
 
-### 1. The key filter is installed on `qApp`, not the window
+The negative result is the most useful line in this section. It is recorded at
+length so that nobody re-derives the same plausible-looking reasoning and
+"fixes" it again.
 
-`main_window.cpp:178`. It therefore sees key presses destined for every object in
-the process, including modal dialogs. `input_->setFocus()` cannot make
-`hasFocus()` true while a dialog owns the active window, so the early-out never
-engages and *every* subsequent keystroke is stolen.
+### 1. The key filter's scope — DID NOT REPRODUCE. Not a bug.
 
-The concrete path: make an edit, click the window close button, and the "Save
-before closing?" box appears from inside `closeEvent`'s nested event loop. Press
-Enter — instead of the default button, `returnPressed` fires, `feed_line("")`
-runs, and a blank line at an interactive prompt **repeats the last command**
-(`prompt.cpp:451`). Arbitrary command execution inside `closeEvent`. Type `QUIT`
-there and a second `closeEvent` recurses while the first one's `exec()` is still
-on the stack.
+The claim: the filter is installed on `qApp` (`main_window.cpp:178`), so it sees
+key presses destined for every object in the process. A modal dialog would
+therefore have its keystrokes stolen — `input_->setFocus()` cannot make
+`hasFocus()` true while the dialog owns the active window, so the early-out never
+engages. The predicted symptom was that Enter at "Save before closing?" would not
+activate the default button but would instead run `feed_line("")`, which at an
+interactive prompt repeats the last command (`prompt.cpp:451`) — arbitrary
+command execution inside `closeEvent`.
 
-Same theft applies to a non-native `QFileDialog` (the file name cannot be typed
-at all) and to the toolbar's popup menu.
+**Tested, and it does not happen.** At the save dialog Enter activates the
+default button; QSAVE runs because QSAVE is what the button does, and it appears
+in the transcript because the transcript reports commands. It does not re-run the
+previous command. Checked on an earlier build too, so this is not something a
+recent change repaired.
 
-This is the highest-severity item left. `86ae3e3` — "the window closed and the
-process lived on" — suggests the area has produced one of these already.
+Why the reasoning was wrong is not established, and does not much matter: Qt
+delivers key events to the focus widget through a path this filter does not
+straddle in the way the argument assumed. What matters is that a change WAS
+written to "fix" it and then discarded, because changing key routing to repair a
+phantom is worse than leaving it alone.
 
-### 2. Destruction order is inverted
+The one piece kept from that work is unrelated and defensible on its own:
+`~MainWindow` now removes the filter explicitly, since it is installed on `qApp`
+and would otherwise outlive `command_line_`, which it dereferences.
+
+If this is ever revisited, the bar is a reproduction, not an argument.
+
+### 2. Destruction order is inverted — STILL OPEN
 
 `main_window.hpp:127-138`. `db_` and `engine_` are members, so they are destroyed
 *before* `~QMainWindow` deletes the child widgets — and `ViewportWidget` holds
@@ -95,7 +108,7 @@ Nothing reaches it today: `ViewportWidget`'s destructor is defaulted and
 `leaveEvent` touches only `snap_`. It is a latent hazard, and any handler added
 to `ViewportWidget` that reads `db_` or `engine_` makes it immediate.
 
-### 3. Middle-drag permanently un-hides the system cursor
+### 3. Middle-drag un-hid the system cursor — CONFIRMED, fixed in `5f5bfa4`
 
 `viewport_widget.cpp:169` sets `Qt::BlankCursor` because the crosshair is painted
 against the UCS; `:850` restores `Qt::CrossCursor` on release. Pan once and you
@@ -104,7 +117,7 @@ UCS one the feature exists to provide. Cosmetic, one word to change, and given
 `babd71d` ("both crashes were the same cursor") it is worth doing carefully
 rather than casually.
 
-### 4. The osnap marker is not cleared on Escape
+### 4. The osnap marker survived Escape — CONFIRMED, fixed in `5f5bfa4`
 
 `viewport_widget.cpp:575-579`. `on_cancel_requested` calls `update()` but not
 `refresh_osnap()` — the typed cancel path at `main_window.cpp:393` does. Start
@@ -112,12 +125,12 @@ LINE, hover an endpoint until the glyph shows, press Escape without moving: the
 marker and its label stay painted over a drawing with no command running. Not a
 crash; the handle is re-validated through `Database::get`.
 
-### 5. `push_view()` runs even when the view does not change
+### 5. `push_view()` ran even when the view did not change — fixed in `5f5bfa4`, not interactively confirmed
 
 `viewport_widget.cpp:187-191`. Home ten times on an empty drawing and the 10-deep
 view stack fills with identical copies, evicting every real previous view.
 
-### 6. Unguarded `static_cast<int>` on a projected coordinate
+### 6. Unguarded `static_cast<int>` on a projected coordinate — fixed in `5f5bfa4`, not interactively confirmed
 
 `viewport_widget.cpp:491`. `qpainter_renderer.cpp:36` documents this exact hazard
 and clamps; this call site does not. Needs a UCS origin far from the model plus
