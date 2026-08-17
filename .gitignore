@@ -23,3 +23,6 @@ compile_commands.json
 # builds on and never a deliverable on either.
 .DS_Store
 *~
+
+# Machine-specific tool permissions. The skills beside it ARE shared.
+.claude/settings.local.json
