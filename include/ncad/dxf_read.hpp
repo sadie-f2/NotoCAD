@@ -62,6 +62,13 @@ struct DxfReadResult {
     // merely unusual.
     std::size_t unresolved_inserts{0};
 
+    // INSERTs refused because their definition would have closed a loop. R12
+    // cannot produce one -- a block does not exist while it is being defined --
+    // but a DXF is data from elsewhere and may claim otherwise, and a cycle
+    // costs 2^32 traversals rather than a stack overflow, since the kernel's
+    // guard bounds depth and not work.
+    std::size_t cyclic_inserts{0};
+
     // Set when the file names a version this reader does not claim to handle.
     // Reading continues anyway -- an R13 file is mostly R12 plus entities that
     // become proxies -- but the caller may want to say so.

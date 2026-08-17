@@ -204,3 +204,26 @@ TEST_CASE("dash: hit-testing does not see the gaps") {
     // picks a dashed line anywhere along it, gaps included.
     CHECK_NEAR(d, 0.0, 1e-6);
 }
+
+TEST_CASE("dash: a vanishingly small pattern draws continuous rather than hanging") {
+    // The dashing loop spends one pattern element per iteration, so the count
+    // is segment_length / period -- and nothing bounded the period from below.
+    // LTSCALE is a Real sysvar and Real sysvars are not range-checked, so
+    // an LTSCALE of 1e-6 on a 1000-unit line is ~1.3e9 iterations, each
+    // emitting a two-point polyline downstream. A DXF's group 49 can do the
+    // same with no user action at all.
+    //
+    // Below the floor a dash is far smaller than a pixel at any zoom, so
+    // continuous is not a compromise -- it is what it would have looked like.
+    Database db;
+    make_dashed_drawing(db, 1000.0, 1.0e-6);
+
+    Capture cap;
+    DashRenderer dashed(cap, db, 1.0e-6);
+    draw_database(db, DrawContext{}, dashed);
+
+    // The real assertion is that this returns at all. One run rather than a
+    // billion says it took the continuous path.
+    CHECK(cap.runs.size() == 1);
+    CHECK_NEAR(cap.total_length(), 1000.0, 1e-9);
+}

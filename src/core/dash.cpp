@@ -43,7 +43,19 @@ void DashRenderer::begin_entity(const EntityProps& props) {
         pattern_.push_back(d < 0.0 ? -std::abs(scaled) : std::abs(scaled));
         period_ += std::abs(scaled);
     }
-    if (period_ <= 0.0) pattern_.clear();  // degenerate: treat as continuous
+    // A floor, not just a zero test. The loop in polyline() spends one pattern
+    // element per iteration, so the iteration count is segment_length/period_
+    // -- and NOTHING bounds the period from below. LTSCALE is a Real sysvar and
+    // Real sysvars are not range-checked, so `(setvar "LTSCALE" 1.0e-6)` on a
+    // 1000-unit line is ~1.3e9 iterations, each emitting a two-point polyline
+    // downstream. Group 49 straight out of a DXF can do the same with no user
+    // action at all: the drawing simply wedges on the redraw after it loads.
+    //
+    // Below this a dash is far smaller than a pixel at any sane zoom, so
+    // drawing the entity continuous is not a compromise -- it is what the
+    // dashes would have looked like anyway.
+    constexpr double kMinPeriod = 1e-4;
+    if (period_ < kMinPeriod) pattern_.clear();  // degenerate: treat as continuous
 
     // Every entity starts at the beginning of its pattern. R12 restarts per
     // entity rather than running one continuous phase through the drawing,

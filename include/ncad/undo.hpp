@@ -147,6 +147,32 @@ public:
 
     bool replaying() const { return replaying_; }
 
+    // Stops the journal recording for as long as it lives.
+    //
+    // For loading a drawing, which is not an edit. Without it, read_dxf_text
+    // cleared the journal at the START -- resetting depth_ to zero underneath
+    // the OPEN command's open group -- so every entity read afterwards became
+    // its own UndoGroup holding a full Entity::clone(). All of it freed again
+    // by the clear at the end, so not a leak: a transient doubling of the
+    // drawing's memory, proportional to file size, paid on every OPEN.
+    //
+    // Deliberately RAII and deliberately not a plain setter: a suppression left
+    // on is a drawing that silently cannot be undone.
+    class SuppressRecording {
+    public:
+        explicit SuppressRecording(UndoJournal& journal)
+            : journal_(journal), previous_(journal.replaying_) {
+            journal_.replaying_ = true;
+        }
+        ~SuppressRecording() { journal_.replaying_ = previous_; }
+        SuppressRecording(const SuppressRecording&) = delete;
+        SuppressRecording& operator=(const SuppressRecording&) = delete;
+
+    private:
+        UndoJournal& journal_;
+        bool previous_;
+    };
+
     bool can_undo() const { return !undo_.empty(); }
     bool can_redo() const { return !redo_.empty(); }
 

@@ -4326,6 +4326,9 @@ Step PasteClipCommand::commit(CommandContext& ctx, const Vec3* dest) {
     if (r.unresolved_inserts > 0) {
         msg += ", " + std::to_string(r.unresolved_inserts) + " insert(s) unresolved";
     }
+    if (r.cyclic_inserts > 0) {
+        msg += ", " + std::to_string(r.cyclic_inserts) + " cyclic insert(s) refused";
+    }
     return Step::done(msg);
 }
 
@@ -6727,6 +6730,15 @@ namespace {
 void reset_drawing(CommandContext& ctx) {
     ctx.db.clear();
     ctx.db.journal().clear();
+
+    // The selection named entities in a drawing that no longer exists. OPEN
+    // already does this and NEW did not, so the header went on reporting a
+    // selection over an empty drawing.
+    //
+    // `previous` is deliberately left alone. It is const to commands, and the
+    // honest answer for a Previous set whose entities are gone is what already
+    // happens: every consumer re-looks-up the handles and reports 0 found.
+    ctx.selection.clear();
     ctx.db.sysvars().set_metadata(Sysvar::DwgName, SysvarValue::of_string(""));
     ctx.db.sysvars().set_metadata(Sysvar::DwgPrefix, SysvarValue::of_string(""));
 
@@ -6954,6 +6966,12 @@ Step DxfInCommand::next(CommandContext& ctx, const InputValue& value) {
         // cannot edit, and knowing before editing beats discovering after.
         message += ", " + std::to_string(r.proxies) +
                    " kept as-is (not editable, written back unchanged)";
+    }
+    if (r.cyclic_inserts != 0) {
+        // Said rather than swallowed: the drawing is missing insertions it
+        // claimed, and a file that claims a block contains itself is one the
+        // user probably wants to know about.
+        message += ", " + std::to_string(r.cyclic_inserts) + " cyclic insert(s) refused";
     }
     if (r.newer_version) message += ". Warning: file is " + r.version + ", newer than R12";
 

@@ -10,6 +10,8 @@
 // this program built.
 #include "ncad/entities.hpp"
 
+#include <algorithm>
+
 #include "ncad/dxf.hpp"
 #include "ncad/ecs.hpp"
 #include "ncad/render.hpp"
@@ -180,8 +182,15 @@ void flatten_insert(const Insert& ins, std::vector<EntityPtr>& out) {
 
 void Insert::set_array(std::int16_t rows, std::int16_t columns, double row_spacing,
                        double column_spacing) {
-    rows_ = rows > 0 ? rows : 1;
-    columns_ = columns > 0 ? columns : 1;
+    // Clamped, not merely made positive. Every traversal of a MINSERT walks the
+    // definition rows x columns times, so the DXF's own maximum -- 32767 each --
+    // is 1.07e9 full traversals per insert, per redraw, from two group codes in
+    // a file. R12's own limit was far smaller and nobody arrays a block ten
+    // thousand deep on purpose; a file that asks for it is corrupt or hostile,
+    // and either way the honest answer is to draw what can be drawn.
+    constexpr std::int16_t kMaxArray = 1000;
+    rows_ = std::clamp<std::int16_t>(rows > 0 ? rows : 1, 1, kMaxArray);
+    columns_ = std::clamp<std::int16_t>(columns > 0 ? columns : 1, 1, kMaxArray);
     row_spacing_ = row_spacing;
     column_spacing_ = column_spacing;
 }

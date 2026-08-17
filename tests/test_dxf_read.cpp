@@ -695,3 +695,93 @@ TEST_CASE("dxf read: a hostile colour index is clamped at the door") {
     CHECK(e->props().color >= -256);
     CHECK(e->props().color <= 256);
 }
+
+TEST_CASE("dxf read: a short header variable does not eat the next section") {
+    // $UCSORG took three groups unconditionally, so a truncated one swallowed
+    // whatever followed -- and what follows a header variable is usually the
+    // 0/SECTION pair opening ENTITIES. The whole section was then skipped and
+    // the file loaded clean and EMPTY: silent data loss, no error, from a file
+    // only slightly malformed.
+    Database db;
+    const DxfReadResult r =
+        read_dxf_text(db, dxf({"  0\nSECTION\n  2\nHEADER",
+                               "  9\n$UCSORG\n 10\n0.0",  // no 20, no 30
+                               kEntitiesOpen,
+                               "  0\nLINE\n 10\n0.0\n 20\n0.0\n 11\n1.0\n 21\n1.0",
+                               kEnd}),
+                      DxfReadMode::Replace);
+    CHECK(r.ok);
+    CHECK(db.size() == 1);
+}
+
+TEST_CASE("dxf read: a block that inserts itself is refused rather than accepted") {
+    // The kernel's kMaxBlockDepth bounds how DEEP a traversal goes, not how
+    // much work it does: a block holding TWO insertions of itself fans out to
+    // 2^32 traversals at depth 32, which is a hang rather than a stack
+    // overflow. R12 cannot produce such a file -- a block does not exist while
+    // it is being defined -- but a DXF is data from elsewhere.
+    Database db;
+    const DxfReadResult r =
+        read_dxf_text(db, dxf({"  0\nSECTION\n  2\nBLOCKS",
+                               "  0\nBLOCK\n  2\nA",
+                               "  0\nLINE\n 10\n0.0\n 20\n0.0\n 11\n1.0\n 21\n1.0",
+                               "  0\nINSERT\n  2\nA\n 10\n1.0\n 20\n0.0",
+                               "  0\nINSERT\n  2\nA\n 10\n2.0\n 20\n0.0",
+                               "  0\nENDBLK",
+                               "  0\nENDSEC",
+                               kEntitiesOpen,
+                               "  0\nINSERT\n  2\nA\n 10\n0.0\n 20\n0.0",
+                               kEnd}),
+                      DxfReadMode::Replace);
+    CHECK(r.ok);
+    // Both self-insertions refused, and said so rather than swallowed.
+    CHECK(r.cyclic_inserts == 2);
+
+    // The model-space insert is legitimate and still resolves, so the drawing
+    // is truncated rather than emptied.
+    REQUIRE(db.size() == 1);
+    const Entity* e = db.get(db.order().front());
+    REQUIRE(e != nullptr);
+    REQUIRE(e->type() == EntityType::Insert);
+    CHECK(static_cast<const Insert*>(e)->definition() != nullptr);
+
+    // And a traversal terminates, which is the whole point.
+    CHECK(e->bbox().valid());
+}
+
+TEST_CASE("dxf read: a MINSERT array from a file is clamped") {
+    // rows x columns full definition traversals, per redraw. The DXF maximum of
+    // 32767 each is 1.07e9, from two group codes.
+    Database db;
+    read_dxf_text(db, dxf({"  0\nSECTION\n  2\nBLOCKS",
+                           "  0\nBLOCK\n  2\nA",
+                           "  0\nLINE\n 10\n0.0\n 20\n0.0\n 11\n1.0\n 21\n1.0",
+                           "  0\nENDBLK",
+                           "  0\nENDSEC",
+                           kEntitiesOpen,
+                           "  0\nINSERT\n  2\nA\n 10\n0.0\n 20\n0.0\n 70\n32767\n 71\n32767",
+                           kEnd}),
+                  DxfReadMode::Replace);
+    REQUIRE(db.size() == 1);
+    const Insert* ins = static_cast<const Insert*>(db.get(db.order().front()));
+    CHECK(ins->rows() <= 1000);
+    CHECK(ins->columns() <= 1000);
+    CHECK(ins->rows() >= 1);
+}
+
+TEST_CASE("dxf read: loading a drawing is not an undoable edit") {
+    // read_dxf_text cleared the journal at the START, resetting the depth under
+    // any open command group, so every entity read became its own UndoGroup
+    // holding a full clone -- allocated, then thrown away by the clear at the
+    // end. A transient doubling of the drawing's memory on every OPEN.
+    Database db;
+    read_dxf_text(db, dxf({kEntitiesOpen,
+                           "  0\nLINE\n 10\n0.0\n 20\n0.0\n 11\n1.0\n 21\n1.0",
+                           "  0\nLINE\n 10\n1.0\n 20\n1.0\n 11\n2.0\n 21\n2.0",
+                           kEnd}),
+                  DxfReadMode::Replace);
+    REQUIRE(db.size() == 2);
+    // Nothing to undo: the load is not an edit, and undoing past it is not
+    // meaningful.
+    CHECK(!db.journal().can_undo());
+}

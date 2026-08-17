@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 #include <cstdlib>
 #include <fstream>
 #include <numbers>
@@ -28,6 +29,13 @@ public:
     explicit GroupStream(std::string text) : text_(std::move(text)) {}
 
     bool next(int& code, std::string& value) {
+        if (has_pending_) {
+            code = pending_code_;
+            value = pending_value_;
+            has_pending_ = false;
+            return true;
+        }
+
         std::string code_line;
         if (!read_line(code_line)) return false;
         if (!read_line(value)) return false;
@@ -39,6 +47,14 @@ public:
         if (end == code_line.c_str()) return false;
         code = static_cast<int>(parsed);
         return true;
+    }
+
+    // One slot of pushback, for a reader that has to LOOK at the next group to
+    // know whether it wants it. Enough for that: nothing here needs two.
+    void unget(int code, const std::string& value) {
+        pending_code_ = code;
+        pending_value_ = value;
+        has_pending_ = true;
     }
 
 private:
@@ -66,6 +82,10 @@ private:
 
     std::string text_;
     std::size_t pos_{0};
+
+    int pending_code_{0};
+    std::string pending_value_;
+    bool has_pending_{false};
 };
 
 // A DXF is untrusted input, and strtod happily parses "nan", "-inf" and
@@ -150,6 +170,11 @@ private:
         Insert* entity{nullptr};
         std::string block_name;
         InsertPlacement placement;
+        // The block this insert is INSIDE, empty for model space. Recorded so
+        // that a cycle can be recognised: an edge from `owner` to `block_name`
+        // that closes a loop is one this drawing must not hold. See
+        // break_block_cycles.
+        std::string owner;
     };
 
     void resolve_inserts();
@@ -160,6 +185,39 @@ private:
     // is worth more than the scan.
     void forget_pending(const Entity* e);
     void forget_pending(const BlockDef& def);
+
+    // Refuses any INSERT whose definition would close a loop. A DXF is data
+    // from elsewhere and may claim a cycle; the kernel's depth guard bounds how
+    // DEEP a traversal goes but not how much WORK it does, so a block holding
+    // two insertions of itself is 2^32 traversals at depth 32 rather than a
+    // stack overflow. Cheaper and more honest to refuse it at the door.
+    void break_block_cycles();
+
+    // The block currently being collected, so a nested INSERT knows its owner.
+    std::string collecting_block_;
+
+    // Name -> id, case-folded, for the two lookups the reader does PER RECORD.
+    // Database::find_layer and find_block are linear scans -- fine for a
+    // command, quadratic for a file: 500k entities against 10k layers is ~5e9
+    // string compares at load, with no progress and no cancel.
+    //
+    // Cached here rather than indexed in Database on purpose. The database's
+    // tables are edited by commands and rewound by undo, and an index inside it
+    // would be a second thing to keep true across all of that. A reader lives
+    // for one file and then dies, so its cache cannot go stale.
+    std::unordered_map<std::string, LayerId> layer_cache_;
+    std::unordered_map<std::string, BlockId> block_cache_;
+
+    static std::string folded(const std::string& name) {
+        std::string out(name);
+        for (char& c : out) {
+            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+        }
+        return out;
+    }
+
+    LayerId layer_for(const std::string& name);
+    BlockId block_for(const std::string& name);
 
     Database& db_;
     DxfReadMode mode_{DxfReadMode::Replace};
@@ -173,11 +231,7 @@ private:
 };
 
 void Reader::apply_common(Entity& e, const EntityGroups& g) {
-    const std::string layer = g.text(8, "0");
-    LayerId id = db_.find_layer(layer);
-    // A file may name a layer its own table forgot to define. Creating it is
-    // better than dropping the entity onto layer 0 and losing the name.
-    if (id == kInvalidLayer) id = db_.add_layer(layer);
+    const LayerId id = layer_for(g.text(8, "0"));
     e.props().layer = id;
 
     const std::string ltype = g.text(6);
@@ -528,7 +582,7 @@ EntityPtr Reader::build(const EntityGroups& g, GroupStream& in, int& pending_cod
                          g.real(45, 0.0), g.real(44, 0.0));
         }
 
-        pending_inserts_.push_back({e.get(), g.text(2), p});
+        pending_inserts_.push_back({e.get(), g.text(2), p, collecting_block_});
         return e;
     }
 
@@ -770,6 +824,7 @@ void Reader::read_blocks(GroupStream& in) {
         if (in_header) {
             in_header = false;
             def.name = current.text(2);
+            collecting_block_ = def.name;
             def.base = current.point(10);
             def.flags = static_cast<std::int16_t>(to_int(current.text(70, "0")));
         }
@@ -778,6 +833,7 @@ void Reader::read_blocks(GroupStream& in) {
             // A previous BLOCK that never reached ENDBLK is abandoned here.
             forget_pending(def);
             def = BlockDef{};
+            collecting_block_.clear();
             in_block = true;
             current = EntityGroups{};
             current.name = value;
@@ -797,6 +853,12 @@ void Reader::read_blocks(GroupStream& in) {
                 }
                 db_.add_block(std::move(def));
                 ++result_.blocks;
+                // The cache records MISSES too, and a name that missed before
+                // this block was defined must not go on missing. Today every
+                // block_for call happens after the BLOCKS section is finished,
+                // so this cannot bite -- it is here so that it still cannot if
+                // that stops being true.
+                block_cache_.clear();
             } else {
                 // A BLOCK with no group 2 has nowhere to go, and its entities
                 // die with `def` on the next line.
@@ -804,6 +866,7 @@ void Reader::read_blocks(GroupStream& in) {
             }
             def = BlockDef{};
             in_block = false;
+            collecting_block_.clear();
             continue;
         }
         if (value == "ENDSEC") {
@@ -835,11 +898,92 @@ void Reader::forget_pending(const BlockDef& def) {
     for (const EntityPtr& owned : def.entities) forget_pending(owned.get());
 }
 
+LayerId Reader::layer_for(const std::string& name) {
+    const std::string key = folded(name);
+    const auto it = layer_cache_.find(key);
+    if (it != layer_cache_.end()) return it->second;
+
+    LayerId id = db_.find_layer(name);
+    // A file may name a layer its own table forgot to define. Creating it is
+    // better than dropping the entity onto layer 0 and losing the name.
+    if (id == kInvalidLayer) id = db_.add_layer(name);
+    layer_cache_.emplace(key, id);
+    return id;
+}
+
+BlockId Reader::block_for(const std::string& name) {
+    const std::string key = folded(name);
+    const auto it = block_cache_.find(key);
+    if (it != block_cache_.end()) return it->second;
+
+    const BlockId id = db_.find_block(name);
+    // A miss is cached too. An INSERT naming a block the file never defines is
+    // often repeated many times, and re-scanning the whole table for each of
+    // them is the case this exists to avoid.
+    block_cache_.emplace(key, id);
+    return id;
+}
+
+void Reader::break_block_cycles() {
+    // The edges are exactly the pending inserts that live inside a block:
+    // owner -> target. A model-space insert cannot be part of a cycle, because
+    // nothing inserts model space.
+    //
+    // Keyed on BlockId rather than on the name, so the database's own
+    // case-insensitive lookup decides what "the same block" means and this does
+    // not grow a second opinion about it.
+    struct Edge {
+        BlockId from{kInvalidBlock};
+        BlockId to{kInvalidBlock};
+        Insert* entity{nullptr};
+    };
+
+    std::vector<Edge> edges;
+    for (const PendingInsert& pending : pending_inserts_) {
+        if (pending.entity == nullptr || pending.owner.empty()) continue;
+        if (pending.entity->definition() == nullptr) continue;
+        const BlockId from = block_for(pending.owner);
+        const BlockId to = block_for(pending.block_name);
+        if (from == kInvalidBlock || to == kInvalidBlock) continue;
+        edges.push_back({from, to, pending.entity});
+    }
+
+    // For each edge, can the target reach the owner again? If so this insert is
+    // what closes the loop, and cutting it costs a drawing one insertion rather
+    // than a viewport that never comes back.
+    for (Edge& edge : edges) {
+        std::vector<BlockId> stack{edge.to};
+        std::vector<BlockId> seen;
+        bool loops = false;
+
+        while (!stack.empty()) {
+            const BlockId here = stack.back();
+            stack.pop_back();
+            if (here == edge.from) {
+                loops = true;
+                break;
+            }
+            if (std::find(seen.begin(), seen.end(), here) != seen.end()) continue;
+            seen.push_back(here);
+            for (const Edge& next : edges) {
+                if (next.from == here && next.entity->definition() != nullptr) {
+                    stack.push_back(next.to);
+                }
+            }
+        }
+
+        if (loops) {
+            edge.entity->set_definition(nullptr);
+            ++result_.cyclic_inserts;
+        }
+    }
+}
+
 void Reader::resolve_inserts() {
     for (const PendingInsert& pending : pending_inserts_) {
         if (!pending.entity) continue;
 
-        const BlockId id = db_.find_block(pending.block_name);
+        const BlockId id = block_for(pending.block_name);
         const BlockDef* def = db_.block(id);
         if (!def) {
             // An INSERT naming a block the file never defined. Left with no
@@ -855,6 +999,7 @@ void Reader::resolve_inserts() {
         // the definition and was not available when the record was read.
         pending.entity->set_placement(compose_placement(pending.placement, def->base));
     }
+    break_block_cycles();
     pending_inserts_.clear();
 }
 
@@ -926,9 +1071,20 @@ DxfReadResult Reader::run(std::string text) {
         if (code == 9 && (value == "$UCSORG" || value == "$UCSXDIR" || value == "$UCSYDIR")) {
             const std::string which = value;
             Vec3 p{};
-            // Three coordinate groups follow, in order.
+            // Up to three coordinate groups follow -- and only as many as are
+            // actually there. Taking three unconditionally meant a short
+            // $UCSORG swallowed whatever came after it, and what usually comes
+            // after a header variable is the 0/SECTION pair that opens
+            // ENTITIES. The whole section was then skipped and the file loaded
+            // clean and empty: silent data loss, no error, from a file only
+            // slightly malformed.
             for (int i = 0; i < 3; ++i) {
                 if (!in.next(code, value)) break;
+                if (code != 10 && code != 20 && code != 30) {
+                    // Not ours. Hand it back to the loop that knows what it is.
+                    in.unget(code, value);
+                    break;
+                }
                 const double d = to_double(value);
                 if (code == 10) p.x = d;
                 else if (code == 20) p.y = d;
@@ -970,7 +1126,22 @@ DxfReadResult read_dxf_text(Database& db, const std::string& text, DxfReadMode m
     }
 
     Reader r(db, mode);
-    DxfReadResult result = r.run(text);
+
+    // Suppressed for a Replace, because loading a drawing is not an edit and
+    // the journal is about to be cleared anyway. Recording it meant a full
+    // clone of every entity in the file, allocated and then thrown away -- see
+    // UndoJournal::SuppressRecording.
+    //
+    // A merge records normally: DXFIN IS an edit, made to a drawing whose
+    // history is worth keeping, and the caller's command group makes the whole
+    // import one undoable step.
+    DxfReadResult result;
+    if (mode == DxfReadMode::Replace) {
+        UndoJournal::SuppressRecording quiet(db.journal());
+        result = r.run(text);
+    } else {
+        result = r.run(text);
+    }
 
     // A freshly opened drawing has no history: undoing past the load is not
     // meaningful, and the load itself is not an edit.
