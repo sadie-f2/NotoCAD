@@ -16,6 +16,7 @@
 #include "ncad/blocks.hpp"
 #include "ncad/entity.hpp"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 

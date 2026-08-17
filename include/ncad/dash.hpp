@@ -21,6 +21,7 @@
 #include "ncad/render.hpp"
 #include "ncad/vec3.hpp"
 
+#include <cstdint>
 #include <vector>
 
 namespace ncad {

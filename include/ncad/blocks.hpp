@@ -25,6 +25,7 @@
 
 #include "ncad/entity.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>

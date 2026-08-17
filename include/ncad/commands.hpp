@@ -18,6 +18,7 @@
 #include "ncad/plot.hpp"
 #include "ncad/render.hpp"
 
+#include <cstdint>
 #include <string_view>
 
 namespace ncad {

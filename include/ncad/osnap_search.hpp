@@ -50,6 +50,7 @@
 #include "ncad/vec3.hpp"
 #include "ncad/viewport.hpp"
 
+#include <cstdint>
 #include <vector>
 
 namespace ncad {

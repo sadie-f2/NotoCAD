@@ -26,6 +26,8 @@
 // signature here.
 #pragma once
 
+#include <cstdint>
+
 #include "ncad/entity.hpp"
 #include "ncad/selection.hpp"
 #include "ncad/viewport.hpp"

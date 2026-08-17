@@ -14,6 +14,7 @@
 #include "ncad/tables.hpp"
 #include "ncad/undo.hpp"
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
