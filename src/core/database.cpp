@@ -368,7 +368,13 @@ const BlockDef* Database::block(BlockId id) const {
 }
 
 void Database::pop_block() {
-    if (!blocks_.empty()) blocks_.pop_back();
+    if (blocks_.empty()) return;
+    // Retired, not freed. The undo stack holds Insert clones whose `def_` still
+    // points here, and redo will hand them back to the drawing -- so destroying
+    // the definition now is a use-after-free with a delay on it. See
+    // retired_blocks_ in the header.
+    retired_blocks_.push_back(std::move(blocks_.back()));
+    blocks_.pop_back();
 }
 
 void Database::restore_block(BlockId id, BlockDef value) {
@@ -378,9 +384,21 @@ void Database::restore_block(BlockId id, BlockDef value) {
     }
     // Redo of an add: the definition has to come back at the same id, which is
     // the end of the vector because adds append.
-    if (id == blocks_.size()) {
-        blocks_.push_back(std::make_unique<BlockDef>(std::move(value)));
+    if (id != blocks_.size()) return;
+
+    if (!retired_blocks_.empty()) {
+        // The allocation this id had before it was popped. Reusing it rather
+        // than making a fresh one is the whole point: every Insert the redo
+        // stack is about to restore already points at this address.
+        //
+        // Undo and redo are a stack, so the last retired definition is the one
+        // being restored -- the same LIFO order that made the ids match.
+        blocks_.push_back(std::move(retired_blocks_.back()));
+        retired_blocks_.pop_back();
+        *blocks_.back() = std::move(value);
+        return;
     }
+    blocks_.push_back(std::make_unique<BlockDef>(std::move(value)));
 }
 
 bool Database::block_is_referenced(BlockId id) const {

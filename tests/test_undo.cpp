@@ -394,3 +394,49 @@ TEST_CASE("undo: a layer change inside a command is part of that command's step"
     CHECK(db.layer(walls).color == 3);
     CHECK(!db.layer(walls).frozen);
 }
+
+TEST_CASE("undo: a popped block definition outlives the Inserts that point at it") {
+    // An Insert holds a raw `const BlockDef*`, and the undo stack holds Insert
+    // CLONES that still point at it. Undoing far enough to remove the block
+    // used to FREE the definition while those clones were alive, so redo handed
+    // the drawing an Insert pointing at dead memory -- a use-after-free that
+    // ASan catches on the next bbox(), draw() or dxf_write().
+    //
+    // Found by audit, reachable by typing six commands:
+    //   LINE / BLOCK / INSERT / U / U / REDO / REDO / DXFOUT
+    Database db;
+
+    BlockDef def;
+    def.name = "A";
+    def.entities.push_back(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{5, 5, 0}));
+    const BlockId id = db.add_block(std::move(def));
+    const BlockDef* address_before = db.block(id);
+    REQUIRE(address_before != nullptr);
+
+    db.add(std::make_unique<Insert>(address_before, Mat4::identity()));
+
+    // Undo past the insert and past the block itself.
+    CHECK(db.journal().undo(db));
+    CHECK(db.journal().undo(db));
+    CHECK(db.find_block("A") == kInvalidBlock);
+
+    // Redo brings both back. The definition must return at the SAME address,
+    // because the Insert being restored alongside it still holds that pointer.
+    CHECK(db.journal().redo(db));
+    CHECK(db.journal().redo(db));
+
+    const BlockDef* address_after = db.block(db.find_block("A"));
+    REQUIRE(address_after != nullptr);
+    CHECK(address_after == address_before);
+
+    // And the restored Insert resolves through it rather than into freed
+    // memory. Under ASan this line is the actual test.
+    REQUIRE(db.size() == 1);
+    const Entity* e = db.get(db.order().front());
+    REQUIRE(e != nullptr);
+    REQUIRE(e->type() == EntityType::Insert);
+    const Insert* ins = static_cast<const Insert*>(e);
+    REQUIRE(ins->definition() != nullptr);
+    CHECK(ins->definition()->name == "A");
+    CHECK(ins->bbox().valid());
+}

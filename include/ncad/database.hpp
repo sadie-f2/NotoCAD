@@ -200,6 +200,19 @@ private:
     // unique_ptr rather than by value: an Insert holds the definition's
     // address, so growing this vector must not move what it points at.
     std::vector<std::unique_ptr<BlockDef>> blocks_;
+
+    // Definitions popped by undo, kept alive rather than freed.
+    //
+    // An Insert holds a raw `const BlockDef*`, and the undo stack holds Insert
+    // CLONES that still point at a definition undo has removed -- so freeing it
+    // is a use-after-free that redo then walks straight into. Popping moves the
+    // allocation here instead, and restoring takes it back, which is what makes
+    // a redone insert point at a live object at the SAME address it had before.
+    //
+    // Bounded by the number of block definitions undone in one session, and
+    // dropped when the drawing is cleared. Paying a stale BlockDef's worth of
+    // memory beats holding the invariant with a comment alone.
+    std::vector<std::unique_ptr<BlockDef>> retired_blocks_;
     UndoJournal journal_;
     Sysvars sysvars_;
 };
