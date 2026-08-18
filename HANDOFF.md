@@ -1,123 +1,127 @@
-# Handoff — session ending 2026-08-15
+# Handoff — session ending 2026-08-17
 
 Session-scoped and disposable. `CLAUDE.md` holds settled rules, `SF_todo.md` the
-roadmap and the reasoning, `features.md` capabilities not yet built, and
-`SF_strategy.md` the long horizon. **This file is only the bridge.** Delete or
-rewrite it rather than letting it rot.
+roadmap and the reasoning, `features.md` capabilities not yet built,
+`SF_strategy.md` the long horizon, `solids.md` the engine design and
+`programming.md` the scripting and parametric direction. **This file is only the
+bridge.** Delete or rewrite it rather than letting it rot.
 
 ## Where things stand
 
-**0.2.73**, 1162 tests, sanitizer clean, GUI builds, `main` ahead of `origin/main`
-by three commits.
+**0.2.74**, 1224 tests, sanitizer clean, `main` level with `origin/main`.
 
-Sadie picked three items and their order, then left it running unattended. All
-three are done and committed separately:
+**Sadie's assessment, and it sets the shape of what comes next: this code is
+release-ready.** Close enough for jazz, no serious design flaws known, and the
+17 August audit closed the memory-safety questions that were open. What remains
+in `SF_todo` is a long tail rather than a blocker.
 
-1. **`%%` control codes** — `%%D` drew three characters instead of a degree sign.
-2. **LEADER**, on R13's design, which was her call between the three shapes.
-3. **Advisory `.dwl` locks**, read side and a warning before writing.
+So the next work is **solids, for real**.
 
-## Decisions taken while she was asleep
+## This session
 
-Three of these are judgement calls she may want to look at. They are flagged in
-`SF_todo.md` where each item lives; this is the short list.
+- **PLOT**, to PDF, from the core. Display, Extents, Limits and Window; fits to
+  A4 landscape; black line work. `plot.hpp` records why the writer is in the core
+  rather than reached through Qt — a command only the window can run is one
+  `(command "PLOT" ...)` cannot drive. Verified by rendering the output through
+  macOS's own PDF engine and looking at it.
+- **DXF read held the file twice** before parsing a byte. `.str()` on an
+  `ostringstream` returns a copy, so a 2.1 GB drawing occupied itself twice over
+  plus stream slack. One buffer now: 7.8 GB → 5.05 GB on that file, a third off.
+- **OPEN warned you about a lock you had just taken yourself.** SAVE and DXFOUT
+  both guard with `ctx.locks->holds(path)`; the OPEN warning was written before
+  the write side existed and never learned.
+- **The audit**, on the Linux box — twenty-two defects, `code-review_8-17.md`,
+  and `SF_todo` now carries the parts that outlive it.
 
-- **QSAVE now asks when the target is locked.** That is a deliberate exception to
-  "QSAVE is the one that must not interrupt". The reasoning is that the rule is
-  about *routine* questions and a lock is somebody else's unsaved work about to
-  go — and that it cannot fire twice for the same reason it fired once, since the
-  lock has to appear *between* two saves. **One line to reverse.**
-- **LEADER's annotation is owned, not referenced by handle.** R13 binds it with a
-  hard pointer (group 340) to a separate database entity. Nothing in this program
-  holds a handle to another entity, and adding that brings dangling references,
-  clipboard remapping and erase ordering with it. Ownership buys the point of
-  R13's split — the note is a real `Text` or `MText` — without the machinery. The
-  cost is that the note cannot be selected on its own.
-- **LEADER degrades to line work at BOTH DXF versions**, not just R12. R2000 does
-  have a LEADER record, but writing one means a hard pointer to an annotation
-  record that has to exist and be read back as one — and our reader does not know
-  LEADER. Writing it would open a round trip we cannot close, and a file we can
-  only half read is worse than one that degrades honestly.
+## Next: solids, and how Sadie wants it started
 
-## What is worth doing next, in the order I would do it
+**A prototype, expected to be a failing first try.** That is the stated
+intention, and it should shape what gets built: the point of the first attempt is
+to find out which parts of `solids.md` survive contact, not to produce something
+that lasts. Build it to be thrown away and it will teach more.
 
-**1. The real R2000 LEADER record, with a reader for it.** One piece of work and
-not two — that is the whole reason it was deferred rather than half-built. It
-closes the round trip the degrade currently leaves open, and it is the only thing
-standing between the R13 entity design and its payoff in interchange.
+`solids.md` is the design and is deliberately written as a proposal rather than
+in settled voice. The parts most likely to break first, in the order they
+probably will:
 
-**2. Baseline and continue dimensions.** Still cheap, still queued, and now the
-last easy thing in the dimension family.
+1. **Evaluation and parent-child.** Named there as the question that gates code.
+   The boundary that makes solids easy makes evaluation hard: the process split
+   is clean because it is thin, but a parametric relationship CROSSES it, with
+   the profile in ncad and the shape in the kernel.
+2. **The tessellation-is-never-authoritative rule**, and the feature-description
+   caching that keeps it affordable. Untested against a real kernel at a real
+   frame rate.
+3. **What the solids UI is.** R12 offers no fidelity target, so this is design
+   rather than reconstruction, and it is wide open.
 
-**3. Something that can edit a note.** There is no DDEDIT or CHANGE for a `Text`
-either, so this is not leader-specific — but the entire argument for R13's shape
-was that the annotation is a real entity rather than baked line work, and nothing
-yet takes advantage of that. The capability the design bought is not spent.
+Read `programming.md` alongside: the feature tree IS the parametric engine and
+the sketcher IS the constraint solver, so those sit underneath solids rather than
+after them. `SF_strategy.md` carries the strategic decisions with its superseded
+items marked rather than deleted.
 
-**4. `?` listings still only print when the command exits.** Unchanged, and still
-an API gap rather than a GUI bug: `Step::ask` cannot carry output. Two options are
-written up in `SF_todo.md`.
+## A version thought, NOT a decision
+
+Sadie's, recorded because it will otherwise be re-derived. Roughly: **dub the
+release 0.3**, keep a component that is the command count, and add a readable
+point-release number so that naming a build does not mean quoting a commit hash.
+
+Two things to pin before implementing it, because the current scheme collides:
+
+- **`CLAUDE.md` says the PATCH number is the command count** ("0.2.72 means 72
+  commands"), and `tests/test_registry.cpp` asserts the two agree. The note above
+  says "minor", which is probably loose usage rather than a change of meaning —
+  but which component carries the count has to be stated before anything moves.
+- **A fourth component is available.** CMake's `project(VERSION)` accepts
+  `major.minor.patch.tweak`, so `0.3.74.xx` needs no scheme invention — only a
+  decision about what increments `xx`, and when.
+
+Nothing was changed. `project(VERSION 0.2.74)` and the registry assertion still
+agree.
 
 ## Still open, carried forward
 
-- **The macOS 13 refusal: the Intel half is now FIXED.** The bundle is universal
-  (arm64 + x86_64) and a gate refuses any bundle missing a slice, so an arm64-only
-  build cannot reach anybody again. Measured cost: 1 MB on the dmg, 9 seconds of
-  build -- Qt is 44 MB of the bundle and was already universal, so the x86_64
-  slices were being shipped either way.
+The long tail, none of it blocking a release:
 
-  **The deployment-target half is still parked**, at Sadie's direction, pending
-  `lipo -archs` on the bundle the friend was actually sent. Still do not touch the
-  target on a guess -- a bundle built before `b6d981c` carries Homebrew Qt stamped
-  `minos 15.x` and would be refused for that reason instead.
-
-  **Gatekeeper is a separate wall.** The script signs ad-hoc by default, which
-  every other Mac refuses regardless of architecture. Shipping to anyone needs a
-  Developer ID and notarisation; `packaging/mac_bundle.sh "Developer ID Application:
-  ..."` takes the identity.
-- **TRIM and EXTEND cannot be driven from LISP** — they need a pick point the
-  terminal cannot supply. FILLET and CHAMFER work around it with a midpoint stand-in;
-  those two have no fallback. LEADER, for what it is worth, *is* LISP-drivable and
-  was checked.
-- **`c:` functions are not dispatched as commands.**
-- **The SizeAllCursor crash.** Untested on Linux, where a crash would mean the
-  cursor correlation was coincidence and the fault is ours.
-- **DXFOUT leaves the drawing dirty**, so quitting still asks.
-- **Writing our own lock files.** Deliberately not started: it needs Sadie to say
-  what a stale lock is and who may clear one, and this program has segfaulted
-  twice this month. We never clear anybody else's today — the message names the
-  file so the user can delete it once they know the session is gone.
+- **The SizeAllCursor crash**, three times, all with the identical Qt stack. The
+  command-line failure that accompanied the third turned out to be a separate bug
+  and is fixed — so the third crash carries no more information than the first
+  two, and the memory-corruption candidate gets no support from it. The LTS Qt
+  6.8.3 the bundle ships is still the untried discriminator, and it is still
+  untested on Linux, where a crash would rule the Cocoa path out entirely.
+- **One audit GUI finding untested and unfixed** — the unguarded
+  `static_cast<int>` at `viewport_widget.cpp:491`. Two more were fixed but never
+  interactively confirmed.
+- **A non-monotone spline knot vector is technically UB** and observably
+  harmless. Known and accepted.
+- **Locks are done and the reciprocity question is closed**, by Autodesk's own
+  documentation: `.dwl`/`.dwl2` have been informational since AutoCAD 2000 and
+  WHOHAS is DWG-only, so AutoCAD will never refuse a file we hold. Reading theirs
+  works, which is what was actually asked for.
+- **PLOT's second phase**: scale, paper size, and the colour-to-pen table, which
+  is the only route to varied lineweight. The GUI's native print dialog too.
+- **`?` listings only print when the command exits**; `c:` functions are not
+  dispatched as commands; TRIM and EXTEND cannot be driven from LISP.
+- **Memory**: a line-work drawing costs about 1.3 KB of RSS per entity and nobody
+  has looked at where that goes. The whole file text is also resident for the
+  duration of a parse — and the measurement says the drawing is the smaller half,
+  so a streaming reader is the larger win.
 
 ## Traps worth knowing
 
-Unchanged from last time except where noted.
-
-- **`DimKind`'s values are DXF's and are not contiguous** (Angular is 5). A table
-  indexed by the enum is read off its end. `measurement()`'s switch now names
-  Angular explicitly so a new kind produces a warning rather than a silent zero.
+- **"Sanitizer clean" on macOS does not mean it compiles on Linux.** `plot.hpp`
+  used `std::uint8_t` without `<cstdint>`; libc++ forgave it transitively,
+  libstdc++ did not, and the audit found the ASan build broken on `main` as a
+  result. Seven other headers are one reordering from the same thing. **Check
+  both platforms before calling a build clean.**
+- **`DimKind`'s values are DXF's and are not contiguous** (Angular is 5).
 - **`entity_subrs.cpp`'s `entget` converter has a `default:`**, so a new entity
-  type compiles and silently returns nothing from LISP. It is the site missed for
-  ELLIPSE. LEADER was added there and there is a test pinning it — copy that test
-  when the next type lands.
-- **`sysvar.cpp`'s static_assert catches a wrong COUNT, not a wrong ORDER.**
-- **`EntityType` has six registration sites**, and only one of them fails loudly.
-  For LEADER they were: `entity.hpp`, `entities.cpp`'s name table, the `entget`
-  converter, LIST, EXPLODE, and the entity's own file in `src/core/CMakeLists.txt`.
-- **BSD `sed` does not support `\b`.** A rename across a file with `sed -i ''
-  's/\bfoo(/bar(/g'` silently does nothing and the build then fails somewhere
-  unrelated-looking. Use `perl -pi -e` with a lookbehind.
-- **The AutoCAD comparison is worth more than any test we write.** Diff against the
-  SOURCE though, not against AutoCAD's output.
-
-## Verified by hand this session, not only by tests
-
-- The three new glyphs were rendered as ASCII art through the real font path
-  before they were trusted — I drew them blind and would not have caught a
-  degree sign at the wrong height any other way.
-- Leader geometry likewise: rightward, leftward and already-horizontal cases
-  rendered as a scene, which is what confirmed the hook picks its side from the
-  path direction and is suppressed when the last segment is already flat.
-- `LEADER` driven from the terminal, from `DIM`'s `LEader`, and from
-  `(command "LEADER" ...)` including the measurement default.
-- The lock warning on OPEN, on SAVE with both answers, on QSAVE, and on DXFOUT,
-  against real `.dwl` / `.dwl2` files in a scratch directory.
+  type compiles and silently returns nothing from LISP.
+- **`EntityType` has six registration sites**, only one of which fails loudly.
+- **BSD `sed` does not support `\b`.** Use `perl -pi -e` with a lookbehind.
+- **`/scripts/` is gitignored** and is scratch only. Anything the build, the
+  tests or a release depends on belongs in `packaging/` or `tests/acad/`.
+- **`examples/` is gitignored too** — the AutoCAD lock specimens, the crash
+  reports and the comparison screenshots live there and do NOT travel on a pull.
+- **The AutoCAD comparison is worth more than any test we write**, diffing
+  against the SOURCE rather than against AutoCAD's output. Sadie's licence is
+  time-limited, and `solids.md` lists the three experiments only it can answer.

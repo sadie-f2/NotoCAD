@@ -377,6 +377,45 @@ them, because the reason a thing is wanted is the most perishable part of wantin
       which is a lot for a `Line` carrying maybe a hundred bytes of geometry, and nobody
       has looked at where it goes.
 
+- [x] **The whole-repository audit, 2026-08-17.** Twenty-two defects across fourteen
+      commits, `96239a4` to `085fbf2`; the suite went 1188 -> 1224 and every fix carries
+      a test. `code-review_8-17.md` is the full record. What belongs HERE, by this file's
+      own rule that a defect found in use lives here:
+
+      **The most serious one did not crash -- it lied.** `mapcar` over a `defun` re-read
+      the function pointer from a stack buffer `apply` had reallocated, so in RELEASE it
+      reported "no function definition" for a function that was perfectly well defined.
+      Silent wrong answers in the one language feature this project exists to be driven
+      by, and 1188 tests never noticed. That is the failure mode worth fearing here, not
+      the segfaults.
+
+      **A malformed DXF could write through freed memory** -- five use-after-frees in the
+      block reader -- and `nan`/`inf` could enter the drawing AND leave again in the DXF.
+      A colour group of 32768 indexed the palette from -32768.
+
+      **The correctness gate contained none of what kept breaking.** `gen_sample` had no
+      blocks and no polylines, which is why "verified to open in AutoCAD" never touched
+      the paths that were failing. It does now, and `tools/fuzz_dxf.py` is in the tree.
+
+      **The method is the part to repeat.** Reasoning found the defects; EXECUTION decided
+      which were real, and corrected severity in both directions -- one item filed as
+      theoretical turned out to be six typed commands, and the highest-severity GUI
+      finding turned out not to exist at all. That negative result is written up at
+      length in the audit so nobody re-derives the same plausible reasoning and "fixes"
+      a phantom. **If it is ever revisited, the bar is a reproduction, not an argument.**
+
+- [ ] **A non-monotone spline knot vector is technically UB.** `spline.cpp:172` --
+      `valid()` checks knot COUNT and never ordering, so `domain_min() > domain_max()`
+      is reachable through `entmake` and violates `std::clamp`'s precondition. libstdc++
+      returns `hi` and nothing observable happens; UBSan did not trip on it. Known and
+      accepted at the audit, recorded here so the acceptance outlives the audit file.
+
+- [ ] **One GUI finding remains untested and unfixed**, from the audit's six: the
+      unguarded `static_cast<int>` on a projected coordinate at `viewport_widget.cpp:491`.
+      `qpainter_renderer.cpp:36` documents this exact hazard and clamps; that call site
+      does not. Needs a UCS origin far from the model plus extreme zoom, which is why it
+      was not reproduced. Two others were fixed but never interactively confirmed.
+
 Not design questions, just things caught in use that should not wait behind phase order.
 
 - [x] **DXFOUT (and SAVE, etc.) should ask which version, not silently use DXFVERSION.**
@@ -616,32 +655,34 @@ Not design questions, just things caught in use that should not wait behind phas
       broke explains the co-occurrence by BEHAVIOUR, not by a shared cause. The crash was
       waiting to happen on any toolbar hover.
 
-      On the command-line failure itself, traced as far as the evidence supports.
-      `PromptSession::report_finished` prints `*Cancel*` purely from
-      `engine_.status() == Cancelled`, and Cancel is manufactured in exactly three
-      places: a literal `\x1b` token (`input_text.cpp`), the literal word `CANCEL`
-      (`prompt.cpp`), and `CommandEngine::cancel()`. The last is GUI-only and Sadie was
-      not clicking, which rules out `MainWindow::run_command`. That leaves two stories:
+      **The command-line failure is SOLVED, and it was the second of the two stories
+      below.** The audit of 2026-08-17 found it: `CommandEngine::begin()` did not clear a
+      running TRANSPARENT command, so one left suspended swallowed every later line as an
+      answer to a prompt that would never be satisfied. Fixed in `ba518cb`, and Sadie
+      confirms it is what she experienced. Reproduced headlessly --
+      `LINE / 1,1 / 'ID / (command) / CIRCLE / 5,5 / 3` -- because ID and DIST are
+      transparent and need no view, which is what made it testable without a display.
 
-      - **The engine stuck at `Cancelled`**, with each new line re-reporting a stale
-        status -- `outcome_reported_` resets at the top of every `feed_line`, so it can
-        echo indefinitely and nothing new is actually being cancelled.
-      - **A command stuck at `Waiting`**, with each typed line swallowed as an answer to
-        a prompt that will never be satisfied -- `feed_line` tests `engine_.active()`
-        before anything else, so a stuck command eats input rather than starting a new
-        command.
+      Kept for the method rather than the conclusion. Tracing it live narrowed the cause
+      to exactly two stories and could not choose between them:
 
-      **One observation separates them and costs nothing: what the prompt line says.** A
-      stuck `Waiting` command still shows its own prompt; a stuck `Cancelled` engine shows
-      the idle `Command:`. Worth noting before restarting, along with whether `?` still
-      worked and how much LISP had run -- a long session plus the arena is the other place
-      state accumulates.
+      - **The engine stuck at `Cancelled`**, each new line re-reporting a stale status.
+      - **A command stuck at `Waiting`**, each typed line swallowed as an answer.
+
+      The second was right. The narrowing was worth doing and the plan for choosing --
+      "note what the prompt line says before restarting" -- was never needed, because a
+      headless reproduction beat an observation. Worth remembering which of the two
+      actually settled it.
+
+      **What that leaves for the crash itself: less than it looked.** The command-line
+      failure was a separate bug, so the third crash carries no more information than the
+      first two, and the memory-corruption candidate has no support from it. Still two
+      candidates, still undiscriminated, and the LTS Qt 6.8.3 in the bundle is still the
+      untried one.
 
       **`build-asan-gui` was six days stale** (2026-08-10) when this happened, which is
-      why it discriminated nothing. Rebuilt at HEAD on 2026-08-17 and passing 1188. It is
-      the right thing to run for daily GUI work while this is open: a long session where
-      something goes wrong slowly is exactly the case it exists for, and if there is
-      corruption it fires at the write rather than at the CoreGraphics victim.
+      why it discriminated nothing. Rebuilt at HEAD on 2026-08-17. It remains the right
+      thing to run for daily GUI work while this is open.
 
       Two triggers with nothing in common except the cursor shape, which is what turns
       this from a mystery into a suspect. On macOS most Qt cursors are native NSCursors,
