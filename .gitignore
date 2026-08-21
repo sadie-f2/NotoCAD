@@ -1,5 +1,10 @@
 build/
 build-*/
+# An in-source `cmake .` leaves this at the working root, where build/ and
+# build-*/ above do not reach it -- this project builds out of source, so
+# nothing anticipated anything landing here. Ignored rather than only deleted,
+# because deleting it fixes today and this stops it coming back.
+/CMakeFiles/
 .cache/
 compile_commands.json
 *.o
