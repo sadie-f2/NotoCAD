@@ -352,10 +352,19 @@ Phase 5 or 6, alongside the other construction commands.
 *(The focus loss is fixed — see the commit "Typing always reaches the command line".
 It needs confirming in a real session, since it could not be reproduced headlessly.)*
 
-**Show the selection box while it is being dragged.** The window or crossing rectangle
-should be drawn as it is dragged, and distinguishably: AutoCAD uses a solid outline for
-window and a dashed one for crossing, which is how you know which you are getting
-before you release.
+**Show the selection box while it is being dragged — HALF BUILT.** The rectangle
+itself is drawn: `viewport_widget.cpp:368`, screen-aligned and normalised, anchored at
+the opposite corner. What is absent is telling window from crossing by eye — AutoCAD
+uses a solid outline for one and a dashed one for the other.
+
+That absence is currently *reasoned*, not overlooked. The code says: *"Which of window
+and crossing this is comes from the typed W or C keyword, so the box does not have to
+say — the prompt already does."* True today. **It stops being true the moment implied
+windowing lands**, because then the drag direction decides which you get and nothing
+announces it until you release — which is the whole reason AutoCAD draws them
+differently. So solid-vs-dashed is a prerequisite of that item rather than a polish
+item beside it, and the comment explaining its absence will need deleting, not
+updating.
 
 **Ghost the selection during placement.** MOVE and COPY should show the selected
 geometry following the cursor between the base point and the second point.
@@ -364,6 +373,129 @@ Both are wanted, with a caveat worth designing around: this is used over SSH wit
 forwarding, where the current no-feedback behaviour is *faster*. Whatever is drawn
 should be cheap — outline only, no fill — and probably switchable, since the remote
 case is a real working mode rather than an edge case.
+
+**The pick box wants too much precision — and it is felt in exactly one place.**
+`PICKBOX` defaults to 3 — a half-height, so a 7-pixel box — which is AutoCAD's default
+and has been since R12, when a screen was around 50 DPI. At the ~110 logical DPI of a
+modern display the box is **physically less than half the size it was**, and nothing
+scales it: `devicePixelRatio` appears only in toolbar icon generation, nowhere in the
+picking path. Everything in the viewport is consistently in logical pixels, so this is
+not a HiDPI bug — the arithmetic is right and the constant is stale.
+
+This is the `CURSORSIZE` case again, and `CLAUDE.md` already licenses it: `PICKBOX = 3`
+is not a considered design choice about interaction, it is a number calibrated against
+a display that no longer exists.
+
+**`PICKBOX` and `APERTURE` are used in disjoint situations, so there is no ratio to
+tune.** `viewport_widget.cpp:334` picks between them —
+`wants_entity() ? pickbox_px() : aperture_px()` — and `wants_entity()` is true only for
+`PromptKind::Entity`, which is only ever the *Select objects* prompt:
+
+| doing | prompt kind | box drawn and used | size |
+|---|---|---|---|
+| Select objects, including typing `W`/`C` to start one | `Entity` | `PICKBOX` | 7 px — **tiny** |
+| Window / crossing **corners** | `Point` | `APERTURE` | 21 px |
+| Drawing lines, any point entry | `Point` | `APERTURE` | 21 px — right |
+
+So the pick box is only ever live during selection, and that is the one place it is
+wrong; the hit test at `viewport_widget.cpp:774` uses it too. Everything else runs on
+`APERTURE` at 21 px, which is **correctly sized and must not move** — reported from use,
+and consistent with the osnap complaint below being about which snap WINS rather than
+how far the aperture reaches.
+
+*What it needs:* raise `PICKBOX` toward `APERTURE`. An earlier version of this note said
+to raise one while lowering the other, "converging them deliberately, breaking AutoCAD's
+10:3 ratio". That was wrong: the two never both apply, so the ratio was never a thing
+either variable experienced.
+
+**Object snap reaches too far, and that one is a DEFECT rather than a preference.**
+`src/core/osnap_search.cpp:68`:
+
+```cpp
+if (a_discrete != b_discrete) return a_discrete;
+```
+
+A discrete snap — endpoint, midpoint, centre, quadrant — beats a continuous one —
+nearest, perpendicular, tangent — **unconditionally, at any distance inside the
+aperture**. With `APERTURE = 10` that is a 21-pixel box, so an ENDPOINT 20 pixels away
+wins over a NEAREST the cursor is sitting exactly on. The radius is not wrong; the tier
+is unbounded.
+
+The comment above the line explains why it is written that way and the reasoning is
+sound — without a tier, NEAREST buries ENDPOINT, because NEAREST is always ~0 px when
+you are on the line. The cure simply overshoots. It also warns, correctly, that the
+obvious repair (`if (fabs(da - db) > eps) return da < db`) is **not transitive** and
+makes `std::sort` undefined rather than merely differently ordered.
+
+*What it needs:* an effective distance — `distance + (discrete ? 0 : penalty)` — sorted
+on as an ordinary number, so transitivity is structural rather than argued. It states
+something meaningful too: *a discrete snap is worth up to N pixels of extra travel.*
+Today's behaviour is `penalty = infinity`. Something around 5 px keeps ENDPOINT winning
+when it is genuinely close and lets NEAREST win when it is not. Probably a sysvar.
+
+Note these two pull in opposite directions and are felt together: raising `PICKBOX`
+while **lowering** `APERTURE` converges them deliberately, breaking AutoCAD's 10:3
+ratio on purpose.
+
+**Selection has no implied windowing, and that is an unbuilt R12 feature rather than a
+modernisation.** Today a window or crossing needs `W` or `C` typed first, then two point
+picks (`commands.cpp:4731`). Click-and-drag on empty space — left-to-right for window,
+right-to-left for crossing — is AutoCAD behaviour governed by `PICKAUTO`, which R12 had
+and this sysvar table does not: 33 variables, no `PICKAUTO` and no `PICKDRAG`. So the
+justification is "a gap", not "let us be modern", which is a much easier argument.
+
+*Priority note, and it is the kind that otherwise evaporates:* **this is for newcomers,
+not for Sadie** — the R12/R13 muscle memory came back within a session of real use, so
+typing `W` costs the author nothing. It stays recorded because the next person has no
+such memory, not because it is felt daily.
+
+There are a few more of this shape. Worth collecting rather than taking one at a time,
+since they will share the drag-state machinery in the viewport and that is the whole
+cost.
+
+**Ortho is built and cannot be reached while you are drawing.** Constraining a point
+to N/S/E/W of the previous one is `apply_ortho` in `viewport_widget.cpp:416`, and it is
+done properly: relative to the **current UCS** rather than world, skipped when there is
+no base point (R12 leaves a first point unconstrained), skipped for `RubberBand::Box`
+so a selection window is not forced square, and an object snap beats it — *"you asked
+for that exact point."* `cursor_point()` applies it on every mouse move.
+
+What is missing is the toggle, and it is missing twice over:
+
+- **There is no F8.** The Qt viewport handles no function keys at all — `Key_Escape` is
+  the only key it interprets. F8 is *the* ortho key and has been since long before R12,
+  so the reflex has nowhere to land.
+- **`'ORTHO` mid-command does not work either.** `command_is_transparent`
+  (`commands.cpp:6362`) lists ZOOM, PAN, PLAN, REDRAW, VPOINT, ID and DIST. ORTHO is
+  not among them, so toggling requires finishing or cancelling the command first —
+  which is exactly the moment you wanted it.
+
+So the feature exists and the workflow it was built for does not. That is worth
+separating from a missing feature, because the fix is a keybinding rather than geometry.
+
+*What it needs:* F8 in the viewport's `keyPressEvent`, flipping `ORTHOMODE` directly.
+That is also how AutoCAD does it — F8 is not a transparent command invocation, it is a
+direct toggle — and it **sidesteps a real awkwardness**: `command_is_transparent` says
+its test is "whether it changes drawing state, not whether it is useful mid-command",
+and ORTHOMODE is journalled and saved in the drawing, so by that rule ORTHO has a fair
+claim to being exactly what must not be transparent. A key that flips a sysvar never
+raises the question.
+
+*What it does not need:* the base points are already there. 74 of the 93 `PromptKind::Point`
+prompts in the core set one, MIRROR's second point included — so "any point-to-point work
+in the viewport" is already covered the moment the toggle exists.
+
+**Polar tracking is the superset, and a later decision.** Ortho is 4 directions; polar
+snaps to an angle increment (45°, 30°, 15°) and reports the angle as you hover. R12 had
+ortho only — polar arrived in AutoCAD 2000 — so it is a deliberate divergence rather than
+a gap, and it wants the same F8-adjacent plumbing underneath. Worth building ortho's
+toggle first and seeing whether polar is still wanted afterwards.
+
+**While the keys are being added,** R12's other F-keys are worth deciding as a set rather
+than one at a time: F7 grid and F9 snap are both excluded by scope today (grid snap is
+listed as "later, rarely used"), F6 is a coordinate readout that wants a status bar, and
+F3 is osnap toggle — which, unlike the rest, has a live sysvar (`OSMODE`) and the same
+shape as this entry.
 
 ## View commands — what is known before they are written
 
