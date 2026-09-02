@@ -123,6 +123,10 @@ struct PlotPaperSize {
 
 const PlotPaperSize* plot_paper_sizes(std::size_t& count);
 
+// The sheet names, spelled for a refusal: "A4, A4P, A3, ...". Beside the table
+// so the message cannot list something the table does not hold.
+std::string plot_paper_size_names();
+
 // Case-insensitive, like find_sysvar. Null when there is no such sheet, which
 // is how SETVAR PAPERSIZE refuses a typo instead of quietly plotting A4.
 const PlotPaperSize* find_plot_paper_size(std::string_view name);

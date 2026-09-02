@@ -3,6 +3,8 @@
 
 #include "ncad/sysvar.hpp"
 
+#include "ncad/units.hpp"
+
 #include "ncad/plot.hpp"
 #include "ncad/undo.hpp"
 
@@ -78,6 +80,12 @@ constexpr SysvarDef kTable[] = {
     // something silently reverts to R12 -- which is exactly the surprise it
     // caused before this comment existed.
     {"DXFVERSION", Sysvar::DxfVersionVar, SysvarType::String, false, false, 0, 0, 0, 0.0, "R12", {}},
+    // save_in_drawing TRUE, unlike DXFVERSION beside it: which unit a drawing
+    // is in is a property OF THE DRAWING, not of this installation, and a part
+    // that arrives from someone else must bring its unit with it or the number
+    // 8 means nothing. Range is checked as a SET rather than a span -- 3 is
+    // miles, sits inside 0..6, and is not one this program will carry.
+    {"INSUNITS", Sysvar::InsUnits, SysvarType::Int, false, true, 0, 0, 6, 0.0, "", {}},
 
     // The plot sheet. The rule tying the name to the numbers is written out in
     // full in sysvar.hpp beside the enum; the short version is that the numbers
@@ -240,6 +248,12 @@ Sysvars::SetStatus Sysvars::set_int(Sysvar id, std::int32_t v) {
     if (d.read_only) return SetStatus::ReadOnly;
     if (d.type != SysvarType::Int) return SetStatus::WrongType;
     if (v < d.int_min || v > d.int_max) return SetStatus::OutOfRange;
+    // INSUNITS is the one Int here whose valid values are a SET rather than a
+    // span: 3 is miles in AutoCAD's table, sits inside 0..6, and is not a unit
+    // this program will carry through to a STEP file. Checked at the moment it
+    // is typed, for the reason PAPERSIZE gives above -- a setting refused on
+    // the spot beats one discovered by measuring a part.
+    if (id == Sysvar::InsUnits && !insunits_valid(v)) return SetStatus::OutOfRange;
     const SysvarValue before = values_[index_of(id)];
     values_[index_of(id)] = SysvarValue::of_int(v);
     journal_write(id, before);

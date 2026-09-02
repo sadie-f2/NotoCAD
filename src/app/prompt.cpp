@@ -216,12 +216,14 @@ bool PromptLineSource::next_value(const Prompt& prompt, InputValue& out) {
     // everything after it means.
     Mat4 frame = Mat4::identity();
     const Mat4* ucs = nullptr;
+    std::int32_t insunits = 0;
     if (db_) {
         frame = db_->current_ucs().to_world();
         ucs = &frame;
+        insunits = db_->sysvars().get_int(Sysvar::InsUnits);
     }
 
-    if (!parse_input(prompt, token, out, error_, ucs)) return false;
+    if (!parse_input(prompt, token, out, error_, ucs, insunits)) return false;
     return true;
 }
 

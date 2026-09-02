@@ -248,6 +248,15 @@ const PlotPaperSize* find_plot_paper_size(std::string_view name) {
     return nullptr;
 }
 
+std::string plot_paper_size_names() {
+    std::string s;
+    for (const PlotPaperSize& row : kPaperSizes) {
+        if (!s.empty()) s += ", ";
+        s += row.name;
+    }
+    return s;
+}
+
 PlotPaper plot_paper_from_sysvars(const Sysvars& vars) {
     PlotPaper paper;
     paper.width_mm = vars.get_real(Sysvar::PaperWidth);

@@ -102,6 +102,12 @@ enum class Sysvar : std::uint16_t {
     // geometry in bulk and saving it without a person present.
     DxfVersionVar,
 
+    // The drawing's one unit, in AutoCAD's own $INSUNITS codes so a DXF
+    // interoperates. Default 0 -- unitless -- because that is what every
+    // drawing that already exists is, and saying nothing must keep meaning
+    // nothing. See units.hpp for why a drafting program grew units at all.
+    InsUnits,
+
     // The sheet PLOT puts the drawing on. DXFVERSION's shape exactly, and for
     // its reason: a setting the terminal answers by typing, which a print
     // dialog folds into its own controls rather than asking for twice.

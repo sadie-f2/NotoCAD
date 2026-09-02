@@ -279,6 +279,20 @@ void DxfWriter::write_header() {
     code(9, "$INSBASE");
     point(10, db_.sysvars().get_point(Sysvar::InsBase));
 
+    // The drawing's unit, and ONLY when it has one.
+    //
+    // Writing `$INSUNITS 0` for every unitless drawing would be truthful and
+    // would also move a byte in every DXF this program has ever written, which
+    // is the one change a format cannot make quietly -- the corpus is pinned
+    // and `test_dxf.cpp`'s header walk is where that is asserted. A drawing
+    // that has never said what it is in stays exactly as it was, and 0 is what
+    // a reader assumes for an absent $INSUNITS anyway, so nothing is lost by
+    // silence.
+    if (const std::int32_t units = db_.sysvars().get_int(Sysvar::InsUnits); units != 0) {
+        code(9, "$INSUNITS");
+        code(70, units);
+    }
+
     // The dimension style. Written because a dimension records only WHAT it
     // measures -- the sizes it was drawn at are baked into the entity and never
     // reach the file, so without these a drawing reopened elsewhere annotates

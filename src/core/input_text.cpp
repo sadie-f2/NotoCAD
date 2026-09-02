@@ -3,6 +3,8 @@
 
 #include "ncad/input_text.hpp"
 
+#include "ncad/units.hpp"
+
 #include "ncad/osnap.hpp"
 
 #include <cmath>
@@ -51,7 +53,8 @@ bool parse_long(std::string_view text, long& out) {
 inline constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
 
 // "1,2,3" or "1,2". Z defaults to zero, as R12 does for 2D input.
-bool parse_point(std::string_view text, Vec3& out) {
+bool parse_point(std::string_view text, Vec3& out, std::int32_t insunits,
+                 std::string& why) {
     double c[3] = {0.0, 0.0, 0.0};
     std::size_t count = 0;
     std::size_t start = 0;
@@ -61,7 +64,10 @@ bool parse_point(std::string_view text, Vec3& out) {
         const std::string_view field =
             text.substr(start, comma == std::string_view::npos ? std::string_view::npos
                                                               : comma - start);
-        if (!parse_double(field, c[count])) return false;
+        // Per coordinate, so `1/4",0` and `10mm,5mm` both work and a mixed
+        // pair does too -- which is the whole point of converting at the
+        // parser rather than at one command.
+        if (!parse_length(field, insunits, c[count], why)) return false;
         ++count;
         if (comma == std::string_view::npos) break;
         start = comma + 1;
@@ -73,13 +79,17 @@ bool parse_point(std::string_view text, Vec3& out) {
 
 // "30<45" -- a distance and a bearing in degrees, in the XY plane. Z comes from
 // the base point, since polar input is planar.
-bool parse_polar(std::string_view text, const Vec3& base, Vec3& out) {
+bool parse_polar(std::string_view text, const Vec3& base, Vec3& out, std::int32_t insunits,
+                 std::string& why) {
     const std::size_t bracket = text.find('<');
     if (bracket == std::string_view::npos) return false;
 
     double distance = 0.0;
     double degrees = 0.0;
-    if (!parse_double(text.substr(0, bracket), distance)) return false;
+    // The DISTANCE is a length and may carry a unit; the BEARING is an angle
+    // and may not. `@1/4"<45` is a quarter inch at 45 degrees; `@10<45mm` is
+    // not a thing and must stay an error.
+    if (!parse_length(text.substr(0, bracket), insunits, distance, why)) return false;
     if (!parse_double(text.substr(bracket + 1), degrees)) return false;
 
     const double radians = degrees * kDegToRad;
@@ -98,7 +108,8 @@ bool parse_polar(std::string_view text, const Vec3& base, Vec3& out) {
 //
 // Without the relative forms, drawing anything by hand is arithmetic homework.
 bool parse_coordinate(const Prompt& prompt, std::string_view text, Vec3& out,
-                      std::string& error, const Mat4* ucs_to_world) {
+                      std::string& error, const Mat4* ucs_to_world,
+                      std::int32_t insunits) {
     const bool relative = !text.empty() && text.front() == '@';
     if (relative && !prompt.has_last_point) {
         error = "no last point to measure from";
@@ -117,7 +128,10 @@ bool parse_coordinate(const Prompt& prompt, std::string_view text, Vec3& out,
         // Polar is solved about the origin, then placed, so that the angle is
         // measured in the UCS's own plane rather than in world XY.
         Vec3 polar;
-        if (!parse_polar(body, Vec3{0.0, 0.0, 0.0}, polar)) {
+        if (!parse_polar(body, Vec3{0.0, 0.0, 0.0}, polar, insunits, error)) {
+            // A unit the drawing cannot honour explains itself; anything else
+            // gets the grammar's own message.
+            if (!error.empty()) return false;
             error = "expected a distance and angle like 30<45";
             return false;
         }
@@ -128,7 +142,8 @@ bool parse_coordinate(const Prompt& prompt, std::string_view text, Vec3& out,
     }
 
     Vec3 coordinates;
-    if (!parse_point(body, coordinates)) {
+    if (!parse_point(body, coordinates, insunits, error)) {
+        if (!error.empty()) return false;
         error = relative ? "expected an offset like @5,0 or @30<45"
                          : "expected a point like 1,2 or 1,2,3";
         return false;
@@ -167,7 +182,7 @@ bool match_keyword(const Prompt& prompt, std::string_view token, std::string& ou
 }  // namespace
 
 bool parse_input(const Prompt& prompt, std::string_view token, InputValue& out,
-                 std::string& error, const Mat4* ucs_to_world) {
+                 std::string& error, const Mat4* ucs_to_world, std::int32_t insunits) {
     error.clear();
 
     // An empty token is Enter.
@@ -205,7 +220,7 @@ bool parse_input(const Prompt& prompt, std::string_view token, InputValue& out,
                 return true;
             }
             Vec3 p;
-            if (!parse_coordinate(prompt, token, p, error, ucs_to_world)) return false;
+            if (!parse_coordinate(prompt, token, p, error, ucs_to_world, insunits)) return false;
             out = InputValue::of_point(p);
             return true;
         }
@@ -216,14 +231,35 @@ bool parse_input(const Prompt& prompt, std::string_view token, InputValue& out,
             // A distance prompt also takes a point, since dragging to a second
             // point is how a radius is given with a mouse.
             double d = 0.0;
-            if (parse_double(token, d)) {
-                out = InputValue::of_real(d);
-                return true;
+            // Distance and Real are LENGTHS and may carry a unit; an Angle
+            // never can. `30<45` must not start accepting `30<45mm`, and a
+            // bearing has no unit to convert into anyway. A `Real` is included
+            // because a Real prompt is often a length in practice -- EXTRUDE's
+            // height is one.
+            if (prompt.kind == PromptKind::Angle) {
+                if (parse_double(token, d)) {
+                    out = InputValue::of_real(d);
+                    return true;
+                }
+            } else {
+                std::string why;
+                if (parse_length(token, insunits, d, why)) {
+                    out = InputValue::of_real(d);
+                    return true;
+                }
+                // A unit suffix the drawing cannot honour is a REFUSAL with a
+                // reason, not a fall-through to "expected a number" -- the
+                // user asked for something specific and deserves to know why
+                // it was not given.
+                if (!why.empty()) {
+                    error = why;
+                    return false;
+                }
             }
             std::string ignored;
             Vec3 p;
             if (prompt_takes_point(prompt.kind) &&
-                parse_coordinate(prompt, token, p, ignored, ucs_to_world)) {
+                parse_coordinate(prompt, token, p, ignored, ucs_to_world, insunits)) {
                 out = InputValue::of_point(p);
                 return true;
             }
@@ -312,12 +348,17 @@ bool TextInputSource::next_value(const Prompt& prompt, InputValue& out) {
     // everything after it read in the new frame.
     Mat4 frame = Mat4::identity();
     const Mat4* ucs = nullptr;
+    std::int32_t insunits = 0;
     if (db_) {
         frame = db_->current_ucs().to_world();
         ucs = &frame;
+        // Read fresh for the same reason the UCS is: a script may SETVAR
+        // INSUNITS half way through, and everything after it is in the new
+        // unit.
+        insunits = db_->sysvars().get_int(Sysvar::InsUnits);
     }
 
-    if (!parse_input(prompt, token, out, error_, ucs)) {
+    if (!parse_input(prompt, token, out, error_, ucs, insunits)) {
         // Consume it anyway: leaving a token that cannot be parsed in place
         // would spin forever.
         ++pos_;

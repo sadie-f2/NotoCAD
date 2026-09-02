@@ -1046,6 +1046,14 @@ DxfReadResult Reader::run(std::string text) {
             continue;
         }
 
+        // The drawing's unit. Absent means unitless, which is the default, so
+        // there is nothing to do when it does not appear -- and every drawing
+        // written before this existed is in exactly that case.
+        if (code == 9 && value == "$INSUNITS") {
+            if (in.next(code, value)) db_.sysvars().set_int(Sysvar::InsUnits, to_int(value));
+            continue;
+        }
+
         // The dimension style. A dimension records only what it measures, so
         // without these the sizes it is redrawn at would come from this
         // reader's defaults rather than from the drawing.

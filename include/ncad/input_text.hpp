@@ -13,6 +13,7 @@
 #include "ncad/database.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -37,8 +38,14 @@ namespace ncad {
 // `@5,0` -- is a displacement from the last point, so its offset is transformed
 // as a VECTOR and added to a base that is already world. Transforming it as a
 // point would apply the UCS origin twice.
+// `insunits` is the drawing's unit (`Sysvar::InsUnits`, AutoCAD's codes) and
+// is what lets a length carry one: `1/4"` on a millimetre drawing is 6.35.
+// Zero -- the default, and every drawing that predates units -- means a bare
+// number is all there is, and a suffix is refused naming the setting rather
+// than assumed. See units.hpp. Angles never take a unit whatever this says.
 bool parse_input(const Prompt& prompt, std::string_view token, InputValue& out,
-                 std::string& error, const Mat4* ucs_to_world = nullptr);
+                 std::string& error, const Mat4* ucs_to_world = nullptr,
+                 std::int32_t insunits = 0);
 
 // Splits a script into tokens. Whitespace and newlines separate them, a blank
 // line is a token in its own right (it means Enter), and quoted runs stay

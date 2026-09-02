@@ -13,6 +13,7 @@
 
 #include "ncad/clipboard.hpp"
 #include "ncad/printer_output.hpp"
+#include "ncad/units.hpp"
 #include "ncad/corner.hpp"
 #include "ncad/offset.hpp"
 #include "ncad/dxf.hpp"
@@ -1752,6 +1753,23 @@ Step SetVarCommand::next(CommandContext& ctx, const InputValue& value) {
             switch (ctx.db.sysvars().set(var_, v)) {
                 case Sysvars::SetStatus::Ok: return Step::done();
                 case Sysvars::SetStatus::OutOfRange:
+                    // The two variables whose values are an enumerated SET
+                    // rather than a span say WHAT would have been accepted. A
+                    // range can be guessed at from the name; a set cannot, and
+                    // "out of range for PAPERSIZE" tells a user nothing they
+                    // can act on. Brief 12 filed this gap for PAPERSIZE and
+                    // brief 19 asked for it on INSUNITS; one branch serves
+                    // both, and any future enumerated variable joins it here.
+                    if (const SysvarDef* d = find_sysvar(var_); d != nullptr) {
+                        if (d->id == Sysvar::InsUnits) {
+                            return Step::failed("no such unit: " + var_ + " takes " +
+                                                insunits_choices());
+                        }
+                        if (d->id == Sysvar::PaperSize) {
+                            return Step::failed("no such paper size: " + var_ + " takes " +
+                                                plot_paper_size_names() + ", or USER");
+                        }
+                    }
                     return Step::failed("value out of range for " + var_);
                 case Sysvars::SetStatus::WrongType:
                     return Step::failed("wrong type for " + var_);

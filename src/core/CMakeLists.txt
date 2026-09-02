@@ -46,6 +46,7 @@ add_library(ncad_core STATIC
   cp1252.cpp
   drawing_lock.cpp
   input_text.cpp
+  units.cpp
 )
 
 target_include_directories(ncad_core PUBLIC ${PROJECT_SOURCE_DIR}/include ${NCAD_VERSION_DIR})
