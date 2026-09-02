@@ -102,6 +102,40 @@ enum class Sysvar : std::uint16_t {
     // geometry in bulk and saving it without a person present.
     DxfVersionVar,
 
+    // The sheet PLOT puts the drawing on. DXFVERSION's shape exactly, and for
+    // its reason: a setting the terminal answers by typing, which a print
+    // dialog folds into its own controls rather than asking for twice.
+    //
+    // PAPERSIZE names the sheet -- "A3", "LETTERP" -- and the table that says
+    // what those mean in millimetres lives in plot.hpp. The three reals are the
+    // sheet itself.
+    //
+    // THE RULE BETWEEN THEM, because a name and a pair of numbers describing
+    // one thing is exactly where ambiguity lives: the NUMBERS are what PLOT
+    // reads, and the NAME is kept in step with them.
+    //
+    //   * Setting PAPERSIZE to a known name writes PAPERWIDTH and PAPERHEIGHT.
+    //     So (getvar "PAPERWIDTH") after SETVAR PAPERSIZE A3 answers 420, not
+    //     the number it held before -- a variable that describes the current
+    //     sheet must not go on describing the previous one.
+    //   * Setting PAPERWIDTH or PAPERHEIGHT sets PAPERSIZE to "USER". Without
+    //     that, typing a width while PAPERSIZE said A3 would either be
+    //     silently ignored or make one of the two variables a lie, and both
+    //     are worse than a name that says the sheet is no longer a named one.
+    //   * An unknown PAPERSIZE is REFUSED rather than falling back to A4.
+    //     DXFVERSION does fall back, and can afford to -- an unrecognised
+    //     version still writes a valid DXF. A misheard paper size writes a plot
+    //     on the wrong sheet and says nothing, and the typo is only findable
+    //     by measuring the PDF.
+    //
+    // Not saved in the drawing, for DXFVERSION's reason as well: paper says how
+    // to PRINT, not what the drawing contains, and OPEN silently reverting the
+    // sheet you just chose is exactly the surprise that comment describes.
+    PaperSize,
+    PaperWidth,
+    PaperHeight,
+    PaperMargin,
+
     // Dimension style, R12's DIMxxx family. Only the handful the dimensions
     // this program draws actually consult -- R12 has about fifty, and carrying
     // the rest before anything reads them would be a table of decoration.
@@ -225,6 +259,15 @@ public:
 
 private:
     void journal_write(Sysvar id, const SysvarValue& before);
+
+    // Writes one variable because ANOTHER one was just written -- PAPERSIZE
+    // following PAPERWIDTH, and the two dimensions following PAPERSIZE.
+    //
+    // It exists so those writes cannot recurse: going back through set_real or
+    // set_string would make each half of the pair set the other half forever.
+    // It journals, like every other write here, so undo takes the pair back
+    // together in the order they were made.
+    void write_paired(Sysvar id, const SysvarValue& v);
 
     SysvarValue values_[static_cast<std::size_t>(Sysvar::kCount)];
     UndoJournal* journal_{nullptr};

@@ -31,12 +31,15 @@
 #include "ncad/bbox.hpp"
 #include "ncad/vec3.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace ncad {
 
 class Database;
+class Sysvars;
 
 // Which part of the drawing goes on the page. R12's names.
 enum class PlotArea : std::uint8_t {
@@ -77,6 +80,11 @@ struct PlotView {
 
 // Paper, in millimetres. A4 landscape, which is what fits a screenful of
 // drawing without anyone having to think about it.
+//
+// These defaults are load-bearing: they are what every plot this program has
+// ever written used, and PAPERSIZE/PAPERWIDTH/PAPERHEIGHT/PAPERMARGIN default
+// to exactly them, so the A4 default keeps producing the same bytes it always
+// has. Moving one of these numbers moves every existing plot.
 struct PlotPaper {
     double width_mm{297.0};
     double height_mm{210.0};
@@ -84,6 +92,55 @@ struct PlotPaper {
 
     bool valid() const;
 };
+
+// Empty when the paper can be plotted on; otherwise the sentence explaining
+// what is wrong with it, with the numbers in it.
+//
+// It exists because paper is now USER INPUT -- PAPERWIDTH is a real with no
+// range check, like every other real here -- so "1 x 1 mm with 10 mm margins"
+// is reachable by typing, and the fit divides by what the margins leave. A
+// bare false would make PLOT say only that the paper is wrong; the person who
+// typed the number needs to be told which number.
+std::string plot_paper_problem(const PlotPaper& paper);
+
+// The sheets PAPERSIZE knows, in millimetres.
+//
+// A bare name is LANDSCAPE and a "P" suffix is portrait, which is the opposite
+// way round from ISO's own definition of the A series. Two reasons: the paper
+// this program has always plotted on is A4 LANDSCAPE at 297x210 and that
+// default may not move, so "A4" has to mean the landscape sheet; and a drawing
+// is wider than it is tall more often than not, so the short name should be
+// the common answer.
+//
+// Names rather than numbers because that is how the request is made -- a
+// designer asks for A3, not for 420x297 -- and because a name is the only form
+// of it that can be checked when it is typed.
+struct PlotPaperSize {
+    const char* name;
+    double width_mm;
+    double height_mm;
+};
+
+const PlotPaperSize* plot_paper_sizes(std::size_t& count);
+
+// Case-insensitive, like find_sysvar. Null when there is no such sheet, which
+// is how SETVAR PAPERSIZE refuses a typo instead of quietly plotting A4.
+const PlotPaperSize* find_plot_paper_size(std::string_view name);
+
+// What PAPERSIZE reads when the sheet was given as numbers instead of named.
+// Not a row in the table above: it has no dimensions of its own, it points at
+// PAPERWIDTH and PAPERHEIGHT.
+inline constexpr const char* kPlotPaperUser = "USER";
+
+// The paper PLOT is currently set to.
+//
+// Reads PAPERWIDTH, PAPERHEIGHT and PAPERMARGIN and NOT PAPERSIZE, because the
+// name is kept in step with the numbers as they are written rather than
+// resolved here: setting PAPERSIZE writes the two dimensions, and setting
+// either dimension sets PAPERSIZE to USER. So the numbers always describe the
+// actual sheet and there is only one place that decides what A3 means. See the
+// sysvar table for the full rule.
+PlotPaper plot_paper_from_sysvars(const Sysvars& vars);
 
 // A plan view over `box`, looking down `normal`. What Extents, Limits and
 // Window all reduce to, since each of them names a world-space rectangle and

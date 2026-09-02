@@ -6,7 +6,13 @@
 # the same reasoning as the DWG option, and the same requirement that the
 # boundary be visible in the build graph rather than inferred. Nothing in
 # src/core or src/lisp may depend on this target.
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+# PrintSupport for the native print dialog. Same licensing terms as the rest of
+# Qt here -- LGPLv3, linked dynamically, and covered by the static-Qt guard
+# below -- so it changes nothing about the boundary this file exists to keep.
+# What it must NOT change is where plotting is decided: `plot.hpp` puts PLOT in
+# the core so both front ends have it, and a printer is a DESTINATION added on
+# top rather than a second way of deciding what a plot is.
+find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport)
 
 # Guard the licensing decision rather than trusting it to stay true. A static
 # Qt would silently change the terms under which the binary can be conveyed.
@@ -32,7 +38,7 @@ target_include_directories(ncad_gui_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${NCA
 add_dependencies(ncad_gui_lib ncad_version)
 # ncad_app carries PromptSession: the GUI command line and the ncad terminal
 # prompt run the same code, which is the only way they stay consistent.
-target_link_libraries(ncad_gui_lib PUBLIC ncad_core ncad_app ncad_sample Qt6::Widgets)
+target_link_libraries(ncad_gui_lib PUBLIC ncad_core ncad_app ncad_sample Qt6::Widgets Qt6::PrintSupport)
 target_link_libraries(ncad_gui_lib PRIVATE ncad_flags)
 
 # The library is ncad_gui_lib to avoid colliding with the ncad_gui executable.

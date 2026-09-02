@@ -9,12 +9,15 @@
 #include "ncad/ecs.hpp"
 #include "ncad/render.hpp"
 #include "ncad/scene.hpp"
+#include "ncad/sysvar.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ncad {
@@ -30,6 +33,18 @@ std::string num(double v) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%.2f", v);
     return buf;
+}
+
+// Not strcasecmp, for the reason sysvar.cpp gives for its own copy: that one
+// is locale-sensitive, and a Turkish locale would stop "a4" matching "A4".
+bool iequals_ascii(std::string_view a, const char* b) {
+    std::size_t i = 0;
+    for (; i < a.size(); ++i) {
+        const char ca = (a[i] >= 'a' && a[i] <= 'z') ? static_cast<char>(a[i] - 'a' + 'A') : a[i];
+        const char cb = (b[i] >= 'a' && b[i] <= 'z') ? static_cast<char>(b[i] - 'a' + 'A') : b[i];
+        if (b[i] == '\0' || ca != cb) return false;
+    }
+    return b[i] == '\0';
 }
 
 // A line width that survives being looked at. R12 had no lineweights and the
@@ -152,9 +167,72 @@ bool PlotView::valid() const {
     return width() > kEps && height() > kEps && !is_zero(ax) && !is_zero(ay);
 }
 
+// One definition of "usable paper", worded once. valid() asking the same
+// question the message answers is what stops the two drifting apart -- a
+// predicate that says no and a sentence that describes a different fault is
+// worse than either alone. It allocates, which is fine: it runs once per plot,
+// not once per line.
 bool PlotPaper::valid() const {
-    return width_mm - 2.0 * margin_mm > kEps && height_mm - 2.0 * margin_mm > kEps &&
-           margin_mm >= 0.0;
+    return plot_paper_problem(*this).empty();
+}
+
+std::string plot_paper_problem(const PlotPaper& paper) {
+    // Non-finite first: every comparison below is false against a NaN, so a
+    // NaN width would otherwise fall through as an unexplained refusal.
+    if (!std::isfinite(paper.width_mm) || !std::isfinite(paper.height_mm) ||
+        !std::isfinite(paper.margin_mm)) {
+        return "the paper size is not a number";
+    }
+    if (paper.margin_mm < 0.0) {
+        return "the paper margin is negative (" + num(paper.margin_mm) + " mm)";
+    }
+    if (paper.width_mm <= kEps || paper.height_mm <= kEps) {
+        return "the paper is " + num(paper.width_mm) + " x " + num(paper.height_mm) +
+               " mm, which is not a sheet";
+    }
+    // The one that is reachable by typing a plausible number: A4 with 200 mm
+    // margins. Saying which way it fails, and by how much, is the difference
+    // between a message and a shrug.
+    const double across = paper.width_mm - 2.0 * paper.margin_mm;
+    const double down = paper.height_mm - 2.0 * paper.margin_mm;
+    if (across <= kEps || down <= kEps) {
+        return "the paper is " + num(paper.width_mm) + " x " + num(paper.height_mm) +
+               " mm and the margins take " + num(2.0 * paper.margin_mm) +
+               " mm off each way, which leaves nothing to plot on";
+    }
+    return {};
+}
+
+// ISO 216 for the A series, 8.5x11 and 11x17 inches converted exactly for the
+// two American sheets. Both orientations of each, because a portrait drawing on
+// landscape paper wastes half the sheet and no amount of fitting fixes it.
+constexpr PlotPaperSize kPaperSizes[] = {
+    {"A4", 297.0, 210.0},       {"A4P", 210.0, 297.0},
+    {"A3", 420.0, 297.0},       {"A3P", 297.0, 420.0},
+    {"A2", 594.0, 420.0},       {"A2P", 420.0, 594.0},
+    {"A1", 841.0, 594.0},       {"A1P", 594.0, 841.0},
+    {"LETTER", 279.4, 215.9},   {"LETTERP", 215.9, 279.4},
+    {"TABLOID", 431.8, 279.4},  {"TABLOIDP", 279.4, 431.8},
+};
+
+const PlotPaperSize* plot_paper_sizes(std::size_t& count) {
+    count = sizeof(kPaperSizes) / sizeof(kPaperSizes[0]);
+    return kPaperSizes;
+}
+
+const PlotPaperSize* find_plot_paper_size(std::string_view name) {
+    for (const PlotPaperSize& s : kPaperSizes) {
+        if (iequals_ascii(name, s.name)) return &s;
+    }
+    return nullptr;
+}
+
+PlotPaper plot_paper_from_sysvars(const Sysvars& vars) {
+    PlotPaper paper;
+    paper.width_mm = vars.get_real(Sysvar::PaperWidth);
+    paper.height_mm = vars.get_real(Sysvar::PaperHeight);
+    paper.margin_mm = vars.get_real(Sysvar::PaperMargin);
+    return paper;
 }
 
 PlotView plot_view_for_box(const BBox& box, const Vec3& normal) {
@@ -220,8 +298,10 @@ bool write_plot_pdf(const Database& db, const PlotView& view, const PlotPaper& p
                     const std::string& path, std::string& error) {
     const std::string pdf = plot_pdf_text(db, view, paper);
     if (pdf.empty()) {
-        error = view.valid() ? "the paper leaves no room to plot on"
-                             : "nothing to plot -- the area is empty";
+        // The paper's own words, not a generic refusal: paper comes from
+        // PAPERWIDTH and PAPERMARGIN now, so this is a report about something
+        // the user typed.
+        error = view.valid() ? plot_paper_problem(paper) : "nothing to plot -- the area is empty";
         return false;
     }
 

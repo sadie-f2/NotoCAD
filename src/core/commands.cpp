@@ -3244,6 +3244,15 @@ Step PlotCommand::ask_file(CommandContext& ctx) {
                             " is empty");
     }
 
+    // And the paper, for the same reason the area is checked here: PAPERWIDTH
+    // is a real with no range check, so a sheet smaller than its own margins is
+    // reachable by typing, and finding that out after being asked for a file
+    // name wastes the typing. The value is looked up again in write() rather
+    // than kept -- resolving three sysvars costs nothing, and PlotCommand's
+    // members are not the place to cache a setting that is read once.
+    const std::string paper_problem = plot_paper_problem(plot_paper_from_sysvars(ctx.db.sysvars()));
+    if (!paper_problem.empty()) return Step::failed(paper_problem);
+
     state_ = State::FileName;
     Prompt p;
     p.kind = PromptKind::String;
@@ -3259,10 +3268,18 @@ Step PlotCommand::write(CommandContext& ctx, const std::string& raw) {
     // The same advisory-lock courtesy every other write gets. A plot is not the
     // drawing, but overwriting somebody's open file is the same act.
     std::string error;
-    if (!write_plot_pdf(ctx.db, view_, PlotPaper{}, path, error)) {
+    if (!write_plot_pdf(ctx.db, view_, plot_paper_from_sysvars(ctx.db.sysvars()), path, error)) {
         return Step::failed(error);
     }
-    return Step::done(note_ + "Plotted " + plot_area_name(area_) + " to " + path);
+    // Which sheet it went on, in the same breath as where it went. Paper is a
+    // setting now, and a setting that quietly changed the size of the last
+    // hundred plots is the failure this line makes visible.
+    const std::string& size_name = ctx.db.sysvars().get_string(Sysvar::PaperSize);
+    const PlotPaper paper = plot_paper_from_sysvars(ctx.db.sysvars());
+    const std::string sheet = size_name == kPlotPaperUser
+                                  ? fmt(paper.width_mm) + "x" + fmt(paper.height_mm) + " mm"
+                                  : size_name;
+    return Step::done(note_ + "Plotted " + plot_area_name(area_) + " on " + sheet + " to " + path);
 }
 
 Step PlotCommand::next(CommandContext& ctx, const InputValue& value) {

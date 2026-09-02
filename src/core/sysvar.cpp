@@ -3,6 +3,7 @@
 
 #include "ncad/sysvar.hpp"
 
+#include "ncad/plot.hpp"
 #include "ncad/undo.hpp"
 
 #include <cstddef>
@@ -77,6 +78,26 @@ constexpr SysvarDef kTable[] = {
     // something silently reverts to R12 -- which is exactly the surprise it
     // caused before this comment existed.
     {"DXFVERSION", Sysvar::DxfVersionVar, SysvarType::String, false, false, 0, 0, 0, 0.0, "R12", {}},
+
+    // The plot sheet. The rule tying the name to the numbers is written out in
+    // full in sysvar.hpp beside the enum; the short version is that the numbers
+    // are the sheet and the name is kept in step with them.
+    //
+    // The defaults ARE PlotPaper's defaults, and deliberately spelled out here
+    // rather than pulled from that struct: they are the A4 landscape sheet
+    // every plot this program has written so far used, and a test pins them to
+    // the table in plot.hpp so the two cannot drift. Changing one of these
+    // numbers changes every plot anybody takes.
+    //
+    // Not saved in the drawing, like DXFVERSION above: how to print is not
+    // drawing content.
+    {"PAPERSIZE", Sysvar::PaperSize, SysvarType::String, false, false, 0, 0, 0, 0.0, "A4", {}},
+    {"PAPERWIDTH", Sysvar::PaperWidth, SysvarType::Real, false, false, 0, 0, 0, 297.0, "", {}},
+    {"PAPERHEIGHT", Sysvar::PaperHeight, SysvarType::Real, false, false, 0, 0, 0, 210.0, "", {}},
+    // 10 mm all round. Not a printer's unprintable margin -- that is the
+    // printer's business and varies by device -- but the white edge a drawing
+    // is expected to have.
+    {"PAPERMARGIN", Sysvar::PaperMargin, SysvarType::Real, false, false, 0, 0, 0, 10.0, "", {}},
     // The dimension style. R12's defaults, and saved in the drawing because
     // they describe how THIS drawing is annotated rather than how this
     // installation behaves -- two drawings at different plot scales want
@@ -232,6 +253,13 @@ Sysvars::SetStatus Sysvars::set_real(Sysvar id, double v) {
     const SysvarValue before = values_[index_of(id)];
     values_[index_of(id)] = SysvarValue::of_real(v);
     journal_write(id, before);
+
+    // A typed-in dimension MEANS the sheet is no longer a named one. Leaving
+    // PAPERSIZE reading "A3" beside a width of 500 would make one of the two
+    // variables a lie, whichever way PLOT then resolved them.
+    if (id == Sysvar::PaperWidth || id == Sysvar::PaperHeight) {
+        write_paired(Sysvar::PaperSize, SysvarValue::of_string(kPlotPaperUser));
+    }
     return SetStatus::Ok;
 }
 
@@ -239,10 +267,41 @@ Sysvars::SetStatus Sysvars::set_string(Sysvar id, std::string v) {
     const SysvarDef& d = sysvar_def(id);
     if (d.read_only) return SetStatus::ReadOnly;
     if (d.type != SysvarType::String) return SetStatus::WrongType;
+
+    // PAPERSIZE is the one string here whose VALUES are enumerated, so it is
+    // the one that can be checked at the moment it is typed rather than at the
+    // moment it is used. Refusing here means SETVAR PAPERSIZE A5 says so on the
+    // spot; falling back to A4 would only be discovered by measuring a plot.
+    const PlotPaperSize* sheet = nullptr;
+    if (id == Sysvar::PaperSize) {
+        if (iequals(v, kPlotPaperUser)) {
+            // Accepted and canonicalised, but it changes no dimension: USER
+            // means "whatever PAPERWIDTH and PAPERHEIGHT already say".
+            v = kPlotPaperUser;
+        } else {
+            sheet = find_plot_paper_size(v);
+            if (sheet == nullptr) return SetStatus::OutOfRange;
+            v = sheet->name;  // canonical case, so getvar answers "A3" for "a3"
+        }
+    }
+
     const SysvarValue before = values_[index_of(id)];
     values_[index_of(id)] = SysvarValue::of_string(std::move(v));
     journal_write(id, before);
+
+    // The named size IS the two dimensions; carrying it as a name that PLOT
+    // resolves later would leave PAPERWIDTH answering for a sheet nobody is on.
+    if (sheet != nullptr) {
+        write_paired(Sysvar::PaperWidth, SysvarValue::of_real(sheet->width_mm));
+        write_paired(Sysvar::PaperHeight, SysvarValue::of_real(sheet->height_mm));
+    }
     return SetStatus::Ok;
+}
+
+void Sysvars::write_paired(Sysvar id, const SysvarValue& v) {
+    const SysvarValue before = values_[index_of(id)];
+    values_[index_of(id)] = v;
+    journal_write(id, before);
 }
 
 Sysvars::SetStatus Sysvars::set_point(Sysvar id, const Vec3& p) {
