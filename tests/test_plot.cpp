@@ -86,7 +86,12 @@ void media_box(const std::string& pdf, double& w, double& h) {
 // this one is four lines and needs no library.
 std::uint64_t fnv1a(const std::string& s) {
     std::uint64_t h = 1469598103934665603ull;
-    for (const unsigned char c : s) {
+    for (const char raw : s) {
+        // Widened through unsigned char explicitly: iterating `s` yields
+        // `char`, whose signedness is implementation-defined, and letting the
+        // loop variable convert would both warn and make the hash differ
+        // between platforms for any byte over 127.
+        const auto c = static_cast<unsigned char>(raw);
         h ^= c;
         h *= 1099511628211ull;
     }

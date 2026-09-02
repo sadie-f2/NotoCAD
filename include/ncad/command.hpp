@@ -421,6 +421,11 @@ public:
     // clipboard, `ncad` an in-process one.
     void set_clipboard(Clipboard* clipboard) { ctx_.clipboard = clipboard; }
 
+    // The Qt shell wires a QPrinter-backed one; `ncad` wires nothing, and a
+    // null printer is what makes PLOT refuse in words instead of writing a
+    // file nobody asked for. See printer_output.hpp.
+    void set_printer(PrinterOutput* printer) { ctx_.printer = printer; }
+
     CommandEngine(const CommandEngine&) = delete;
     CommandEngine& operator=(const CommandEngine&) = delete;
 

@@ -15,6 +15,7 @@
 #include "ncad/lisp/interp_script_loader.hpp"
 #include "prompt.hpp"
 #include "qt_clipboard.hpp"
+#include "qt_printer_output.hpp"
 
 #include <QKeySequence>
 #include <QMainWindow>
@@ -129,6 +130,11 @@ private:
     lisp::Interp interp_;
     lisp::InterpScriptLoader script_loader_{interp_};
     QtClipboard clipboard_;
+
+    // PLOT's way to a real printer. `ncad` has none, which is what makes
+    // asking for one there a refusal rather than a file. See
+    // printer_output.hpp.
+    QtPrinterOutput printer_{this};
     CommandEngine engine_;
 
     ViewportWidget* view_{nullptr};

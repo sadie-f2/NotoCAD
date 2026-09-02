@@ -31,7 +31,9 @@
 #include "print_plot.hpp"
 
 #include <QGuiApplication>
+#include <QBuffer>
 #include <QImage>
+#include <QPdfWriter>
 #include <QPainter>
 
 #include <cmath>
@@ -154,10 +156,59 @@ int compare(double nudge, bool expect_match) {
 
 }  // namespace
 
+// The whole printer path, exercised without a printer.
+//
+// `paint_plot` takes a QPagedPaintDevice, and QPdfWriter is one -- so the page
+// setup, the painter and the `draw_database` walk all run here exactly as they
+// would against a QPrinter. What cannot be checked without hardware is the
+// queue; everything up to it can, and is.
+int paints_a_page() {
+    ncad::Database db;
+    build_drawing(db);
+    const ncad::PlotView view = ncad::plot_view_for_box(db.extents(), ncad::Vec3{0, 0, 1});
+    const ncad::PlotPaper paper;
+
+    QBuffer buffer;
+    buffer.open(QIODevice::WriteOnly);
+    QPdfWriter writer(&buffer);
+    std::string error;
+    if (!ncad::paint_plot(writer, db, view, paper, error)) {
+        std::printf("FAIL: paint_plot refused: %s\n", error.c_str());
+        return 1;
+    }
+    buffer.close();
+
+    // A page with line work on it is not a few bytes of header.
+    if (buffer.data().size() < 1000) {
+        std::printf("FAIL: the painted page is only %lld bytes\n",
+                    static_cast<long long>(buffer.data().size()));
+        return 1;
+    }
+    std::printf("%-28s %lld bytes painted\n", "printer path:",
+                static_cast<long long>(buffer.data().size()));
+
+    // And unusable paper is refused through this path too, from the same
+    // plot_paper_problem the file writer uses -- a printer must not accept a
+    // sheet the PDF writer would decline.
+    ncad::PlotPaper bad_paper;
+    bad_paper.margin_mm = 400.0;
+    QBuffer sink;
+    sink.open(QIODevice::WriteOnly);
+    QPdfWriter writer2(&sink);
+    std::string problem;
+    if (ncad::paint_plot(writer2, db, view, bad_paper, problem)) {
+        std::printf("FAIL: a sheet smaller than its margins was accepted\n");
+        return 1;
+    }
+    std::printf("%-28s %s\n", "impossible paper:", problem.c_str());
+    return 0;
+}
+
 int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
 
     int bad = 0;
+    bad += paints_a_page();
     // They agree.
     bad += compare(0.0, true);
     // And the comparison can fail: one point of displacement is seen.

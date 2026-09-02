@@ -77,6 +77,9 @@ MainWindow::MainWindow(const QString& drawing, QWidget* parent)
     // The system clipboard, so COPYCLIP reaches other windows and other
     // applications. `ncad` wires an in-process one here instead.
     engine_.set_clipboard(&clipboard_);
+    // And a printer, which is the destination `ncad` cannot have. PLOT decides
+    // WHAT to plot in the core either way; only where it goes differs here.
+    engine_.set_printer(&printer_);
 
     // Something to look at on startup, when nothing was asked for. A named
     // drawing is opened further down instead -- after the command line exists,
