@@ -12,6 +12,7 @@
 #include "ncad/scene.hpp"
 
 #include "ncad/clipboard.hpp"
+#include "ncad/printer_output.hpp"
 #include "ncad/corner.hpp"
 #include "ncad/offset.hpp"
 #include "ncad/dxf.hpp"
@@ -25,6 +26,21 @@
 #include <string>
 
 namespace ncad {
+
+// ASCII-only, and not strcasecmp for the reason plot.cpp and sysvar.cpp both
+// give for their own copies: that one is locale-sensitive, and a Turkish
+// locale would stop "printer" matching "Printer".
+bool iequals_ascii_word(std::string_view a, const char* b) {
+    std::size_t i = 0;
+    for (; i < a.size(); ++i) {
+        if (b[i] == '\0') return false;
+        const char x = (a[i] >= 'a' && a[i] <= 'z') ? static_cast<char>(a[i] - 32) : a[i];
+        const char y = (b[i] >= 'a' && b[i] <= 'z') ? static_cast<char>(b[i] - 32) : b[i];
+        if (x != y) return false;
+    }
+    return b[i] == '\0';
+}
+
 namespace {
 
 std::string upcase(std::string_view s) {
@@ -3194,7 +3210,11 @@ Step PlotCommand::start(CommandContext&) {
     return Step::ask(p);
 }
 
-Step PlotCommand::ask_file(CommandContext& ctx) {
+// Turns the chosen area into a `PlotView` and checks it is plottable.
+//
+// Named for what it does rather than what it asks next: the destination prompt
+// now sits between this and the file name.
+Step PlotCommand::resolve_view(CommandContext& ctx) {
     // Built here rather than at the prompt, so a failure to find an area is
     // reported BEFORE a file name is asked for. Asking and then refusing is the
     // shape that wastes the user's typing.
@@ -3253,13 +3273,61 @@ Step PlotCommand::ask_file(CommandContext& ctx) {
     const std::string paper_problem = plot_paper_problem(plot_paper_from_sysvars(ctx.db.sysvars()));
     if (!paper_problem.empty()) return Step::failed(paper_problem);
 
+    return ask_file(ctx);
+}
+
+// Where the plot goes: a file name, or the `Printer` keyword.
+//
+// ONE prompt rather than a destination menu in front of it, and that is a
+// compatibility decision as much as a taste one. `(command "PLOT" "E"
+// "out.pdf")` is what every script and LISP routine written before printers
+// existed says, and it has to keep meaning what it meant. A menu in front of
+// the name would break all of them.
+//
+// The keyword is offered only where there IS a printer -- `ncad` must not
+// advertise what it cannot do -- but it is ACCEPTED either way, so that a
+// script asking for a printer on a headless session is refused in words rather
+// than quietly writing a file called `Printer.pdf`. That silent fallback is
+// exactly what printer_output.hpp says must not happen, and it is what this
+// command did until the case was noticed.
+Step PlotCommand::ask_file(CommandContext& ctx) {
     state_ = State::FileName;
     Prompt p;
     p.kind = PromptKind::String;
-    p.message = "Plot to file";
+    p.message = ctx.printer != nullptr ? "Plot to file, or [Printer]" : "Plot to file";
+    if (ctx.printer != nullptr) p.keywords = {"Printer"};
     p.file = FileIntent::Save;
     p.file_extension = "pdf";
     return Step::ask(p);
+}
+
+// The printer path. The dialog, the queue and the page setup are all the
+// shell's; what the core keeps is the DECISION about what to plot, and the
+// paper the rest of the program reads.
+Step PlotCommand::to_printer(CommandContext& ctx) {
+    if (ctx.printer == nullptr) {
+        // Unreachable through ask_destination, which never offers Printer
+        // without one -- but a LISP script can drive the keyword directly, and
+        // that must refuse in words rather than assert.
+        return Step::failed(
+            "there is no printer here: PLOT to a printer needs the window. "
+            "Plot to a file instead, or open the drawing in ncad_gui");
+    }
+
+    PlotPaper paper = plot_paper_from_sysvars(ctx.db.sysvars());
+    std::string error;
+    if (!ctx.printer->print(ctx.db, view_, paper, error)) {
+        // An empty error is a cancelled dialog, which is a decision rather than
+        // a fault and must not be reported as one.
+        if (error.empty()) return Step::done("Cancelled.");
+        return Step::failed(error);
+    }
+
+    // The dialog may have been left on a different sheet. Writing it back means
+    // the choice was made once, in the place SETVAR and the next plot read.
+    plot_paper_to_sysvars(ctx.db.sysvars(), paper);
+
+    return Step::done(note_ + "Plotted " + plot_area_name(area_) + " to the printer");
 }
 
 Step PlotCommand::write(CommandContext& ctx, const std::string& raw) {
@@ -3302,7 +3370,7 @@ Step PlotCommand::next(CommandContext& ctx, const InputValue& value) {
         } else {
             return Step::failed("unknown plot area");
         }
-        return ask_file(ctx);
+        return resolve_view(ctx);
     }
 
     if (state_ == State::WindowFirst) {
@@ -3325,6 +3393,14 @@ Step PlotCommand::next(CommandContext& ctx, const InputValue& value) {
         box.expand(value.point);
         view_ = plot_view_for_box(box, ctx.db.construction_normal());
         return ask_file(ctx);
+    }
+
+    // Checked BEFORE the name, and checked even where no printer was offered:
+    // a script that asks for one on a headless session gets the reason rather
+    // than a file named after the thing it wanted.
+    if (keyword_is(value, "Printer") ||
+        (value.kind == InputKind::String && iequals_ascii_word(value.text, "Printer"))) {
+        return to_printer(ctx);
     }
 
     if (value.kind != InputKind::String || value.text.empty()) {

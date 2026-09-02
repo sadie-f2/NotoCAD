@@ -104,6 +104,22 @@ add_test(NAME ncad_cli_command COMMAND ncad
          -e "(princ (cdr (assoc 11 (entget (entlast)))))")
 set_tests_properties(ncad_cli_command PROPERTIES PASS_REGULAR_EXPRESSION "10.0")
 
+
+# --- print_place_diff ---------------------------------------------------------
+#
+# Needs Qt, so built only with the GUI -- but registered as a TEST.
+if(NCAD_BUILD_GUI)
+  find_package(Qt6 REQUIRED COMPONENTS Gui)
+  # Brief 13's invariant, asserted rather than hoped: the printer and the PDF
+  # put a world point at the same page coordinate. Reads the PDF writer's own
+  # output rather than recomputing it, and carries its own can-this-fail check.
+  add_executable(ncad_print_place_diff print_place_diff.cpp)
+  target_link_libraries(ncad_print_place_diff PRIVATE ncad_gui_lib ncad_flags Qt6::Gui)
+  add_test(NAME ncad_print_place_diff COMMAND ncad_print_place_diff)
+  set_tests_properties(ncad_print_place_diff PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
 # The command prompt reads stdin, so driving it needs a shell to pipe with.
 if(UNIX)
   add_test(NAME ncad_cli_prompt COMMAND sh -c

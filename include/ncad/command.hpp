@@ -296,6 +296,8 @@ struct CommandMemory {
 // then MOVE Previous is one selection used twice. The engine owns it for the
 // same reason it owns LASTPOINT -- state that spans commands belongs to
 // whatever spans commands.
+class PrinterOutput;
+
 struct CommandContext {
     Database& db;
     SelectionSet& selection;
@@ -314,6 +316,12 @@ struct CommandContext {
     // command that needs it must say so rather than pretend -- see
     // view_control.hpp for why this is an interface and not a Viewport.
     ViewControl* view{nullptr};
+
+    // PLOT's way to a real printer. Null in `ncad`, which has no session to
+    // attach one to -- see printer_output.hpp for why a destination is the one
+    // thing here that is allowed to differ between the front ends, and why the
+    // refusal is words rather than a quiet fallback to a file.
+    PrinterOutput* printer{nullptr};
 
     // APPLOAD's way into the interpreter. Null only if nobody wired one up --
     // see script_loader.hpp for why this is an interface and not an Interp*.

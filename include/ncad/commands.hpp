@@ -1091,8 +1091,10 @@ public:
 private:
     enum class State : std::uint8_t { Area, WindowFirst, WindowSecond, FileName };
 
+    Step resolve_view(CommandContext& ctx);
     Step ask_file(CommandContext& ctx);
     Step write(CommandContext& ctx, const std::string& path);
+    Step to_printer(CommandContext& ctx);
 
     State state_{State::Area};
     PlotArea area_{PlotArea::Display};

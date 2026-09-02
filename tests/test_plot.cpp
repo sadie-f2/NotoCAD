@@ -595,3 +595,91 @@ TEST_CASE("plot command: impossible paper is refused BEFORE a file name is asked
     CHECK(engine.status() == EngineStatus::Failed);
     CHECK(engine.message().find("nothing to plot on") != std::string::npos);
 }
+
+// --- the printer destination --------------------------------------------------
+
+TEST_CASE("plot command: a printer asked for in ncad is refused, not written to a file") {
+    // THE case this test exists for, and it is not hypothetical: before the
+    // Printer keyword was checked, `(command "PLOT" "E" "Printer")` on a
+    // headless session wrote a file called Printer.pdf and reported success.
+    // printer_output.hpp says a missing printer must refuse in words rather
+    // than fall back to a file, and a silent fallback is worse than a refusal
+    // precisely because nobody goes looking for the file it wrote.
+    //
+    // CommandContext::printer is null here, which is what `ncad` always has.
+    Database db;
+    fill_square(db);
+
+    CommandEngine engine(db);
+    engine.begin(make_command("PLOT"));
+    engine.supply(InputValue::of_keyword("EXTENTS"));
+    REQUIRE(engine.status() == EngineStatus::Waiting);
+    engine.supply(InputValue::of_string("Printer"));
+
+    CHECK(engine.status() == EngineStatus::Failed);
+    CHECK(engine.message().find("no printer here") != std::string::npos);
+}
+
+TEST_CASE("plot command: the printer keyword is matched whatever its case") {
+    // A LISP routine writes whatever it writes. Matching only "Printer" would
+    // send "printer" off to be a file name, which is the very fallback the
+    // test above exists to prevent.
+    for (const char* spelling : {"printer", "PRINTER", "Printer", "PrInTeR"}) {
+        Database db;
+        fill_square(db);
+        CommandEngine engine(db);
+        engine.begin(make_command("PLOT"));
+        engine.supply(InputValue::of_keyword("EXTENTS"));
+        REQUIRE(engine.status() == EngineStatus::Waiting);
+        engine.supply(InputValue::of_string(spelling));
+        CHECK(engine.status() == EngineStatus::Failed);
+        if (engine.status() != EngineStatus::Failed) {
+            std::printf("       \"%s\" was taken as a file name\n", spelling);
+        }
+    }
+}
+
+TEST_CASE("plot command: ncad's prompt sequence is unchanged by the printer existing") {
+    // The compatibility promise. Every script and LISP routine written before
+    // printers says (command "PLOT" "E" "out.pdf"), and a destination menu in
+    // front of the name would break all of them. With no printer the prompt
+    // does not even mention one -- ncad must not advertise what it cannot do.
+    Database db;
+    fill_square(db);
+
+    CommandEngine engine(db);
+    engine.begin(make_command("PLOT"));
+    engine.supply(InputValue::of_keyword("EXTENTS"));
+
+    REQUIRE(engine.status() == EngineStatus::Waiting);
+    CHECK(engine.prompt().message == "Plot to file");
+    CHECK(engine.prompt().keywords.empty());
+    CHECK(engine.prompt().file == FileIntent::Save);
+}
+
+TEST_CASE("plot: a sheet chosen elsewhere comes back through the sysvars by name") {
+    // plot_paper_to_sysvars is how a print dialog's page setup reaches the
+    // rest of the program: the choice is made once, where SETVAR and the next
+    // plot already read it. A known sheet is NAMED rather than left as USER
+    // with the right numbers under it.
+    Database db;
+    PlotPaper paper;
+    paper.width_mm = 420.0;
+    paper.height_mm = 297.0;
+    paper.margin_mm = 12.0;
+    plot_paper_to_sysvars(db.sysvars(), paper);
+
+    CHECK(db.sysvars().get_string(Sysvar::PaperSize) == "A3");
+    CHECK_NEAR(db.sysvars().get_real(Sysvar::PaperWidth), 420.0, kTol);
+    CHECK_NEAR(db.sysvars().get_real(Sysvar::PaperMargin), 12.0, kTol);
+
+    // And a sheet the table does not hold keeps its numbers and says USER,
+    // because the numbers are the truth -- the pairing rule in sysvar.hpp.
+    PlotPaper odd;
+    odd.width_mm = 333.0;
+    odd.height_mm = 222.0;
+    odd.margin_mm = 5.0;
+    plot_paper_to_sysvars(db.sysvars(), odd);
+    CHECK(db.sysvars().get_string(Sysvar::PaperSize) == "USER");
+    CHECK_NEAR(db.sysvars().get_real(Sysvar::PaperWidth), 333.0, kTol);
+}

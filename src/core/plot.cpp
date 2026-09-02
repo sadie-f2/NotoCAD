@@ -11,6 +11,7 @@
 #include "ncad/scene.hpp"
 #include "ncad/sysvar.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -62,19 +63,11 @@ constexpr double kLineWidthPt = 0.25;
 // check worth having; this makes it three.
 class PdfRenderer final : public Renderer {
 public:
+    // The fit, the centring and the placement all live in `PlotPlacement` now,
+    // because the Qt print path needs the SAME ones and two copies of that
+    // arithmetic would disagree about scale. See plot.hpp.
     PdfRenderer(const PlotView& view, const PlotPaper& paper, std::string& out)
-        : view_(view), out_(out) {
-        // Fit, preserving aspect: the larger of the two ratios would crop, and
-        // a plot that silently loses its right-hand edge is worse than one that
-        // comes out smaller than asked for.
-        const double avail_w = (paper.width_mm - 2.0 * paper.margin_mm) * kPointsPerMm;
-        const double avail_h = (paper.height_mm - 2.0 * paper.margin_mm) * kPointsPerMm;
-        scale_ = std::min(avail_w / view.width(), avail_h / view.height());
-
-        // Centred in what is left, so the margins come out even.
-        origin_x_ = paper.margin_mm * kPointsPerMm + (avail_w - view.width() * scale_) * 0.5;
-        origin_y_ = paper.margin_mm * kPointsPerMm + (avail_h - view.height() * scale_) * 0.5;
-    }
+        : place_(view, paper), out_(out) {}
 
     void begin_entity(const EntityProps&) override {
         // Black line work only -- see plot.hpp. Colour arrives with the pen
@@ -100,17 +93,10 @@ public:
     }
 
 private:
-    void place(const Vec3& p, double& px, double& py) const {
-        const Vec3 rel = p - view_.origin;
-        px = origin_x_ + (dot(rel, view_.ax) - view_.min_x) * scale_;
-        py = origin_y_ + (dot(rel, view_.ay) - view_.min_y) * scale_;
-    }
+    void place(const Vec3& p, double& px, double& py) const { place_.place(p, px, py); }
 
-    PlotView view_;
+    PlotPlacement place_;
     std::string& out_;
-    double scale_{1.0};
-    double origin_x_{0.0};
-    double origin_y_{0.0};
 };
 
 // The document around the content stream.
@@ -152,6 +138,41 @@ std::string wrap_pdf(const std::string& content, const PlotPaper& paper) {
 }
 
 }  // namespace
+
+DrawContext plot_draw_context(const PlotView& view) {
+    DrawContext ctx;
+    // No clip: what is outside the plotted rectangle simply lands outside the
+    // page and is not shown. Clipping here would mean flattening curves
+    // against a tolerance chosen for the screen, and the plot has its own.
+    ctx.chord_tolerance = std::max(view.width(), view.height()) * 1e-4;
+    return ctx;
+}
+
+double plot_points_per_mm() {
+    return kPointsPerMm;
+}
+
+// The arithmetic is `PdfRenderer`'s, moved here unchanged -- deliberately not
+// "improved" in the move, because the PDF corpus is pinned to the byte and a
+// tidier-looking rearrangement of the same algebra can still land a vertex on
+// a different two-decimal point.
+PlotPlacement::PlotPlacement(const PlotView& view, const PlotPaper& paper) : view_(view) {
+    const double avail_w = (paper.width_mm - 2.0 * paper.margin_mm) * kPointsPerMm;
+    const double avail_h = (paper.height_mm - 2.0 * paper.margin_mm) * kPointsPerMm;
+    scale_ = std::min(avail_w / view.width(), avail_h / view.height());
+
+    origin_x_ = paper.margin_mm * kPointsPerMm + (avail_w - view.width() * scale_) * 0.5;
+    origin_y_ = paper.margin_mm * kPointsPerMm + (avail_h - view.height() * scale_) * 0.5;
+
+    page_w_ = paper.width_mm * kPointsPerMm;
+    page_h_ = paper.height_mm * kPointsPerMm;
+}
+
+void PlotPlacement::place(const Vec3& p, double& px, double& py) const {
+    const Vec3 rel = p - view_.origin;
+    px = origin_x_ + (dot(rel, view_.ax) - view_.min_x) * scale_;
+    py = origin_y_ + (dot(rel, view_.ay) - view_.min_y) * scale_;
+}
 
 const char* plot_area_name(PlotArea a) {
     switch (a) {
@@ -235,6 +256,30 @@ PlotPaper plot_paper_from_sysvars(const Sysvars& vars) {
     return paper;
 }
 
+void plot_paper_to_sysvars(Sysvars& vars, const PlotPaper& paper) {
+    // A tenth of a millimetre: finer than any sheet is specified to, and
+    // coarse enough that a dialog reporting 279.4001 mm still reads as Letter
+    // rather than falling out of the table into USER.
+    constexpr double kNameTol = 0.05;
+    std::size_t count = 0;
+    const PlotPaperSize* sizes = plot_paper_sizes(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        if (std::fabs(sizes[i].width_mm - paper.width_mm) < kNameTol &&
+            std::fabs(sizes[i].height_mm - paper.height_mm) < kNameTol) {
+            // Setting the NAME writes both dimensions, which is the pairing
+            // rule working for us: one call and the three stay consistent.
+            vars.set_string(Sysvar::PaperSize, sizes[i].name);
+            vars.set_real(Sysvar::PaperMargin, paper.margin_mm);
+            return;
+        }
+    }
+    // No such sheet in the table, so the numbers are the truth and the name
+    // becomes USER -- again by the pairing rule, not by saying so here.
+    vars.set_real(Sysvar::PaperWidth, paper.width_mm);
+    vars.set_real(Sysvar::PaperHeight, paper.height_mm);
+    vars.set_real(Sysvar::PaperMargin, paper.margin_mm);
+}
+
 PlotView plot_view_for_box(const BBox& box, const Vec3& normal) {
     PlotView view;
     if (!box.valid()) return view;
@@ -287,8 +332,7 @@ std::string plot_pdf_text(const Database& db, const PlotView& view, const PlotPa
     // No clip: what is outside the plotted rectangle simply lands outside the
     // MediaBox and is not shown. Clipping here would mean flattening curves
     // against a tolerance chosen for the screen, and the plot has its own.
-    DrawContext ctx;
-    ctx.chord_tolerance = std::max(view.width(), view.height()) * 1e-4;
+    const DrawContext ctx = plot_draw_context(view);
     draw_database(db, ctx, r);
 
     return wrap_pdf(content, paper);

@@ -28,6 +28,7 @@ set(CMAKE_AUTOMOC ON)
 
 add_library(ncad_gui_lib STATIC
   qpainter_renderer.cpp
+  print_plot.cpp
   viewport_widget.cpp
   command_line_widget.cpp
   main_window.cpp
