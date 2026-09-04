@@ -14,6 +14,7 @@
 #include "ncad/database.hpp"
 #include "ncad/entities.hpp"
 #include "ncad/plot.hpp"
+#include "ncad/printer_output.hpp"
 #include "ncad/sysvar.hpp"
 
 #include <cmath>
@@ -625,6 +626,40 @@ TEST_CASE("plot command: a printer asked for in ncad is refused, not written to 
     CHECK(engine.message().find("no printer here") != std::string::npos);
 }
 
+TEST_CASE("plot command: the KEYWORD route reaches the printer, not just a string") {
+    // The gap that shipped a broken window. `match_keyword` upcases what it
+    // returns, so a matched keyword arrives as "PRINTER" -- and the check
+    // compared against "Printer", matched nothing, and fell through to "a file
+    // name is required". Every test here supplied a STRING, which takes the
+    // other branch, and the terminal declares no keyword to match, so nothing
+    // in the suite or the CLI ever exercised the path the GUI uses.
+    //
+    // Supplied the way the parser really produces it.
+    struct StubPrinter final : PrinterOutput {
+        bool print(const Database&, const PlotView&, PlotPaper&, std::string& error) override {
+            error = "stub printer reached";
+            return false;
+        }
+    } printer;
+
+    Database db;
+    fill_square(db);
+    CommandEngine engine(db);
+    engine.set_printer(&printer);
+    engine.begin(make_command("PLOT"));
+    engine.supply(InputValue::of_keyword("EXTENTS"));
+    REQUIRE(engine.status() == EngineStatus::Waiting);
+
+    engine.supply(InputValue::of_keyword("PRINTER"));
+    // It reached the printer: the stub's own words come back, NOT the file
+    // prompt's complaint.
+    CHECK(engine.message().find("stub printer reached") != std::string::npos);
+    CHECK(engine.message().find("a file name is required") == std::string::npos);
+    if (engine.message().find("a file name is required") != std::string::npos) {
+        std::printf("       the keyword route fell through to the file prompt again\n");
+    }
+}
+
 TEST_CASE("plot command: the printer keyword is matched whatever its case") {
     // A LISP routine writes whatever it writes. Matching only "Printer" would
     // send "printer" off to be a file name, which is the very fallback the
@@ -687,4 +722,36 @@ TEST_CASE("plot: a sheet chosen elsewhere comes back through the sysvars by name
     plot_paper_to_sysvars(db.sysvars(), odd);
     CHECK(db.sysvars().get_string(Sysvar::PaperSize) == "USER");
     CHECK_NEAR(db.sysvars().get_real(Sysvar::PaperWidth), 333.0, kTol);
+}
+
+TEST_CASE("plot command: with a printer, the prompt carries the keyword the window needs") {
+    // The contract the GUI's destination dialog rests on. It decides whether
+    // to ask "printer or file?" by looking for `Printer` among the standing
+    // prompt's keywords -- so if this list ever stops carrying it, the window
+    // silently loses its only route to a printer while the terminal keeps
+    // working. That failure would not show up in any GUI-free test, which is
+    // exactly why it is pinned here.
+    struct StubPrinter final : PrinterOutput {
+        bool print(const Database&, const PlotView&, PlotPaper&, std::string&) override {
+            return true;
+        }
+    } printer;
+
+    Database db;
+    fill_square(db);
+    CommandEngine engine(db);
+    engine.set_printer(&printer);
+    engine.begin(make_command("PLOT"));
+    engine.supply(InputValue::of_keyword("EXTENTS"));
+
+    REQUIRE(engine.status() == EngineStatus::Waiting);
+    CHECK(engine.prompt().file == FileIntent::Save);  // still a file prompt
+    bool offers_printer = false;
+    for (const std::string& k : engine.prompt().keywords) {
+        if (k == "Printer") offers_printer = true;
+    }
+    CHECK(offers_printer);
+    if (!offers_printer) {
+        std::printf("       the PLOT prompt no longer offers Printer; the GUI cannot reach one\n");
+    }
 }

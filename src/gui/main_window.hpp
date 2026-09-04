@@ -94,6 +94,12 @@ private:
     void offer_file_dialog();
     void run_file_dialog();
 
+    // PLOT offers a file name OR the `Printer` keyword on ONE prompt, so that
+    // scripts written before printers still work. A window cannot reach that
+    // keyword through a file dialog, so it asks the destination first.
+    bool printer_offered(const Prompt& p) const;
+    void run_plot_destination();
+
     // Toolbar placement and window size, remembered between sessions. Saved
     // when the window actually closes rather than as things move, so a session
     // that is killed leaves the last deliberate arrangement in place.

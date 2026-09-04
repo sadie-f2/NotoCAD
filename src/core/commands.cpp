@@ -3416,7 +3416,15 @@ Step PlotCommand::next(CommandContext& ctx, const InputValue& value) {
     // Checked BEFORE the name, and checked even where no printer was offered:
     // a script that asks for one on a headless session gets the reason rather
     // than a file named after the thing it wanted.
-    if (keyword_is(value, "Printer") ||
+    // UPPERCASE, because `match_keyword` upcases what it returns
+    // (`input_text.cpp`) and every other `keyword_is` in this file compares
+    // against that form -- PLOT's own EXTENTS and WINDOW two states up
+    // included. Comparing against "Printer" matched nothing, and the answer
+    // then fell through to "a file name is required": the window offered a
+    // printer and refused the only word that asked for one. It survived the
+    // tests because a String answer hits the second branch, and survived the
+    // terminal because ncad declares no keyword there to match.
+    if (keyword_is(value, "PRINTER") ||
         (value.kind == InputKind::String && iequals_ascii_word(value.text, "Printer"))) {
         return to_printer(ctx);
     }

@@ -12,6 +12,7 @@
 #include <QContextMenuEvent>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QSettings>
 #include <QTimer>
 #include <QToolBar>
@@ -632,7 +633,66 @@ void MainWindow::offer_file_dialog() {
     if (token == file_prompt_token_) return;  // already offered, and declined
     file_prompt_token_ = token;
 
+    // A prompt that offers a PRINTER must not be answered by a file dialog.
+    //
+    // PLOT asks one question -- a file name, or the keyword `Printer` -- so
+    // that `(command "PLOT" "E" "out.pdf")` keeps meaning what it always did.
+    // In the terminal that works: the keyword is on the prompt line and can be
+    // typed. In a WINDOW it could not be reached at all, because this function
+    // fires on any prompt carrying a FileIntent and the modal took over before
+    // the user could answer -- the command line showed `[Printer]` and would
+    // not accept it. Reported from the GUI, 2026-09-03.
+    //
+    // So the destination is asked FIRST when there is a choice, and the file
+    // dialog stays what it always was: the way to answer a file name.
+    if (printer_offered(p)) {
+        QTimer::singleShot(0, this, &MainWindow::run_plot_destination);
+        return;
+    }
+
     QTimer::singleShot(0, this, &MainWindow::run_file_dialog);
+}
+
+// True when the standing prompt names `Printer` among its keywords. The
+// command only offers it where a printer exists, so this asks the prompt
+// rather than asking the shell twice.
+bool MainWindow::printer_offered(const Prompt& p) const {
+    for (const std::string& k : p.keywords) {
+        if (k == "Printer") return true;
+    }
+    return false;
+}
+
+void MainWindow::run_plot_destination() {
+    if (!engine_.active()) return;
+    const Prompt p = engine_.prompt();
+    if (!printer_offered(p)) return;
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::NoIcon);
+    box.setWindowTitle(QStringLiteral("Plot"));
+    box.setText(QStringLiteral("Where should this plot go?"));
+    QPushButton* to_printer = box.addButton(QStringLiteral("Printer…"), QMessageBox::AcceptRole);
+    QPushButton* to_file = box.addButton(QStringLiteral("File…"), QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(to_file);
+    box.exec();
+
+    if (box.clickedButton() == to_printer) {
+        // Answering the prompt with the keyword routes through the command,
+        // which opens the native print dialog -- so the choice and the
+        // printing stay one path rather than two.
+        on_line_entered(QStringLiteral("Printer"));
+        return;
+    }
+    if (box.clickedButton() == to_file) {
+        run_file_dialog();
+        return;
+    }
+    // Cancelled, and the same rule the file dialog follows: declining cancels
+    // the COMMAND, because the prompt would otherwise still be standing with
+    // no way to answer it that the user has not just refused.
+    on_cancel_requested();
 }
 
 void MainWindow::run_file_dialog() {
