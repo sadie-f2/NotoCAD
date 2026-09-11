@@ -132,8 +132,27 @@ inline constexpr std::size_t kMaxApertureEntities = 32;
 int osnap_priority(OsnapType t);
 
 // True for the snaps that name a specific point rather than sliding along the
-// geometry. Discrete snaps beat continuous ones regardless of distance.
+// geometry -- END, MID, CEN, QUA and the rest, against NEA, PER and TAN.
 bool osnap_is_discrete(OsnapType t);
+
+// What a discrete snap is worth, in pixels of extra travel.
+//
+// It USED to be worth any amount: the comparator consulted the tier before the
+// distance, so an endpoint beat a nearest however far away it was -- and "far"
+// is unbounded here, because the aperture selects ENTITIES and an entity in
+// the set offers every one of its snap points at any distance. Hover a long
+// line anywhere and its ends won. This is that preference made finite.
+inline constexpr double kDiscreteBonusPx = 5.0;
+
+// How far a hit counts as being, for ordering: its true distance for a
+// discrete snap, plus `kDiscreteBonusPx` for a continuous one.
+//
+// Exposed because it IS the comparator's promise, and a test that restated it
+// would be a second copy of the rule -- which is the drift this codebase keeps
+// designing out. Ordering on a number is also what makes the comparator
+// transitive by construction, where a tier has to have its transitivity
+// argued.
+double osnap_effective_px(const OsnapHit& h);
 
 // Every candidate offered by the entities under the aperture, best first.
 // Their distances are not bounded by aperture_px.

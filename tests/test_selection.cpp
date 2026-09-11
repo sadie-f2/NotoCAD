@@ -325,6 +325,31 @@ TEST_CASE("selection: WINDOW takes only what is wholly inside") {
     CHECK(g.engine.selection().empty());
 }
 
+TEST_CASE("selection: both corners of a window are region corners") {
+    // The case felt most: picking a selection box on a crowded drawing, where
+    // an object snap on either corner drags the box somewhere else. Both
+    // corners say so, and the second also declares the box it draws.
+    for (const char* mode : {"WINDOW", "CROSSING"}) {
+        Grid g;
+        g.engine.begin(make_command("ERASE"));
+        g.engine.supply(InputValue::of_keyword(mode));
+        CHECK(g.engine.prompt().region_corner);
+        CHECK(!g.engine.prompt().has_base);
+
+        g.engine.supply(InputValue::of_point({-1, -1, 0}));
+        CHECK(g.engine.prompt().region_corner);
+        CHECK(g.engine.prompt().rubber_band == RubberBand::Box);
+    }
+}
+
+TEST_CASE("selection: the Select objects prompt itself is not a region corner") {
+    // It picks an ENTITY, so PICKBOX governs it and osnap never ran there --
+    // the flag must not spread to it.
+    Grid g;
+    g.engine.begin(make_command("ERASE"));
+    CHECK(!g.engine.prompt().region_corner);
+}
+
 TEST_CASE("selection: CROSSING takes anything it touches") {
     Grid g;
     g.engine.begin(make_command("ERASE"));

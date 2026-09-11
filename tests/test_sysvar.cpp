@@ -27,7 +27,7 @@ TEST_CASE("sysvar: defaults") {
     CHECK(!osnap_enabled(m, OsnapType::Midpoint));
     CHECK(!osnap_enabled(m, OsnapType::Nearest));
     CHECK(!osnap_enabled(m, OsnapType::Quadrant));
-    CHECK(sv.get_int(Sysvar::PickBox) == 3);
+    CHECK(sv.get_int(Sysvar::PickBox) == 6);
     CHECK(sv.get_int(Sysvar::Aperture) == 10);
 }
 
@@ -67,10 +67,10 @@ TEST_CASE("sysvar: unknown names") {
 TEST_CASE("sysvar: out of range is rejected, not clamped") {
     Sysvars sv;
     CHECK(sv.set_int(Sysvar::PickBox, 900) == SetStatus::OutOfRange);
-    CHECK(sv.get_int(Sysvar::PickBox) == 3);  // the old value survives
+    CHECK(sv.get_int(Sysvar::PickBox) == 6);  // the old value survives
 
     CHECK(sv.set_int(Sysvar::PickBox, -1) == SetStatus::OutOfRange);
-    CHECK(sv.get_int(Sysvar::PickBox) == 3);
+    CHECK(sv.get_int(Sysvar::PickBox) == 6);
 
     // APERTURE's minimum is 1, not 0: a zero-size aperture cannot be hit.
     CHECK(sv.set_int(Sysvar::Aperture, 0) == SetStatus::OutOfRange);

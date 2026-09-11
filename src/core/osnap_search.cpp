@@ -62,11 +62,22 @@ void add_hit(std::vector<OsnapHit>& out, const Viewport& vp, const ScreenPoint& 
 // the obvious-looking way to write this and it is not transitive, which makes
 // std::sort undefined rather than merely differently ordered. Distances compare
 // exactly; the handle tiebreak is what makes the result deterministic.
+//
+// **THE PREFERENCE IS A NUMBER, WHICH IS WHAT MAKES IT SAFE.** Ordering on a
+// derived distance is transitive by construction -- it is `<` on a double --
+// where a tier consulted before the distance has to have its transitivity
+// argued. That argument is exactly what the epsilon repair above fails, and
+// the reason this is not written as one.
 bool better(const OsnapHit& a, const OsnapHit& b) {
-    const bool a_discrete = osnap_is_discrete(a.type);
-    const bool b_discrete = osnap_is_discrete(b.type);
-    if (a_discrete != b_discrete) return a_discrete;
+    const double ea = osnap_effective_px(a);
+    const double eb = osnap_effective_px(b);
+    if (ea != eb) return ea < eb;
 
+    // Effective distances can now tie ACROSS kinds -- a discrete snap exactly
+    // `kDiscreteBonusPx` away against a continuous one under the cursor -- and
+    // at that crossover the raw distance decides, which hands it to the thing
+    // the cursor is actually on. Within one kind it is the ordinary
+    // nearest-first rule it always was.
     if (a.distance_px != b.distance_px) return a.distance_px < b.distance_px;
 
     const int pa = osnap_priority(a.type);
@@ -172,6 +183,10 @@ bool osnap_is_discrete(OsnapType t) {
         case OsnapType::Nearest: return false;
         default: return true;
     }
+}
+
+double osnap_effective_px(const OsnapHit& h) {
+    return h.distance_px + (osnap_is_discrete(h.type) ? 0.0 : kDiscreteBonusPx);
 }
 
 void osnap_candidates(const Database& db, const Viewport& vp, const ScreenPoint& cursor,

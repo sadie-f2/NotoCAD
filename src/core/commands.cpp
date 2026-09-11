@@ -3384,6 +3384,7 @@ Step PlotCommand::next(CommandContext& ctx, const InputValue& value) {
             Prompt p;
             p.kind = PromptKind::Point;
             p.message = "First corner";
+            p.region_corner = true;
             return Step::ask(p);
         } else {
             return Step::failed("unknown plot area");
@@ -3401,6 +3402,7 @@ Step PlotCommand::next(CommandContext& ctx, const InputValue& value) {
         p.base = corner_;
         p.has_base = true;
         p.rubber_band = RubberBand::Box;
+        p.region_corner = true;
         return Step::ask(p);
     }
 
@@ -4748,6 +4750,7 @@ Prompt SelectionPrompter::prompt(const CommandContext& ctx) const {
             p.has_base = true;
             p.rubber_band = RubberBand::Box;
         }
+        p.region_corner = true;
         return p;
     }
 
@@ -6414,6 +6417,7 @@ Step ZoomCommand::next(CommandContext& ctx, const InputValue& value) {
                 Prompt p;
                 p.kind = PromptKind::Point;
                 p.message = "First corner";
+                p.region_corner = true;
                 return Step::ask(p);
             }
 
@@ -6437,6 +6441,13 @@ Step ZoomCommand::next(CommandContext& ctx, const InputValue& value) {
             p.message = "Other corner";
             p.base = first_;
             p.has_base = true;
+            // ZOOM never said it was drawing a BOX, so it inherited `Line` and
+            // trailed a diagonal across the region being chosen -- the exact
+            // thing the selection window's own comment warns about. It also
+            // meant ORTHO constrained the far corner, collapsing the window to
+            // a strip. One missing line, three defects.
+            p.rubber_band = RubberBand::Box;
+            p.region_corner = true;
             return Step::ask(p);
         }
 

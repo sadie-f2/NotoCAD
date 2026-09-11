@@ -183,14 +183,50 @@ TEST_CASE("osnap search: a continuous snap wins when no discrete one is in range
     CHECK(hit.entity == h);
     CHECK_VEC(hit.pos, 30.0, 0.0, 0.0, 1e-9);
 
-    // Add END and the endpoint takes it, even though NEAREST is zero pixels
-    // away and the endpoint is thirty. This is why NEA is not in the default
-    // OSMODE: with it on, it matches everywhere, and only the tier rule keeps
-    // it from burying everything else.
+    // Add END and NEAREST still takes it, because the endpoint is thirty
+    // pixels away and the cursor is sitting exactly on the line.
+    //
+    // **THIS USED TO ANSWER ENDPOINT, AND THAT WAS THE DEFECT.** The tier was
+    // unconditional -- a discrete snap beat a continuous one at any distance
+    // -- and "any distance" is not a figure of speech here: the aperture
+    // selects ENTITIES, and an entity in the set offers all of its snap points
+    // however far off they are. So hovering anywhere on a line meant its ends
+    // won, wherever they were, and on a busy drawing the snap you got was
+    // almost never the one under the cursor.
+    //
+    // The tier was right in kind and wrong in size; it is now worth
+    // `kDiscreteBonusPx` of travel and no more. NEA is still not in the
+    // default OSMODE, and for the reason this test used to give: with it on it
+    // matches everywhere.
     const OsnapHit with_end =
         osnap_search(db, v, at(30, 0), query(kOsnapEndpoint | kOsnapNearest, 30, 0));
     CHECK(with_end.valid);
-    CHECK(with_end.type == OsnapType::Endpoint);
+    CHECK(with_end.type == OsnapType::Nearest);
+}
+
+TEST_CASE("osnap search: the discrete preference is worth a few pixels, not any number") {
+    // The crossover, pinned as a number rather than left as a tier. A discrete
+    // snap is worth `kDiscreteBonusPx` (5) pixels of extra travel: nearer than
+    // that it wins over a NEAREST sitting exactly on the line, further and the
+    // thing under the cursor wins.
+    //
+    // Pinned from both sides on purpose. One side alone would pass with the
+    // preference infinite (the old defect) or absent (NEAREST buries
+    // everything, which is what the tier was added to stop).
+    Database db;
+    db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{100, 0, 0}));
+    const Viewport v = plan_800x600();
+    const OsnapMask both = kOsnapEndpoint | kOsnapNearest;
+
+    // Four pixels from the end, cursor on the line: the endpoint is worth it.
+    const OsnapHit near_end = osnap_search(db, v, at(4, 0), query(both, 4, 0));
+    CHECK(near_end.valid);
+    CHECK(near_end.type == OsnapType::Endpoint);
+
+    // Six: it is not.
+    const OsnapHit far_end = osnap_search(db, v, at(6, 0), query(both, 6, 0));
+    CHECK(far_end.valid);
+    CHECK(far_end.type == OsnapType::Nearest);
 }
 
 TEST_CASE("osnap search: the aperture bounds what is considered") {
@@ -319,16 +355,18 @@ TEST_CASE("osnap search: candidates come back sorted, best first") {
     osnap_candidates(db, v, at(4, 0), query(kOsnapAll, 4, 0, 40.0), all);
     CHECK(!all.empty());
 
-    // The ordering the comparator promises, checked pairwise: no continuous
-    // snap may precede a discrete one, and within a tier distance must not
-    // decrease.
+    // The ordering the comparator promises, checked pairwise, and it is one
+    // statement rather than two now: EFFECTIVE distance never decreases.
+    //
+    // It used to be "no continuous snap may precede a discrete one, and within
+    // a tier distance must not decrease" -- a tier plus a rule. A continuous
+    // snap CAN precede a discrete one now, and must be able to: that is the
+    // whole fix, and asserting otherwise would pin the defect.
+    //
+    // Asked of `osnap_effective_px`, the comparator's own function, so this
+    // cannot drift from the rule it is checking.
     for (std::size_t i = 1; i < all.size(); ++i) {
-        const OsnapHit& prev = all[i - 1];
-        const OsnapHit& cur = all[i];
-        CHECK(!(!osnap_is_discrete(prev.type) && osnap_is_discrete(cur.type)));
-        if (osnap_is_discrete(prev.type) == osnap_is_discrete(cur.type)) {
-            CHECK(prev.distance_px <= cur.distance_px);
-        }
+        CHECK(osnap_effective_px(all[i - 1]) <= osnap_effective_px(all[i]));
     }
 
     // Every candidate is valid. Note there is deliberately no distance bound

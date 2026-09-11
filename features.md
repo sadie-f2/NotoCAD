@@ -375,7 +375,12 @@ should be cheap — outline only, no fill — and probably switchable, since the
 case is a real working mode rather than an edge case.
 
 **The pick box wants too much precision — and it is felt in exactly one place.**
-`PICKBOX` defaults to 3 — a half-height, so a 7-pixel box — which is AutoCAD's default
+**BUILT: `PICKBOX` defaults to 6.** The derivation rather than a taste: 3 was chosen when
+a screen was about 50 DPI, and `3 x (110/50)` is 6.6, taken down to 6 — a 13-pixel box,
+restoring the physical size the constant was calibrated for and still comfortably inside
+`APERTURE`'s 21. `APERTURE` did **not** move; see the correction below.
+
+`PICKBOX` defaulted to 3 — a half-height, so a 7-pixel box — which is AutoCAD's default
 and has been since R12, when a screen was around 50 DPI. At the ~110 logical DPI of a
 modern display the box is **physically less than half the size it was**, and nothing
 scales it: `devicePixelRatio` appears only in toolbar icon generation, nowhere in the
@@ -386,19 +391,24 @@ This is the `CURSORSIZE` case again, and `CLAUDE.md` already licenses it: `PICKB
 is not a considered design choice about interaction, it is a number calibrated against
 a display that no longer exists.
 
-**`PICKBOX` and `APERTURE` are used in disjoint situations, so there is no ratio to
-tune.** `viewport_widget.cpp:337` picks between them —
-`wants_entity() ? pickbox_px() : aperture_px()` — and `wants_entity()` is true only for
-`PromptKind::Entity`, which is only ever the *Select objects* prompt:
+**`PICKBOX` and `APERTURE` are not two sizes of one thing — they answer two different
+questions, and never at the same moment.** That is why there is no ratio to tune.
 
-| doing | prompt kind | box drawn and used | size |
-|---|---|---|---|
-| Select objects, including typing `W`/`C` to start one | `Entity` | `PICKBOX` | 7 px — **tiny** |
-| Window / crossing **corners** | `Point` | `APERTURE` | 21 px |
-| Drawing lines, any point entry | `Point` | `APERTURE` | 21 px — right |
+| | `PICKBOX` | `APERTURE` |
+|---|---|---|
+| question | which entity does this click hit? | which snap points are eligible? |
+| measured to | the entity's drawn geometry | entity geometry (to gather), then each snap point |
+| consumer | `pick_entity` (`pick.cpp:149`) | `osnap_search` (`osnap_search.cpp:206`) |
+| live when | `PromptKind::Entity` — *Select objects* | point prompts, with `OSMODE` on |
+| read at | `viewport_widget.cpp:1186` | `viewport_widget.cpp:636` |
 
-So the pick box is only ever live during selection, and that is the one place it is
-wrong; the hit test at `viewport_widget.cpp:810` uses it too. Everything else runs on
+Both are half-extents in logical pixels, which is why 3 drew a 7-pixel box.
+
+The one place they meet is cosmetic — the box drawn at the cursor,
+`viewport_widget.cpp:401`: `wants_entity() ? pickbox_px() : aperture_px()`, whose own
+comment says *"seeing the box change size is how you know which one is live"*. An earlier
+version of this note tabulated that as "box drawn **and used**", which read as though both
+were pick radii; they are not, and the table above replaces it. Everything else runs on
 `APERTURE` at 21 px, which is **correctly sized and must not move** — reported from use,
 and consistent with the osnap complaint below being about which snap WINS rather than
 how far the aperture reaches.
@@ -409,7 +419,22 @@ to raise one while lowering the other, "converging them deliberately, breaking A
 either variable experienced.
 
 **Object snap reaches too far, and that one is a DEFECT rather than a preference.**
-`src/core/osnap_search.cpp:68`:
+**BUILT.** The comparator now orders on an EFFECTIVE distance —
+`osnap_effective_px` = `distance + (discrete ? 0 : kDiscreteBonusPx)`, with the bonus a
+named constant at 5 px — so a discrete snap is worth five pixels of extra travel and no
+more. A constant rather than a sysvar deliberately: R12 has no such variable to be
+compatible with, and a sysvar cannot be un-invented.
+
+**The diagnosis below understates the reach, and the measurement is worth keeping.** It
+says "an ENDPOINT 20 pixels away wins"; in fact the aperture selects **entities**, and
+`osnap_candidates` says in its own comment that everything in that set *"offers all of
+its enabled snap points at any distance"*. So hovering anywhere on a hundred-unit line
+put both its ends in play, unbounded — a test pinned an endpoint winning from thirty
+pixels, as intended behaviour. That test now pins the crossover from both sides, which is
+what stops the fix being either infinite (the defect) or absent (NEAREST buries
+everything, which the tier was added to prevent).
+
+`src/core/osnap_search.cpp`, in `better()`:
 
 ```cpp
 if (a_discrete != b_discrete) return a_discrete;
@@ -433,9 +458,39 @@ something meaningful too: *a discrete snap is worth up to N pixels of extra trav
 Today's behaviour is `penalty = infinity`. Something around 5 px keeps ENDPOINT winning
 when it is genuinely close and lets NEAREST win when it is not. Probably a sysvar.
 
-Note these two pull in opposite directions and are felt together: raising `PICKBOX`
+~~Note these two pull in opposite directions and are felt together: raising `PICKBOX`
 while **lowering** `APERTURE` converges them deliberately, breaking AutoCAD's 10:3
-ratio on purpose.
+ratio on purpose.~~ **Wrong, and it survived the retraction two sections above rather
+than being deleted with it.** The two never both apply, so they cannot pull in opposite
+directions; and lowering `APERTURE` would shorten osnap's REACH, which this very section
+says is fine — *"the radius is not wrong; the tier is unbounded"*. `APERTURE` stays at 10.
+
+**A window corner tried to snap to objects, and on a busy drawing that is a fight —
+BUILT.** Reported from use (Sadie, 2026-08-28): picking the second corner of a zoom or a
+selection box finds an object snap and drags the box somewhere you were not pointing.
+
+A window corner is a screen REGION boundary; there is nothing on the model for it to
+want. The prompt now says so — `Prompt::region_corner`, set by ZOOM, PLOT and the
+selection window on **both** corners — and `update_osnap` returns early on it.
+
+It is a different fact from `rubber_band`, which says what to DRAW and can only speak
+once there is a base. The first corner has no base, so it had nothing to say it with, and
+that is the corner where a snap is least expected. Fixing only the second would have been
+half the fix.
+
+**ORTHO had already made this exact decision**, in these words: *"A selection window is
+not a direction. Constraining its far corner would force every window square, which is
+not what ORTHO means."* So this is that decision finished rather than a new one — and
+`apply_ortho` now asks `region_corner` rather than `rubber_band == Box`, because keying a
+behaviour off what gets drawn is what caused the next one:
+
+**ZOOM Window never declared its box, and that was three defects in one missing line.**
+`commands.cpp` set `has_base` and left `rubber_band` at its `Line` default, so ZOOM
+Window (a) trailed a diagonal rubber line across the region instead of drawing a
+rectangle — the exact thing the selection window's own comment warns about — (b) was
+**constrained by ORTHO**, since `apply_ortho` skipped only boxes, collapsing the window to
+a strip, and (c) would have been missed by any osnap fix keyed on `Box`. Found while
+implementing the above, not reported.
 
 **Selection has no implied windowing, and that is an unbuilt R12 feature rather than a
 modernisation.** Today a window or crossing needs `W` or `C` typed first, then two point

@@ -32,7 +32,14 @@ namespace {
 // one-shot override.
 constexpr SysvarDef kTable[] = {
     {"OSMODE", Sysvar::OsMode, SysvarType::Int, false, true, 37, 0, 2047, 0.0, "", {}},
-    {"PICKBOX", Sysvar::PickBox, SysvarType::Int, false, false, 3, 0, 50, 0.0, "", {}},
+    // 6 rather than R12's 3, and it is a RECALIBRATION rather than a taste.
+    // The 3 was chosen when a screen was about 50 DPI; at the ~110 DPI of a
+    // modern display the same number is a box physically less than half the
+    // size it was meant to be, and nothing scales it -- the viewport is in
+    // logical pixels throughout, so the arithmetic is right and only the
+    // constant is stale. 3 x (110/50) is 6.6, taken down to 6: a 13-pixel
+    // box, still comfortably inside APERTURE's 21.
+    {"PICKBOX", Sysvar::PickBox, SysvarType::Int, false, false, 6, 0, 50, 0.0, "", {}},
     {"APERTURE", Sysvar::Aperture, SysvarType::Int, false, false, 10, 1, 50, 0.0, "", {}},
     // Not journalled, like PICKBOX and APERTURE beside it: a display preference
     // is not drawing state, and undoing back through one would be surprising.

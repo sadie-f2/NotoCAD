@@ -124,6 +124,22 @@ struct Prompt {
     // what it always did.
     RubberBand rubber_band{RubberBand::Line};
 
+    // **THIS POINT CHOOSES A SCREEN REGION, NOT A PLACE ON THE MODEL.** Both
+    // corners of a window, a crossing, a ZOOM window, a PLOT window.
+    //
+    // It is a different fact from `rubber_band`, which says what to DRAW and
+    // can only speak once there is a base -- so the FIRST corner has nothing
+    // to say it with, and that is the corner where an object snap is least
+    // expected and most annoying. A region corner wants the pixel the cursor
+    // is on: snapping it to an endpoint twenty pixels away moves the region
+    // somewhere the user did not point, which on a busy drawing is most of
+    // the time.
+    //
+    // ORTHO already refuses these for the same reason, in the same words --
+    // "a selection window is not a direction" -- and this is that decision
+    // finished rather than a new one.
+    bool region_corner{false};
+
     // R12's LASTPOINT: the last point entered, which outlives the command that
     // took it, so `LINE / @5,0` works right after a CIRCLE. Stamped on by the
     // engine rather than by commands -- it is not theirs to know about. Usually

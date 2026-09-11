@@ -423,7 +423,12 @@ Vec3 ViewportWidget::apply_ortho(const Vec3& p) const {
     if (!pr.has_base) return p;
     // A selection window is not a direction. Constraining its far corner would
     // force every window square, which is not what ORTHO means.
-    if (pr.rubber_band == RubberBand::Box) return p;
+    //
+    // Asked of `region_corner` rather than of `rubber_band`: one says what
+    // this point IS and the other says what to draw, and keying a behaviour
+    // off the drawing is how ZOOM's window came to be constrained -- it never
+    // declared a box, so this test missed it for as long as it existed.
+    if (pr.region_corner) return p;
 
     const Ucs u = db_.current_ucs().normalized();
     const Vec3 d = p - pr.base;
@@ -556,6 +561,12 @@ void ViewportWidget::refresh_osnap() {
 void ViewportWidget::update_osnap() {
     snap_ = OsnapHit{};
     if (!cursor_inside_ || !wants_point()) return;
+    // A window corner is a REGION boundary, not a place on the model, so
+    // there is nothing on the model for it to want. Snapping it drags the
+    // region to an endpoint the user was not pointing at -- which on a busy
+    // drawing is most picks, and is why zooming into a crowd is a fight.
+    // ORTHO has refused these all along for the same reason.
+    if (engine_->prompt().region_corner) return;
 
     OsnapQuery q;
     // A typed override replaces OSMODE entirely for this one pick, rather than

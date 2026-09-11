@@ -183,6 +183,51 @@ TEST_CASE("zoom: previous reports when there is nothing to go back to") {
     CHECK(engine.message() == "No previous view");
 }
 
+TEST_CASE("window corners say they are choosing a region, not a point") {
+    // **WHAT THIS BUYS, AND IT IS NOT COSMETIC.** A window corner is a screen
+    // REGION boundary; there is nothing on the model for it to want. The
+    // viewport refuses to run an object snap on a prompt that says so, which
+    // is what stops a zoom or a selection box jumping to an endpoint the user
+    // was not pointing at -- on a busy drawing, most picks.
+    //
+    // BOTH corners, which is why this is its own fact and not `rubber_band`:
+    // `rubber_band` can only speak once there is a base, so the FIRST corner
+    // has nothing to say it with, and that is the corner where a snap is least
+    // expected. ORTHO has refused these all along, and now asks the same
+    // question rather than a proxy for it.
+    Database db;
+    CommandEngine engine(db);
+    RecordingView view;
+    engine.set_view_control(&view);
+
+    engine.begin(make_command("ZOOM"));
+    engine.supply(InputValue::of_keyword("WINDOW"));
+    CHECK(engine.prompt().region_corner);  // the first corner, before any base
+    CHECK(!engine.prompt().has_base);
+
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    CHECK(engine.prompt().region_corner);
+    CHECK(engine.prompt().has_base);
+    // ZOOM never declared its box, so it inherited `Line` and trailed a
+    // diagonal across the region -- and ORTHO, which skipped only boxes,
+    // constrained the far corner and collapsed the window to a strip.
+    CHECK(engine.prompt().rubber_band == RubberBand::Box);
+}
+
+TEST_CASE("an ordinary point prompt is not a region corner") {
+    // The negative half, without which the assertions above pass on a flag
+    // that is simply always set.
+    Database db;
+    CommandEngine engine(db);
+
+    engine.begin(make_command("LINE"));
+    CHECK(!engine.prompt().region_corner);
+    engine.supply(InputValue::of_point({0, 0, 0}));
+    CHECK(!engine.prompt().region_corner);
+    CHECK(engine.prompt().has_base);
+    CHECK(engine.prompt().rubber_band == RubberBand::Line);
+}
+
 TEST_CASE("zoom: a window takes two corners") {
     Database db;
     CommandEngine engine(db);
