@@ -768,15 +768,60 @@ TEST_CASE("input: which prompts can be answered by pointing") {
     // One rule, asked by the text parser and the viewport alike. A magnitude and
     // a direction are both things you show rather than type; a row count and a
     // file name are not.
-    CHECK(prompt_takes_point(PromptKind::Point));
-    CHECK(prompt_takes_point(PromptKind::Distance));
-    CHECK(prompt_takes_point(PromptKind::Angle));
+    auto of = [](PromptKind k) {
+        Prompt p;
+        p.kind = k;
+        return p;
+    };
+    auto based = [](PromptKind k) {
+        Prompt p;
+        p.kind = k;
+        p.base = Vec3{1, 2, 3};
+        p.has_base = true;
+        return p;
+    };
 
-    CHECK(!prompt_takes_point(PromptKind::Real));
-    CHECK(!prompt_takes_point(PromptKind::Integer));
-    CHECK(!prompt_takes_point(PromptKind::String));
+    CHECK(prompt_takes_point(of(PromptKind::Point)));
+    CHECK(prompt_takes_point(of(PromptKind::Angle)));
+
+    // BRIEF 49. A distance is the distance from `base` to where you pointed,
+    // so a prompt that named no base cannot be pointed at: there is no first
+    // end to the measurement. A base is chosen, never inherited.
+    CHECK(prompt_takes_point(based(PromptKind::Distance)));
+    CHECK(!prompt_takes_point(of(PromptKind::Distance)));
+
+    // And a base changes nothing for the kinds that were never about geometry
+    // -- so a command that sets one by habit cannot turn a file name into
+    // something a click answers.
+    CHECK(!prompt_takes_point(of(PromptKind::Real)));
+    CHECK(!prompt_takes_point(based(PromptKind::Real)));
+    CHECK(!prompt_takes_point(of(PromptKind::Integer)));
+    CHECK(!prompt_takes_point(of(PromptKind::String)));
+    CHECK(!prompt_takes_point(based(PromptKind::String)));
     // An entity prompt takes a handle, not a location.
-    CHECK(!prompt_takes_point(PromptKind::Entity));
+    CHECK(!prompt_takes_point(of(PromptKind::Entity)));
+}
+
+TEST_CASE("input: a coordinate at a baseless distance prompt is refused") {
+    // The parser's half of the same rule, and the reason it is worth its own
+    // case: before brief 49 this token parsed, and what it then MEANT was
+    // decided independently by whichever command received it -- in the solids
+    // commands, its distance from the world origin. A refusal here is what
+    // stops the question from being answered downstream by an invented origin.
+    Prompt d;
+    d.kind = PromptKind::Distance;
+    d.message = "Specify wall thickness";
+
+    std::string err;
+    InputValue v;
+    CHECK(!parse_input(d, "3,4,0", v, err));
+    CHECK(err == "expected a number");
+
+    // The same prompt with a base takes it, measured from there: 5-3-4.
+    d.base = Vec3{0, 0, 0};
+    d.has_base = true;
+    REQUIRE(parse_input(d, "3,4,0", v, err));
+    CHECK(v.kind == InputKind::Point);
 }
 
 TEST_CASE("input: a distance or an angle can be given as a coordinate") {

@@ -23,11 +23,14 @@ std::string Prompt::text() const {
 
 // --- InputValue -------------------------------------------------------------
 
-bool prompt_takes_point(PromptKind kind) {
-    switch (kind) {
+bool prompt_takes_point(const Prompt& prompt) {
+    switch (prompt.kind) {
         case PromptKind::Point:
-        case PromptKind::Distance:
         case PromptKind::Angle: return true;
+        // A DISTANCE ONLY WHEN THE PROMPT SAYS WHERE FROM. See the header: a
+        // magnitude pointed at is the distance from `base`, so with no base
+        // there is nothing for the pointing to mean.
+        case PromptKind::Distance: return prompt.has_base;
         case PromptKind::Real:
         case PromptKind::Integer:
         case PromptKind::String:

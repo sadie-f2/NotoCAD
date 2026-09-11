@@ -281,7 +281,7 @@ bool ViewportWidget::wants_point() const {
     // Not "is this a Point prompt". A radius is answered by pointing at where
     // the circle should pass through, and an angle by pointing along it -- so
     // the click, the snap and the rubber band all belong at those prompts too.
-    return prompt_takes_point(engine_->prompt().kind);
+    return prompt_takes_point(engine_->prompt());
 }
 
 bool ViewportWidget::wants_entity() const {

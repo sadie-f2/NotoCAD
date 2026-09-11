@@ -182,7 +182,28 @@ enum class InputKind : std::uint8_t {
 // you show rather than type: a radius is the distance from Prompt::base to where
 // you pointed, an angle is the direction to it. Real, Integer and String do not:
 // there is no geometry that answers "how many rows" or "what file name".
-bool prompt_takes_point(PromptKind kind);
+//
+// WHICH IS WHY IT TAKES THE PROMPT AND NOT THE KIND (brief 49). The sentence
+// above already named the base -- "the distance from Prompt::base to where you
+// pointed" -- so a DISTANCE prompt that declared no base was asking for a
+// measurement with no first end. The kind alone could not say so, and each
+// reader downstream then invented an origin of its own: the parser and the
+// viewport produced the point, the viewport's plane and object snaps fell back
+// to LASTPOINT, and the solids commands measured the result from the world
+// origin. Three answers to one unasked question, which is how a wall thickness
+// came to be the distance from (0,0,0) to wherever the cursor was.
+//
+// So: a base is CHOSEN, never inherited. A Distance prompt that names one can
+// be pointed at; one that does not is a typed number, and a click or a typed
+// coordinate is refused rather than measured from somewhere nobody named.
+//
+// ANGLE IS LEFT EXACTLY AS IT WAS, deliberately. Brief 49's STOP line is
+// prompt bases, and while the same argument plainly applies to a direction,
+// the angle prompts carrying no base are a different set with a different
+// history -- REVOLVE's already refuses a point in its own words, and UNITS'
+// have no geometry near them at all. Recorded as a question, not answered
+// here.
+bool prompt_takes_point(const Prompt& prompt);
 
 struct InputValue {
     InputKind kind{InputKind::None};

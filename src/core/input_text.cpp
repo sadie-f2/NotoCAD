@@ -258,7 +258,7 @@ bool parse_input(const Prompt& prompt, std::string_view token, InputValue& out,
             }
             std::string ignored;
             Vec3 p;
-            if (prompt_takes_point(prompt.kind) &&
+            if (prompt_takes_point(prompt) &&
                 parse_coordinate(prompt, token, p, ignored, ucs_to_world, insunits)) {
                 out = InputValue::of_point(p);
                 return true;
