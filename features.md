@@ -422,6 +422,50 @@ There are a few more of this shape. Worth collecting rather than taking one at a
 since they will share the drag-state machinery in the viewport and that is the whole
 cost.
 
+**Ortho is built and cannot be reached while you are drawing.** Constraining a point
+to N/S/E/W of the previous one is `apply_ortho` in `viewport_widget.cpp:415`, and it is
+done properly: relative to the **current UCS** rather than world, skipped when there is
+no base point (R12 leaves a first point unconstrained), skipped for `RubberBand::Box`
+so a selection window is not forced square, and an object snap beats it — *"you asked
+for that exact point."* `cursor_point()` applies it on every mouse move.
+
+What is missing is the toggle, and it is missing twice over:
+
+- **There is no F8.** The Qt viewport handles no function keys at all — `Key_Escape` is
+  the only key it interprets. F8 is *the* ortho key and has been since long before R12,
+  so the reflex has nowhere to land.
+- **`'ORTHO` mid-command does not work either.** `command_is_transparent`
+  (`commands.cpp:6363`) lists ZOOM, PAN, PLAN, REDRAW, VPOINT, ID and DIST. ORTHO is
+  not among them, so toggling requires finishing or cancelling the command first —
+  which is exactly the moment you wanted it.
+
+So the feature exists and the workflow it was built for does not. That is worth
+separating from a missing feature, because the fix is a keybinding rather than geometry.
+
+*What it needs:* F8 in the viewport's `keyPressEvent`, flipping `ORTHOMODE` directly.
+That is also how AutoCAD does it — F8 is not a transparent command invocation, it is a
+direct toggle — and it **sidesteps a real awkwardness**: `command_is_transparent` says
+its test is "whether it changes drawing state, not whether it is useful mid-command",
+and ORTHOMODE is journalled and saved in the drawing, so by that rule ORTHO has a fair
+claim to being exactly what must not be transparent. A key that flips a sysvar never
+raises the question.
+
+*What it does not need:* the base points are already there. 74 of the 93 `PromptKind::Point`
+prompts in the core set one, MIRROR's second point included — so "any point-to-point work
+in the viewport" is already covered the moment the toggle exists.
+
+**Polar tracking is the superset, and a later decision.** Ortho is 4 directions; polar
+snaps to an angle increment (45°, 30°, 15°) and reports the angle as you hover. R12 had
+ortho only — polar arrived in AutoCAD 2000 — so it is a deliberate divergence rather than
+a gap, and it wants the same F8-adjacent plumbing underneath. Worth building ortho's
+toggle first and seeing whether polar is still wanted afterwards.
+
+**While the keys are being added,** R12's other F-keys are worth deciding as a set rather
+than one at a time: F7 grid and F9 snap are both excluded by scope today (grid snap is
+listed as "later, rarely used"), F6 is a coordinate readout that wants a status bar, and
+F3 is osnap toggle — which, unlike the rest, has a live sysvar (`OSMODE`) and the same
+shape as this entry.
+
 ## View commands — what is known before they are written
 
 Recorded from Sadie's daily AutoCAD use, so the design does not have to be guessed at
