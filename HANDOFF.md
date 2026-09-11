@@ -125,3 +125,67 @@ The long tail, none of it blocking a release:
 - **The AutoCAD comparison is worth more than any test we write**, diffing
   against the SOURCE rather than against AutoCAD's output. Sadie's licence is
   time-limited, and `solids.md` lists the three experiments only it can answer.
+
+## 2026-09-11 — Tier 1 backports from NotoCAD-solids
+
+Ten commits cherry-picked onto `solids-backports` from
+`NotoCAD-solids @ run/2026-09-08-naming-and-shells`, the Tier 1 set of
+ARCHITECTURE-REVIEW.md §9 in the Nsolid tree. Each carries a
+`Cherry-picked-from:` trailer naming its origin and what it dropped. **1254
+cases before, 1270 after; ctest 11/11 throughout; the GUI target links.** No
+command was added, so the version stays **0.2.74**.
+
+| new | from | what it dropped |
+|---|---|---|
+| `41b8e3c` | `9b9f755` | the "Solids — wanted" section (direction markers, N-ary booleans) |
+| `282b449` | `a2460e1` | nothing — doc-only |
+| `fdc3bb8` | `fd1caee` | nothing — doc-only, applied clean |
+| `4a3fb0e` | `50ebbb4` | nothing — base-only in full |
+| `ccbbf90` | `da6b5e2` | nothing — base-only in full |
+| `de97b2b` | `20e8a55` | `engine_root.hpp`, the engine-reachable harness case, the eight solids suites' SKIP conversions, `rebuild.sh`, the SF_todo and HANDOFF records |
+| `4ac4365` | `42372f6` | item 1 entirely (the chord policy) and every solids reader; **item 3 only**, despite the subject, which is kept verbatim as every backport's is |
+| `409d332` | `b957618` | `solids.hpp`, `solids_commands.cpp`, `test_thicken.cpp` |
+| `94ccef3` | `b039986` | `09-solids.md`, the quickstart's Solids section, the HANDOFF record |
+| `25ff32a` | `d410812` | everything but `Database::rename_block` |
+
+**`9b9f755` is a PREREQUISITE, not a Tier 1 commit.** It opened the
+features.md section that all four picking commits edit; without it `fd1caee`
+and `a2460e1` are features.md-only picks with nothing to apply to, and
+`50ebbb4` conflicts against an absent section. Its two solids notes were
+dropped. Worth telling the steward, since §9 does not list it.
+
+**Nothing was skipped, but one listed commit lands nothing.** `2ec4407`
+("The designer's manual, with every transcript actually run") is entirely
+`docs/using-solids.md`, which `b039986` renames to chapter 9, plus a
+quickstart section pointing at it. There is no non-solids half, so it is
+recorded here rather than committed.
+
+**`rebuild.sh` did not come with brief 32**, contrary to §9: the base has no
+such file, and it arrives in the solids tree with `a05de75`, a **Tier 2**
+commit. Only the generic harness — `test.hpp`'s SKIP/verdict machinery and
+`test_harness.cpp`'s first two cases — was taken. `NCAD_TESTS_ALLOW_NO_ENGINE`
+keeps its name so that a case backported later from a tree that has an engine
+arrives working; nothing here skips, so the count is always 0.
+
+**The manual's ratchet is 54, not the solids tree's 51**, and the two are not
+comparable: that number was measured against a registry of 86 with a ninth
+chapter covering the solids commands, and this registry holds 74 with no
+chapter 9. Measured here on the day it landed: **20 of 74 documented, 54
+owed.** The chapter-count assertion is 8 rather than 9 for the same reason.
+Chapter 1's `?` transcript was re-run against this program, its
+"Regeneration" section removed (`REGEN` is not in this registry), and every
+version and count re-stamped to 0.2.74/74.
+
+**Two things not in any original hunk**, both recorded in their commits:
+`NCAD_SOURCE_DIR` in `tests/CMakeLists.txt`, which `test_eps.cpp`'s grep needs
+and which reached the solids tree with a STEP commit; and a `test_blocks.cpp`
+case for `rename_block`, which arrives with no caller in this program and had
+no separable test upstream.
+
+**Brief 49's four open rows are still open.** ARRAY's two spacings, PEDIT's
+width, LTSCALE and ZOOM no longer measure a click from the world origin —
+the predicate makes them unreachable with a point — but the dead
+`distance_from(..., Vec3{0,0,0}, ...)` calls remain at `commands.cpp:4706`,
+`:5623`, `:5631`, `:6278` and `:6427`, reachable only from AutoLISP. The
+audit table is carried into `409d332`'s message. Half an hour of work,
+deliberately not taken.
