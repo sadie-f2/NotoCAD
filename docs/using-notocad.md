@@ -13,6 +13,12 @@ not model — but you should treat it accordingly: save often, keep copies of
 anything you care about, and expect rough edges exactly where this document
 marks them.
 
+**This is the quickstart.** For the full reference — a chapter per area, with
+every transcript executed against the build it documents — see
+**[the manual](manual/README.md)**. It is being written a chapter at a time;
+[getting started](manual/01-starting.md) and [drafting](manual/02-drafting.md)
+are written today and the rest are stubs.
+
 ## Starting it
 
 - **`ncad`** — the terminal program. The full drawing engine and interpreter
@@ -231,9 +237,10 @@ for you.**
   as an ellipse from above and edge-on from its own plane. If a shape looks
   "wrong," check your viewpoint before your geometry: `PLAN`, `VPOINT`, or
   an orbit usually explains it.
-- **No dimensions yet.** `MEASUREGEOM`, `DIST`, `ID`, `AREA` and `LIST`
-  answer the questions dimensions would; annotation entities are on the
-  roadmap.
+- **Dimensions exist and are rough.** `DIMLINEAR`, `DIMALIGNED`, `DIMRADIUS`,
+  `DIMDIAMETER`, `DIMANGULAR`, `LEADER` and the `DIM`/`DIM1` drivers all draw
+  real DIMENSION entities. `MEASUREGEOM`, `DIST`, `ID`, `AREA` and `LIST`
+  answer the same questions without annotating the drawing.
 - **No grid snap yet** — object snaps are the precision mechanism. Typed
   coordinates are always exact.
 
@@ -269,7 +276,7 @@ are invoked with parentheses.
 - Alpha software; no warranty; no autosave.
 - File paths are typed, not browsed; relative paths follow the launch
   directory.
-- No dimensions, no hatching, no grid snap, no plotting.
+- No hatching, and no grid snap.
 - Toolbars cover the common commands; the rest are typed (`?` lists them all).
 - FILLET and CHAMFER work on two lines; arcs and circles are a later pass.
 - OFFSET declines ellipses and splines rather than approximating them.

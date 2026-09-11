@@ -25,6 +25,7 @@ add_executable(ncad_tests
   test_eps.cpp
   test_command.cpp
   test_units.cpp
+  test_manual.cpp
   test_appload.cpp
   test_prompt.cpp
   test_osnap_derived.cpp
