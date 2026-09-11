@@ -31,6 +31,7 @@ add_library(ncad_core STATIC
   osnap_search.cpp
   render.cpp
   scene.cpp
+  solids.cpp
   viewport.cpp
   database.cpp
   dxf.cpp

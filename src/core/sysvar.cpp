@@ -31,6 +31,12 @@ constexpr SysvarDef kTable[] = {
     {"OSMODE", Sysvar::OsMode, SysvarType::Int, false, true, 37, 0, 2047, 0.0, "", {}},
     {"PICKBOX", Sysvar::PickBox, SysvarType::Int, false, false, 3, 0, 50, 0.0, "", {}},
     {"APERTURE", Sysvar::Aperture, SysvarType::Int, false, false, 10, 1, 50, 0.0, "", {}},
+    // SOLIDMESH: how finely the solids engine grids each face. A curved face
+    // drawn with longitudes alone is hard to read -- a cylinder is two circles
+    // and four verticals and could bulge either way -- so 4 gives a 4x4 grid
+    // in both parametric directions. 0 is off, and it costs real time on a
+    // boolean because every mesh line has to be trimmed like any other curve.
+    {"SOLIDMESH", Sysvar::SolidMesh, SysvarType::Int, false, false, 4, 0, 16, 0.0, "", {}},
     // Not journalled, like PICKBOX and APERTURE beside it: a display preference
     // is not drawing state, and undoing back through one would be surprising.
     {"CURSORSIZE", Sysvar::CursorSize, SysvarType::Int, false, false, 5, 1, 100, 0.0, "", {}},

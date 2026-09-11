@@ -2,6 +2,7 @@
 // Copyright (c) 2026, Sadie Forbes
 
 #include "ncad/commands.hpp"
+#include "ncad/solids.hpp"
 
 #include "ncad/curve_edit.hpp"
 #include "ncad/about.hpp"
@@ -6731,6 +6732,12 @@ void reset_drawing(CommandContext& ctx) {
     ctx.db.clear();
     ctx.db.journal().clear();
 
+    // The solids this session built describe a drawing that is no longer
+    // loaded, and they hold entity handles from it. Handles are never reused
+    // WITHIN a drawing, but a fresh one starts numbering again -- so a stale
+    // record could name, and erase, something entirely unrelated.
+    SolidTable::instance().clear();
+
     // The selection named entities in a drawing that no longer exists. OPEN
     // already does this and NEW did not, so the header went on reporting a
     // selection over an empty drawing.
@@ -7167,6 +7174,22 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "STRETCH") return std::make_unique<StretchCommand>();
     if (upper == "MIRROR") return std::make_unique<TransformCommand>(TransformCommand::Kind::Mirror);
     if (upper == "COPY") return std::make_unique<MoveCommand>(true);
+    if (upper == "EXTRUDE") {
+        return std::make_unique<SolidSweepCommand>(SolidSweepCommand::Mode::Extrude);
+    }
+    if (upper == "REVOLVE") {
+        return std::make_unique<SolidSweepCommand>(SolidSweepCommand::Mode::Revolve);
+    }
+    if (upper == "UNION") {
+        return std::make_unique<SolidBooleanCommand>(SolidBooleanCommand::Op::Union);
+    }
+    if (upper == "SUBTRACT") {
+        return std::make_unique<SolidBooleanCommand>(SolidBooleanCommand::Op::Subtract);
+    }
+    if (upper == "INTERSECT") {
+        return std::make_unique<SolidBooleanCommand>(SolidBooleanCommand::Op::Intersect);
+    }
+    if (upper == "SOLIDS") return std::make_unique<SolidListCommand>();
     if (upper == "UNDO") return std::make_unique<UndoCommand>();
     if (upper == "REDO") return std::make_unique<RedoCommand>();
     return nullptr;
@@ -7181,7 +7204,8 @@ const std::vector<std::string>& command_names() {
         "3DFACE", "BASE", "BLOCK", "BREAK", "EXPLODE", "EXTEND", "TRIM", "OFFSET", "FILLET", "CHAMFER",
         "DIM", "DIM1", "DIMLINEAR", "DIMALIGNED", "DIMRADIUS", "DIMDIAMETER", "DIMANGULAR", "LEADER", "PLOT", "UCS", "UCSICON", "VPOINT", "INSERT", "MINSERT", "WBLOCK",
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
-        "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
+        "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM",
+        "EXTRUDE", "REVOLVE", "UNION", "SUBTRACT", "INTERSECT", "SOLIDS"};
     return names;
 }
 

@@ -50,6 +50,10 @@ enum class Sysvar : std::uint16_t {
     OsMode,
     PickBox,
     Aperture,
+    // Grid divisions the solids engine draws on each face of a solid. A
+    // display preference like PICKBOX beside it, not drawing state, so it is
+    // not journalled and not saved. 0 draws edges and seams only.
+    SolidMesh,
 
     // Crosshair length, as a percentage of the smaller viewport dimension.
     // AutoCAD's, not R12's -- R12 had a full-screen crosshair and no way to
