@@ -13,6 +13,7 @@
 // project's licensing care makes an extra library a decision rather than a
 // convenience.
 
+#include "ncad/eps.hpp"
 #include "ncad/entities.hpp"
 
 #include "ncad/dxf.hpp"
@@ -112,7 +113,7 @@ bool solve_dense(std::vector<std::vector<double>>& a, std::vector<Weighted>& b) 
         for (std::size_t r = col + 1; r < n; ++r) {
             if (std::abs(a[r][col]) > std::abs(a[pivot][col])) pivot = r;
         }
-        if (std::abs(a[pivot][col]) < 1e-12) return false;  // singular
+        if (std::abs(a[pivot][col]) < kFloatFloor) return false;  // singular
 
         std::swap(a[col], a[pivot]);
         std::swap(b[col], b[pivot]);

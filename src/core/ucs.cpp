@@ -8,6 +8,7 @@
 // right-handed, and the current UCS arrives through system variables that
 // AutoLISP can write, so that assumption has to be enforced somewhere rather
 // than hoped for.
+#include "ncad/eps.hpp"
 #include "ncad/tables.hpp"
 
 #include <cmath>
@@ -15,7 +16,7 @@
 namespace ncad {
 namespace {
 
-constexpr double kUcsEps = 1e-12;
+constexpr double kUcsEps = kFloatFloor;
 
 }  // namespace
 
@@ -25,8 +26,8 @@ Vec3 Ucs::zdir() const {
 }
 
 bool Ucs::is_world() const {
-    return is_zero(origin, 1e-12) && near_equal(normalize(xdir), kWorldX, 1e-12) &&
-           near_equal(normalize(ydir), kWorldY, 1e-12);
+    return is_zero(origin, kFloatFloor) && near_equal(normalize(xdir), kWorldX, kFloatFloor) &&
+           near_equal(normalize(ydir), kWorldY, kFloatFloor);
 }
 
 Ucs Ucs::normalized() const {

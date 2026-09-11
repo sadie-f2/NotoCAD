@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
+#include "ncad/eps.hpp"
 #include "ncad/dxf.hpp"
 
 #include "ncad/database.hpp"
@@ -28,7 +29,7 @@ std::string to_hex(Handle h) {
 }
 
 bool is_default_normal(const Vec3& n) {
-    return near_equal(n, kWorldZ, 1e-12);
+    return near_equal(n, kWorldZ, kFloatFloor);
 }
 
 }  // namespace

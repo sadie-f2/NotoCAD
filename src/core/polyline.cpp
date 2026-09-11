@@ -15,6 +15,7 @@
 // those. Storing bulge rather than a centre is what the format does and is also
 // what survives editing: dragging a vertex keeps the arc's relationship to its
 // neighbours rather than referring to a centre that may no longer make sense.
+#include "ncad/eps.hpp"
 #include "ncad/entities.hpp"
 
 #include "ncad/dxf.hpp"
@@ -26,7 +27,7 @@
 namespace ncad {
 namespace {
 
-constexpr double kBulgeEps = 1e-12;
+constexpr double kBulgeEps = kFloatFloor;
 
 }  // namespace
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
+#include "ncad/eps.hpp"
 #include "ncad/offset.hpp"
 
 #include "ncad/ecs.hpp"
@@ -20,7 +21,7 @@ namespace {
 
 // Below this a bulge is a straight segment, matching what segment_arc treats
 // as one -- the two must agree or a segment changes kind between them.
-constexpr double kBulgeEps = 1e-12;
+constexpr double kBulgeEps = kFloatFloor;
 
 EntityPtr offset_line(const Line& l, double d, const Vec3& side, const Vec3& plane) {
     const Vec3 dir = l.end() - l.start();

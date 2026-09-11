@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
+#include "ncad/eps.hpp"
 #include "ncad/commands.hpp"
 
 #include "ncad/curve_edit.hpp"
@@ -1372,7 +1373,7 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
             // an endpoint alone means.
             const double included =
                 signed_angle(normalize(from), normalize(to), construction_normal(ctx));
-            if (std::abs(included) < 1e-12) return Step::failed("degenerate arc");
+            if (std::abs(included) < kFloatFloor) return Step::failed("degenerate arc");
             return add_vertex(ctx, value.point, included, true);
         }
 
@@ -1394,7 +1395,7 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
             if (value.kind != InputKind::Point) return Step::failed("a point is required");
             const Vec3 chord = value.point - current();
             const double chord_len = length(chord);
-            if (chord_len < 1e-12) return Step::failed("zero-length arc");
+            if (chord_len < kFloatFloor) return Step::failed("zero-length arc");
             // |chord| = 2r sin(theta/2), so a chord longer than the diameter
             // has no arc of this radius at all.
             const double ratio = chord_len / (2.0 * pending_radius_);
@@ -1432,7 +1433,7 @@ Step PlineCommand::next(CommandContext& ctx, const InputValue& value) {
             if (is_zero(a) || is_zero(b)) return Step::failed("degenerate arc");
             const Vec3 n = construction_normal(ctx);
             const double turn = signed_angle(normalize(a), normalize(b), n);
-            if (std::abs(turn) < 1e-12) return Step::failed("three points are collinear");
+            if (std::abs(turn) < kFloatFloor) return Step::failed("three points are collinear");
             // The inscribed-angle relation: the turn between the two chords is
             // half the total included angle.
             return add_vertex(ctx, value.point, 2.0 * turn, true);
@@ -2010,7 +2011,7 @@ Step TextCommand::build(CommandContext& ctx, const std::string& value) {
     if (h_align_ == TextHAlign::Aligned || h_align_ == TextHAlign::Fit) {
         const Vec3 span = second_ - start_;
         const double distance = length(span);
-        if (distance < 1e-12) return Step::failed("the two points are the same");
+        if (distance < kFloatFloor) return Step::failed("the two points are the same");
         text->set_rotation(std::atan2(span.y, span.x));
 
         // The nominal width of the string at the current height and width
@@ -2018,7 +2019,7 @@ Step TextCommand::build(CommandContext& ctx, const std::string& value) {
         // distance. Without a font this is the placeholder metric, which makes
         // the result approximate in the same way the drawing already is.
         const double nominal = text->text_width();
-        if (nominal < 1e-12) return Step::failed("cannot fit empty text");
+        if (nominal < kFloatFloor) return Step::failed("cannot fit empty text");
 
         if (h_align_ == TextHAlign::Aligned) {
             text->set_height(height_ * distance / nominal);
@@ -2245,7 +2246,7 @@ Step BreakCommand::next(CommandContext& ctx, const InputValue& value) {
             // curve in two without removing anything.
             if (keyword_is(value, "AT")) return apply(ctx, first_, first_, true);
             if (value.kind != InputKind::Point) return Step::failed("a point is required");
-            if (near_equal(value.point, first_, 1e-12)) {
+            if (near_equal(value.point, first_, kFloatFloor)) {
                 return apply(ctx, first_, first_, true);
             }
             return apply(ctx, first_, value.point, false);
@@ -2730,12 +2731,12 @@ Step TrimCommand::act_on(CommandContext& ctx, Handle target, const Vec3& at) {
         bool found = false;
         double best = 0.0;
         for (const double t : cuts) {
-            if (grow_end && t > 1.0 + 1e-9) {
+            if (grow_end && t > 1.0 + kSameEps) {
                 if (!found || t < best) {
                     best = t;
                     found = true;
                 }
-            } else if (!grow_end && t < -1e-9) {
+            } else if (!grow_end && t < -kSameEps) {
                 if (!found || t > best) {
                     best = t;
                     found = true;
@@ -4461,7 +4462,7 @@ namespace {
 // on exact coincidence by default, so this is a floating-point tolerance rather
 // than a fuzz distance -- picking with an object snap lands exactly, and
 // anything looser would join things the user did not mean.
-constexpr double kJoinTol = 1e-9;
+constexpr double kJoinTol = kSameEps;  // the gate, under the name this file reads best
 
 // The vertex chain an entity contributes to a polyline it is joined to, or
 // empty when it cannot be joined at all.
@@ -5546,7 +5547,7 @@ Step ArrayCommand::build_polar(CommandContext& ctx) {
     // NOTE: that rule is the sensible reading and is not verified against the
     // R12 documentation -- flagged in SF_todo.md.
     const double two_pi = 2.0 * std::numbers::pi;
-    const bool full = std::abs(std::abs(fill_) - two_pi) < 1e-9;
+    const bool full = std::abs(std::abs(fill_) - two_pi) < kSameEps;
     const double step =
         full ? fill_ / count_ : (count_ > 1 ? fill_ / (count_ - 1) : 0.0);
 
@@ -5697,7 +5698,7 @@ Step ArrayCommand::next(CommandContext& ctx, const InputValue& value) {
             const Vec3 ref = extent.center();
 
             const double two_pi = 2.0 * std::numbers::pi;
-            const bool full = std::abs(std::abs(fill_) - two_pi) < 1e-9;
+            const bool full = std::abs(std::abs(fill_) - two_pi) < kSameEps;
             const double step = full ? fill_ / count_ : (count_ > 1 ? fill_ / (count_ - 1) : 0.0);
 
             std::size_t n = 0;

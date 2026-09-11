@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
+#include "ncad/eps.hpp"
 #include "ncad/osnap_derived.hpp"
 
 #include "ncad/ecs.hpp"
@@ -262,7 +263,7 @@ int ellipse_tangents(const EllipseFrame& f, const Vec3& ref, Vec3 out[kMaxTangen
     const double py = dot(d, f.v) / f.b;
 
     const double r = std::sqrt(px * px + py * py);
-    if (r < 1.0 - 1e-9) return 0;  // strictly inside: no tangent exists
+    if (r < 1.0 - kSameEps) return 0;  // strictly inside: no tangent exists
 
     const double phi = std::atan2(py, px);
     const double half = std::acos(std::clamp(1.0 / r, -1.0, 1.0));
@@ -270,7 +271,7 @@ int ellipse_tangents(const EllipseFrame& f, const Vec3& ref, Vec3 out[kMaxTangen
     int count = 0;
     // On the curve, the two answers coincide and the tangent point is `ref`
     // itself -- the same reading the circular case gives.
-    if (half <= 1e-9) {
+    if (half <= kSameEps) {
         if (param_on_sweep(f, phi)) out[count++] = f.src->point_at(phi);
         return count;
     }
@@ -345,7 +346,7 @@ int spline_tangents(const Spline& s, const Vec3& ref, Vec3 out[kMaxTangents]) {
         const Vec3 p = s.point_at(u);
         bool duplicate = false;
         for (int i = 0; i < count; ++i) {
-            if (near_equal(out[i], p, 1e-9)) duplicate = true;
+            if (near_equal(out[i], p, kSameEps)) duplicate = true;
         }
         if (!duplicate) out[count++] = p;
     }
@@ -500,7 +501,7 @@ bool perpendicular_in_polyline(const Polyline& p, const Vec3& ref, Vec3* out) {
         if (!ok) continue;
 
         const double d = length_sq(foot - ref);
-        if (ok_clamped && near_equal(foot, clamped, 1e-9)) {
+        if (ok_clamped && near_equal(foot, clamped, kSameEps)) {
             if (!found_on || d < best_on) {
                 best_on = d;
                 on = foot;
@@ -675,13 +676,13 @@ int tangent_points(const Entity& e, const Vec3& ref, Vec3 out[kMaxTangents]) {
     const Vec3 radial = p - c.center;
     const double dist = length(radial);
 
-    if (dist < c.radius - 1e-9) return 0;  // inside: no tangent exists
+    if (dist < c.radius - kSameEps) return 0;  // inside: no tangent exists
 
     const Vec3 along = normalize(radial);
     if (is_zero(along)) return 0;  // at the centre
 
     // On the circle: the tangent point is the point itself.
-    if (dist <= c.radius + 1e-9) {
+    if (dist <= c.radius + kSameEps) {
         const Vec3 t = c.center + along * c.radius;
         if (!on_sweep(c, t)) return 0;
         out[0] = t;
@@ -725,7 +726,7 @@ int intersect_entities(const Entity& a, const Entity& b, Vec3 out[kMaxIntersecti
         // same point twice would make pick cycling stutter.
         bool duplicate = false;
         for (int i = 0; i < count; ++i) {
-            if (near_equal(out[i], hit.point, 1e-9)) duplicate = true;
+            if (near_equal(out[i], hit.point, kSameEps)) duplicate = true;
         }
         if (!duplicate) out[count++] = hit.point;
     }

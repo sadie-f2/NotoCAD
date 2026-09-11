@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Sadie Forbes
 
+#include "ncad/eps.hpp"
 #include "ncad/viewport.hpp"
 
 #include <algorithm>
@@ -14,7 +15,7 @@ constexpr double kTwoPi = 2.0 * std::numbers::pi;
 
 // Smallest view height allowed. Zooming is multiplicative, so without a floor a
 // long enough zoom-in reaches denormals and the projection loses all precision.
-constexpr double kMinViewHeight = 1e-9;
+constexpr double kMinViewHeight = kSameEps;
 constexpr double kMaxViewHeight = 1e12;
 
 // Leaves a little air around ZOOM Extents, as R12 does.

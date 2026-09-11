@@ -9,6 +9,7 @@
 // primitives. That is what makes polylines fall out for free rather than
 // needing a fourth case, and it is why a bulged polyline segment meets a circle
 // by exactly the arithmetic a standalone ARC would use.
+#include "ncad/eps.hpp"
 #include "ncad/intersect.hpp"
 
 #include "ncad/ecs.hpp"
@@ -427,7 +428,7 @@ void intersect_circle_circle(const Vec3& c0, double r0, const Vec3& n0, const Ve
         out.push_back(hit);
     };
 
-    const bool parallel_planes = is_zero(cross(u0, u1), 1e-9);
+    const bool parallel_planes = is_zero(cross(u0, u1), kSameEps);
 
     if (parallel_planes) {
         // Parallel but offset planes never meet.

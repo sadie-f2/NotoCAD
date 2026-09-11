@@ -8,6 +8,7 @@
 // a different bulge from the one it was cut out of. Getting that wrong is
 // invisible on a straight polyline and obvious on a curved one, which is the
 // worst combination, so it is tested directly.
+#include "ncad/eps.hpp"
 #include "ncad/curve_edit.hpp"
 
 #include "ncad/ecs.hpp"
@@ -22,7 +23,7 @@ namespace ncad {
 namespace {
 
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
-constexpr double kSpanEps = 1e-9;
+constexpr double kSpanEps = kSameEps;  // the gate, under the name this file reads best
 
 void carry_properties(const Entity& from, Entity& to) {
     to.props() = from.props();

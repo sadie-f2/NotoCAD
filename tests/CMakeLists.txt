@@ -22,6 +22,7 @@ add_executable(ncad_tests
   test_leader.cpp
   test_lock.cpp
   test_plot.cpp
+  test_eps.cpp
   test_command.cpp
   test_units.cpp
   test_appload.cpp
@@ -75,6 +76,11 @@ target_include_directories(ncad_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAK
 # ncad_app carries ncad_core and ncad_lisp PUBLICly, so naming them here too
 # repeats them on the link line. GNU ld is silent about that; Apple's ld warns.
 target_link_libraries(ncad_tests PRIVATE ncad_app ncad_flags)
+
+# test_eps.cpp greps src/core for bare epsilon literals, so it needs the tree
+# rather than the build directory. Taken verbatim from the solids tree, where
+# this line already existed when brief 28's grep-as-a-test was written.
+target_compile_definitions(ncad_tests PRIVATE NCAD_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 add_test(NAME ncad_tests COMMAND ncad_tests)
 
