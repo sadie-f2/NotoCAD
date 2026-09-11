@@ -352,10 +352,19 @@ Phase 5 or 6, alongside the other construction commands.
 *(The focus loss is fixed — see the commit "Typing always reaches the command line".
 It needs confirming in a real session, since it could not be reproduced headlessly.)*
 
-**Show the selection box while it is being dragged.** The window or crossing rectangle
-should be drawn as it is dragged, and distinguishably: AutoCAD uses a solid outline for
-window and a dashed one for crossing, which is how you know which you are getting
-before you release.
+**Show the selection box while it is being dragged — HALF BUILT.** The rectangle
+itself is drawn: `viewport_widget.cpp:370`, screen-aligned and normalised, anchored at
+the opposite corner. What is absent is telling window from crossing by eye — AutoCAD
+uses a solid outline for one and a dashed one for the other.
+
+That absence is currently *reasoned*, not overlooked. The code says: *"Which of window
+and crossing this is comes from the typed W or C keyword, so the box does not have to
+say — the prompt already does."* True today. **It stops being true the moment implied
+windowing lands**, because then the drag direction decides which you get and nothing
+announces it until you release — which is the whole reason AutoCAD draws them
+differently. So solid-vs-dashed is a prerequisite of that item rather than a polish
+item beside it, and the comment explaining its absence will need deleting, not
+updating.
 
 **Ghost the selection during placement.** MOVE and COPY should show the selected
 geometry following the cursor between the base point and the second point.
@@ -365,7 +374,7 @@ forwarding, where the current no-feedback behaviour is *faster*. Whatever is dra
 should be cheap — outline only, no fill — and probably switchable, since the remote
 case is a real working mode rather than an edge case.
 
-**The pick box wants too much precision, and the reason is that a pixel changed size.**
+**The pick box wants too much precision — and it is felt in exactly one place.**
 `PICKBOX` defaults to 3 — a half-height, so a 7-pixel box — which is AutoCAD's default
 and has been since R12, when a screen was around 50 DPI. At the ~110 logical DPI of a
 modern display the box is **physically less than half the size it was**, and nothing
@@ -376,6 +385,28 @@ not a HiDPI bug — the arithmetic is right and the constant is stale.
 This is the `CURSORSIZE` case again, and `CLAUDE.md` already licenses it: `PICKBOX = 3`
 is not a considered design choice about interaction, it is a number calibrated against
 a display that no longer exists.
+
+**`PICKBOX` and `APERTURE` are used in disjoint situations, so there is no ratio to
+tune.** `viewport_widget.cpp:337` picks between them —
+`wants_entity() ? pickbox_px() : aperture_px()` — and `wants_entity()` is true only for
+`PromptKind::Entity`, which is only ever the *Select objects* prompt:
+
+| doing | prompt kind | box drawn and used | size |
+|---|---|---|---|
+| Select objects, including typing `W`/`C` to start one | `Entity` | `PICKBOX` | 7 px — **tiny** |
+| Window / crossing **corners** | `Point` | `APERTURE` | 21 px |
+| Drawing lines, any point entry | `Point` | `APERTURE` | 21 px — right |
+
+So the pick box is only ever live during selection, and that is the one place it is
+wrong; the hit test at `viewport_widget.cpp:810` uses it too. Everything else runs on
+`APERTURE` at 21 px, which is **correctly sized and must not move** — reported from use,
+and consistent with the osnap complaint below being about which snap WINS rather than
+how far the aperture reaches.
+
+*What it needs:* raise `PICKBOX` toward `APERTURE`. An earlier version of this note said
+to raise one while lowering the other, "converging them deliberately, breaking AutoCAD's
+10:3 ratio". That was wrong: the two never both apply, so the ratio was never a thing
+either variable experienced.
 
 **Object snap reaches too far, and that one is a DEFECT rather than a preference.**
 `src/core/osnap_search.cpp:68`:
