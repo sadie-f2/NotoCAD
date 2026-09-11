@@ -365,6 +365,63 @@ forwarding, where the current no-feedback behaviour is *faster*. Whatever is dra
 should be cheap — outline only, no fill — and probably switchable, since the remote
 case is a real working mode rather than an edge case.
 
+**The pick box wants too much precision, and the reason is that a pixel changed size.**
+`PICKBOX` defaults to 3 — a half-height, so a 7-pixel box — which is AutoCAD's default
+and has been since R12, when a screen was around 50 DPI. At the ~110 logical DPI of a
+modern display the box is **physically less than half the size it was**, and nothing
+scales it: `devicePixelRatio` appears only in toolbar icon generation, nowhere in the
+picking path. Everything in the viewport is consistently in logical pixels, so this is
+not a HiDPI bug — the arithmetic is right and the constant is stale.
+
+This is the `CURSORSIZE` case again, and `CLAUDE.md` already licenses it: `PICKBOX = 3`
+is not a considered design choice about interaction, it is a number calibrated against
+a display that no longer exists.
+
+**Object snap reaches too far, and that one is a DEFECT rather than a preference.**
+`src/core/osnap_search.cpp:68`:
+
+```cpp
+if (a_discrete != b_discrete) return a_discrete;
+```
+
+A discrete snap — endpoint, midpoint, centre, quadrant — beats a continuous one —
+nearest, perpendicular, tangent — **unconditionally, at any distance inside the
+aperture**. With `APERTURE = 10` that is a 21-pixel box, so an ENDPOINT 20 pixels away
+wins over a NEAREST the cursor is sitting exactly on. The radius is not wrong; the tier
+is unbounded.
+
+The comment above the line explains why it is written that way and the reasoning is
+sound — without a tier, NEAREST buries ENDPOINT, because NEAREST is always ~0 px when
+you are on the line. The cure simply overshoots. It also warns, correctly, that the
+obvious repair (`if (fabs(da - db) > eps) return da < db`) is **not transitive** and
+makes `std::sort` undefined rather than merely differently ordered.
+
+*What it needs:* an effective distance — `distance + (discrete ? 0 : penalty)` — sorted
+on as an ordinary number, so transitivity is structural rather than argued. It states
+something meaningful too: *a discrete snap is worth up to N pixels of extra travel.*
+Today's behaviour is `penalty = infinity`. Something around 5 px keeps ENDPOINT winning
+when it is genuinely close and lets NEAREST win when it is not. Probably a sysvar.
+
+Note these two pull in opposite directions and are felt together: raising `PICKBOX`
+while **lowering** `APERTURE` converges them deliberately, breaking AutoCAD's 10:3
+ratio on purpose.
+
+**Selection has no implied windowing, and that is an unbuilt R12 feature rather than a
+modernisation.** Today a window or crossing needs `W` or `C` typed first, then two point
+picks (`commands.cpp:4732`). Click-and-drag on empty space — left-to-right for window,
+right-to-left for crossing — is AutoCAD behaviour governed by `PICKAUTO`, which R12 had
+and this sysvar table does not: 33 variables, no `PICKAUTO` and no `PICKDRAG`. So the
+justification is "a gap", not "let us be modern", which is a much easier argument.
+
+*Priority note, and it is the kind that otherwise evaporates:* **this is for newcomers,
+not for Sadie** — the R12/R13 muscle memory came back within a session of real use, so
+typing `W` costs the author nothing. It stays recorded because the next person has no
+such memory, not because it is felt daily.
+
+There are a few more of this shape. Worth collecting rather than taking one at a time,
+since they will share the drag-state machinery in the viewport and that is the whole
+cost.
+
 ## View commands — what is known before they are written
 
 Recorded from Sadie's daily AutoCAD use, so the design does not have to be guessed at
