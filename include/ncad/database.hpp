@@ -141,6 +141,22 @@ public:
     // Stable for the lifetime of the database. Null for an invalid id.
     const BlockDef* block(BlockId id) const;
 
+    // A block's NAME changed and nothing else. The definition keeps its id and
+    // its address, so every insertion of it still points at it -- which is the
+    // whole reason a rename is not an erase and an add.
+    //
+    // NOTHING IS JOURNALLED HERE, deliberately, and the reason is the shape
+    // of the caller it was written for rather than laziness. In the tree this
+    // came from, one command renames the block AND a second table beside it,
+    // and the journal can reach only the block on its own -- so that command
+    // records the pair as a single change and replays both halves together,
+    // where a `ModifyBlock` recorded in here as well would undo the block half
+    // twice. NOTHING IN THIS PROGRAM CALLS IT YET: whatever does must record
+    // its own `ModifyBlock`, or the rename will not undo.
+    //
+    // False for an invalid id, or a name another block already holds.
+    bool rename_block(BlockId id, const std::string& name);
+
     std::size_t block_count() const { return blocks_.size(); }
     const std::vector<std::unique_ptr<BlockDef>>& blocks() const { return blocks_; }
 

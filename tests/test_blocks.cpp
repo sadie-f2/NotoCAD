@@ -93,6 +93,39 @@ TEST_CASE("blocks: a definition is found by name and keeps its address") {
     CHECK(db.find_block("NOPE") == kInvalidBlock);
 }
 
+TEST_CASE("blocks: a rename keeps the id and the address, and refuses a taken name") {
+    // NO CALLER IN THIS PROGRAM YET. `rename_block` is backported ahead of one,
+    // so the header's contract is asserted here rather than left to whichever
+    // command reaches for it first -- an untested method with no caller is a
+    // method whose behaviour is whatever the next reader assumes.
+    Database db;
+    const BlockId a = db.add_block(square_def("A"));
+    const BlockId b = db.add_block(square_def("B"));
+    const BlockDef* def = db.block(a);
+    REQUIRE(def != nullptr);
+
+    // The point of a rename being a rename: the insertion's pointer holds.
+    REQUIRE(db.rename_block(a, "BOLT"));
+    CHECK(db.block(a) == def);
+    CHECK(def->name == "BOLT");
+    CHECK(db.find_block("BOLT") == a);
+    CHECK(db.find_block("A") == kInvalidBlock);
+
+    // A name another block holds is refused, and nothing moves.
+    CHECK(!db.rename_block(a, "B"));
+    CHECK(def->name == "BOLT");
+
+    // Its own name folded differently is not a collision: names are matched
+    // case-insensitively, so this is the block renaming itself.
+    CHECK(db.rename_block(a, "bolt"));
+    CHECK(def->name == "bolt");
+    CHECK(db.find_block("BOLT") == a);
+
+    // An invalid id is false rather than undefined.
+    CHECK(!db.rename_block(static_cast<BlockId>(db.block_count() + 7), "ANYTHING"));
+    CHECK(db.block(b)->name == "B");
+}
+
 TEST_CASE("blocks: redefining a name updates every insertion of it") {
     Database db;
     const BlockId id = db.add_block(square_def());

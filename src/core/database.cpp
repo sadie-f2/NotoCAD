@@ -367,6 +367,17 @@ const BlockDef* Database::block(BlockId id) const {
     return id < blocks_.size() ? blocks_[id].get() : nullptr;
 }
 
+bool Database::rename_block(BlockId id, const std::string& name) {
+    if (id >= blocks_.size()) return false;
+    const BlockId taken = find_block(name);
+    // Its own name, folded differently, is not a collision -- `names_equal` is
+    // case-insensitive, so `BOLT` and `bolt` are the same block, and renaming
+    // one to the other must not refuse.
+    if (taken != kInvalidBlock && taken != id) return false;
+    blocks_[id]->name = name;
+    return true;
+}
+
 void Database::pop_block() {
     if (blocks_.empty()) return;
     // Retired, not freed. The undo stack holds Insert clones whose `def_` still
