@@ -3,6 +3,7 @@
 
 add_executable(ncad_tests
   test_main.cpp
+  test_harness.cpp
   test_math.cpp
   test_entities.cpp
   test_dxf.cpp
