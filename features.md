@@ -391,6 +391,21 @@ This is the `CURSORSIZE` case again, and `CLAUDE.md` already licenses it: `PICKB
 is not a considered design choice about interaction, it is a number calibrated against
 a display that no longer exists.
 
+**Follow-up, same day: the box was too dim to find.** With the size right, the
+APERTURE box at 21 px was still hard to see — reported as a "size/contrast combination",
+and it is the contrast half. `kCrosshair` was (90, 90, 100) against a (24, 24, 28) field,
+which on a busy drawing of ordinary ACI-7 white is effectively invisible; candidates were
+drawn at 1:1 over a dense field to choose. It is now **(245, 245, 252)**, near-white,
+keeping the two counts of blue the rest of the chrome carries.
+
+What the mock settled, and it is worth knowing before anyone dims it again: legibility
+here is as much SHAPE as tone. A closed rectangle among open strokes reads at once, which
+is why the box does not get lost at nearly the brightness of the linework it sits on.
+
+The constant was also **renamed to `kCursorBox`**. It never painted the crosshair — that
+is drawn per axis in the UCS colours — and it has exactly one user; the name cost a wrong
+answer to "what colour is the cursor box" before it was corrected.
+
 **`PICKBOX` and `APERTURE` are not two sizes of one thing — they answer two different
 questions, and never at the same moment.** That is why there is no ratio to tune.
 

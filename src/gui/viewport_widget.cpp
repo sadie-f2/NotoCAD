@@ -26,7 +26,26 @@ namespace {
 // R12 on a CRT: light geometry on a near-black field.
 const QColor kBackground(24, 24, 28);
 const QColor kRubberBand(180, 180, 190);
-const QColor kCrosshair(90, 90, 100);
+
+// The box at the cursor -- PICKBOX when selecting, APERTURE when snapping.
+//
+// **NOT the crosshair**, despite what this was called until 2026-08-29: the
+// crosshair is drawn per axis in the UCS colours (`frame.colour[i]`), and this
+// constant has exactly one user, `draw_rubber_band`. The old name cost a wrong
+// answer to "what colour is the cursor box" and was renamed rather than
+// commented around.
+//
+// Near-white, from use: at (90, 90, 100) the APERTURE box was effectively
+// invisible against ordinary ACI-7 geometry on a busy drawing -- reported, then
+// confirmed by drawing the candidates at 1:1 over a dense field. What makes it
+// legible is as much its SHAPE as its tone; a closed rectangle among open
+// strokes reads at once, which is why it does not get lost at nearly the
+// brightness of the linework it sits on.
+//
+// The blue is the two counts the rest of the chrome carries -- `kRubberBand`,
+// `kNameplate` -- so the cursor box stays inside that grammar rather than being
+// the one neutral thing on screen.
+const QColor kCursorBox(245, 245, 252);
 
 const QColor kOsnapMarker(250, 200, 60);
 
@@ -332,7 +351,7 @@ void ViewportWidget::draw_rubber_band(QPainter& painter) const {
     // stands for: the pick box when selecting objects, the aperture when
     // snapping. Seeing the box change size is how you know which one is live.
     const double half = wants_entity() ? pickbox_px() : aperture_px();
-    QPen pen(kCrosshair);
+    QPen pen(kCursorBox);
     pen.setWidth(0);
     painter.setPen(pen);
     painter.setBrush(Qt::NoBrush);
