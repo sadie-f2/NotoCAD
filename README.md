@@ -1,4 +1,4 @@
-# NotoCAD
+# NotoCAD™
 
 An open-source, command-line-first CAD tool modeled on **AutoCAD R12** — the
 pre-GUI-heavy, pre-solids era. Not a modern AutoCAD clone.
