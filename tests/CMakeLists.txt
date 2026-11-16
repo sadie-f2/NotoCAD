@@ -26,6 +26,7 @@ add_executable(ncad_tests
   test_prompt.cpp
   test_osnap_derived.cpp
   test_sysvar.cpp
+  test_extension.cpp
   test_pick.cpp
   test_osnap_search.cpp
   test_grip.cpp

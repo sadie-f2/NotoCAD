@@ -6,6 +6,7 @@
 #include "ncad/undo.hpp"
 
 #include <cstddef>
+#include <deque>
 
 namespace ncad {
 namespace {
@@ -165,15 +166,80 @@ const SysvarDef* sysvar_table(std::size_t& count) {
     return kTable;
 }
 
+namespace {
+
+// Deques, so the pointers a SysvarDef hands out (into `strings`, and the Def
+// addresses callers hold from find_sysvar) survive later registrations.
+struct Registered {
+    std::deque<SysvarDef> defs;
+    std::deque<std::string> strings;
+};
+
+Registered& registered() {
+    static Registered r;
+    return r;
+}
+
+constexpr std::size_t kBuiltin = static_cast<std::size_t>(Sysvar::kCount);
+
+}  // namespace
+
 const SysvarDef* find_sysvar(std::string_view name) {
     for (const SysvarDef& d : kTable) {
+        if (iequals(name, d.name)) return &d;
+    }
+    for (const SysvarDef& d : registered().defs) {
         if (iequals(name, d.name)) return &d;
     }
     return nullptr;
 }
 
 const SysvarDef& sysvar_def(Sysvar id) {
-    return kTable[index_of(id)];
+    const std::size_t i = index_of(id);
+    if (i < kBuiltin) return kTable[i];
+    // An id this process never issued is a programming error; answering with
+    // the first row keeps the no-throw promise of the accessors.
+    const Registered& r = registered();
+    return i - kBuiltin < r.defs.size() ? r.defs[i - kBuiltin] : kTable[0];
+}
+
+std::size_t sysvar_total() {
+    return kBuiltin + registered().defs.size();
+}
+
+bool register_sysvar(const SysvarSpec& spec, Sysvar& id) {
+    if (spec.name.empty()) return false;
+    std::string upper_name;
+    for (char c : spec.name) upper_name += upper(c);
+
+    for (const SysvarDef& d : kTable) {
+        if (iequals(upper_name, d.name)) return false;
+    }
+    Registered& r = registered();
+    for (const SysvarDef& d : r.defs) {
+        if (iequals(upper_name, d.name)) {
+            if (d.type != spec.type) return false;
+            id = d.id;
+            return true;
+        }
+    }
+
+    r.strings.push_back(upper_name);
+    const char* name = r.strings.back().c_str();
+    r.strings.push_back(spec.string_default);
+    const char* text = r.strings.back().c_str();
+
+    const Sysvar new_id = static_cast<Sysvar>(kBuiltin + r.defs.size());
+    r.defs.push_back(SysvarDef{name, new_id, spec.type, spec.read_only, spec.save_in_drawing,
+                               spec.int_default, spec.int_min, spec.int_max, spec.real_default,
+                               text, spec.point_default});
+    id = new_id;
+    return true;
+}
+
+void clear_registered_sysvars() {
+    registered().defs.clear();
+    registered().strings.clear();
 }
 
 namespace {
@@ -191,26 +257,42 @@ SysvarValue default_value(const SysvarDef& d) {
 }  // namespace
 
 Sysvars::Sysvars() {
-    for (const SysvarDef& d : kTable) values_[index_of(d.id)] = default_value(d);
+    values_.reserve(sysvar_total());
+    for (std::size_t i = 0; i < sysvar_total(); ++i) {
+        values_.push_back(default_value(sysvar_def(static_cast<Sysvar>(i))));
+    }
+}
+
+const SysvarValue& Sysvars::slot(Sysvar id) const {
+    // sysvar_def() answers kTable[0] for an unissued id, so cap the growth at
+    // what exists rather than inventing storage for a stray number.
+    while (values_.size() < sysvar_total() && values_.size() <= index_of(id)) {
+        values_.push_back(default_value(sysvar_def(static_cast<Sysvar>(values_.size()))));
+    }
+    return index_of(id) < values_.size() ? values_[index_of(id)] : values_[0];
+}
+
+SysvarValue& Sysvars::slot_for_write(Sysvar id) {
+    return const_cast<SysvarValue&>(slot(id));
 }
 
 std::int32_t Sysvars::get_int(Sysvar id) const {
-    const SysvarValue& v = values_[index_of(id)];
+    const SysvarValue& v = slot(id);
     return v.type == SysvarType::Int ? v.integer : 0;
 }
 
 double Sysvars::get_real(Sysvar id) const {
-    const SysvarValue& v = values_[index_of(id)];
+    const SysvarValue& v = slot(id);
     return v.type == SysvarType::Real ? v.real : 0.0;
 }
 
 const std::string& Sysvars::get_string(Sysvar id) const {
-    const SysvarValue& v = values_[index_of(id)];
+    const SysvarValue& v = slot(id);
     return v.type == SysvarType::String ? v.text : empty_string();
 }
 
 Vec3 Sysvars::get_point(Sysvar id) const {
-    const SysvarValue& v = values_[index_of(id)];
+    const SysvarValue& v = slot(id);
     return v.type == SysvarType::Point ? v.point : Vec3{};
 }
 
@@ -219,8 +301,8 @@ Sysvars::SetStatus Sysvars::set_int(Sysvar id, std::int32_t v) {
     if (d.read_only) return SetStatus::ReadOnly;
     if (d.type != SysvarType::Int) return SetStatus::WrongType;
     if (v < d.int_min || v > d.int_max) return SetStatus::OutOfRange;
-    const SysvarValue before = values_[index_of(id)];
-    values_[index_of(id)] = SysvarValue::of_int(v);
+    const SysvarValue before = slot(id);
+    slot_for_write(id) = SysvarValue::of_int(v);
     journal_write(id, before);
     return SetStatus::Ok;
 }
@@ -229,8 +311,8 @@ Sysvars::SetStatus Sysvars::set_real(Sysvar id, double v) {
     const SysvarDef& d = sysvar_def(id);
     if (d.read_only) return SetStatus::ReadOnly;
     if (d.type != SysvarType::Real) return SetStatus::WrongType;
-    const SysvarValue before = values_[index_of(id)];
-    values_[index_of(id)] = SysvarValue::of_real(v);
+    const SysvarValue before = slot(id);
+    slot_for_write(id) = SysvarValue::of_real(v);
     journal_write(id, before);
     return SetStatus::Ok;
 }
@@ -239,8 +321,8 @@ Sysvars::SetStatus Sysvars::set_string(Sysvar id, std::string v) {
     const SysvarDef& d = sysvar_def(id);
     if (d.read_only) return SetStatus::ReadOnly;
     if (d.type != SysvarType::String) return SetStatus::WrongType;
-    const SysvarValue before = values_[index_of(id)];
-    values_[index_of(id)] = SysvarValue::of_string(std::move(v));
+    const SysvarValue before = slot(id);
+    slot_for_write(id) = SysvarValue::of_string(std::move(v));
     journal_write(id, before);
     return SetStatus::Ok;
 }
@@ -249,8 +331,8 @@ Sysvars::SetStatus Sysvars::set_point(Sysvar id, const Vec3& p) {
     const SysvarDef& d = sysvar_def(id);
     if (d.read_only) return SetStatus::ReadOnly;
     if (d.type != SysvarType::Point) return SetStatus::WrongType;
-    const SysvarValue before = values_[index_of(id)];
-    values_[index_of(id)] = SysvarValue::of_point(p);
+    const SysvarValue before = slot(id);
+    slot_for_write(id) = SysvarValue::of_point(p);
     journal_write(id, before);
     return SetStatus::Ok;
 }
@@ -259,8 +341,8 @@ Sysvars::SetStatus Sysvars::set_owned(Sysvar id, const SysvarValue& v) {
     const SysvarDef& d = sysvar_def(id);
     if (d.type != v.type) return SetStatus::WrongType;
 
-    const SysvarValue before = values_[index_of(id)];
-    values_[index_of(id)] = v;
+    const SysvarValue before = slot(id);
+    slot_for_write(id) = v;
     journal_write(id, before);
     return SetStatus::Ok;
 }
@@ -271,14 +353,14 @@ Sysvars::SetStatus Sysvars::set_metadata(Sysvar id, const SysvarValue& v) {
 
     // No journal_write: see the header for why these specifically are outside
     // undo rather than escaping it.
-    values_[index_of(id)] = v;
+    slot_for_write(id) = v;
     return SetStatus::Ok;
 }
 
 bool Sysvars::get(std::string_view name, SysvarValue& out) const {
     const SysvarDef* d = find_sysvar(name);
     if (d == nullptr) return false;
-    out = values_[index_of(d->id)];
+    out = slot(d->id);
     return true;
 }
 
@@ -311,12 +393,13 @@ Sysvars::SetStatus Sysvars::set(std::string_view name, const SysvarValue& v) {
 }
 
 void Sysvars::journal_write(Sysvar id, const SysvarValue& before) {
-    if (journal_) journal_->record_sysvar(id, before, values_[index_of(id)]);
+    if (journal_) journal_->record_sysvar(id, before, slot(id));
 }
 
 void Sysvars::reset_drawing_vars() {
-    for (const SysvarDef& d : kTable) {
-        if (d.save_in_drawing) values_[index_of(d.id)] = default_value(d);
+    for (std::size_t i = 0; i < sysvar_total(); ++i) {
+        const SysvarDef& d = sysvar_def(static_cast<Sysvar>(i));
+        if (d.save_in_drawing) slot_for_write(d.id) = default_value(d);
     }
 }
 

@@ -19,6 +19,7 @@
 #include "ncad/render.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <string_view>
 
 namespace ncad {
@@ -1725,7 +1726,34 @@ public:
 
 CommandPtr make_command(std::string_view name);
 
-// The registered command names, for help text and completion.
+// --- commands added from outside the core -------------------------------------
+//
+// make_command is a fixed chain and command_names() a fixed list, which is right
+// for what ncad_core owns and wrong for a module that sits beside it (a device
+// backend, a plug-in) and must not be named here. This is the seam: such a
+// module registers a name and a factory, and from then on make_command,
+// command_names and resolve_command_name treat it like any other command, so
+// the prompt, abbreviations, `?` and (command ...) all find it with no further
+// plumbing.
+//
+// The factory is a std::function rather than a bare pointer so it can capture
+// state shared between invocations (a session that outlives one command).
+//
+// Registration is an explicit call at startup, never a static initialiser. A
+// built-in name cannot be replaced -- an extension must not be able to change
+// what LINE means -- and registering the same name twice replaces the factory,
+// which makes an install function idempotent.
+using CommandFactory = std::function<CommandPtr()>;
+
+// False for an empty name or one that belongs to a built-in.
+bool register_command(std::string name, CommandFactory factory);
+
+// Forgets every registered command, for tests; see clear_registered_sysvars.
+void clear_registered_commands();
+
+// The registered command names, for help text and completion. Built-ins first,
+// then registered ones in registration order. The reference is invalidated by
+// register_command, so copy it if a registration might intervene.
 const std::vector<std::string>& command_names();
 
 // An acad.pgp-style abbreviation. R12 shipped a table of these rather than

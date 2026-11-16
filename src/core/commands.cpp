@@ -1667,12 +1667,11 @@ Step SetVarCommand::next(CommandContext& ctx, const InputValue& value) {
             }
 
             if (value.text == "?") {
-                std::size_t count = 0;
-                const SysvarDef* table = sysvar_table(count);
                 std::string report;
-                for (std::size_t i = 0; i < count; ++i) {
-                    report += table[i].name;
-                    if (table[i].read_only) report += " (read only)";
+                for (std::size_t i = 0; i < sysvar_total(); ++i) {
+                    const SysvarDef& d = sysvar_def(static_cast<Sysvar>(i));
+                    report += d.name;
+                    if (d.read_only) report += " (read only)";
                     report += "\n";
                 }
                 return Step::done(report);
@@ -7093,6 +7092,51 @@ Step AppLoadCommand::next(CommandContext& ctx, const InputValue& value) {
 
 // --- registry ---------------------------------------------------------------
 
+namespace {
+
+const std::vector<std::string>& builtin_command_names();
+
+struct ExternalCommand {
+    std::string name;
+    CommandFactory factory;
+};
+
+struct ExternalCommands {
+    std::vector<ExternalCommand> list;
+    std::vector<std::string> merged;  // built-ins then registered; rebuilt on change
+    bool merged_valid{false};
+};
+
+ExternalCommands& externals() {
+    static ExternalCommands e;
+    return e;
+}
+
+}  // namespace
+
+bool register_command(std::string name, CommandFactory factory) {
+    name = upcase(name);
+    if (name.empty() || !factory) return false;
+    for (const std::string& b : builtin_command_names()) {
+        if (b == name) return false;
+    }
+    ExternalCommands& e = externals();
+    e.merged_valid = false;
+    for (ExternalCommand& c : e.list) {
+        if (c.name == name) {
+            c.factory = std::move(factory);
+            return true;
+        }
+    }
+    e.list.push_back({std::move(name), std::move(factory)});
+    return true;
+}
+
+void clear_registered_commands() {
+    externals().list.clear();
+    externals().merged_valid = false;
+}
+
 CommandPtr make_command(std::string_view name) {
     const std::string upper = upcase(name);
     if (upper == "ABOUT") return std::make_unique<AboutCommand>();
@@ -7169,10 +7213,14 @@ CommandPtr make_command(std::string_view name) {
     if (upper == "COPY") return std::make_unique<MoveCommand>(true);
     if (upper == "UNDO") return std::make_unique<UndoCommand>();
     if (upper == "REDO") return std::make_unique<RedoCommand>();
+    for (const ExternalCommand& c : externals().list) {
+        if (c.name == upper) return c.factory();
+    }
     return nullptr;
 }
 
-const std::vector<std::string>& command_names() {
+namespace {
+const std::vector<std::string>& builtin_command_names() {
     static const std::vector<std::string> names = {
         "ABOUT", "APPLOAD", "ARC", "AREA", "ARRAY", "CIRCLE", "ELLIPSE", "NEW", "SAVE", "SAVEAS", "QSAVE",
         "MEASUREGEOM", "ORTHO", "OSNAP", "SETVAR", "SPLINE", "COLOR", "COPY", "DIST", "DXFIN", "DXFOUT", "ERASE",
@@ -7183,6 +7231,18 @@ const std::vector<std::string>& command_names() {
         "LAYER", "LINE", "LIST", "LTYPE", "MIRROR", "MOVE", "PAN",  "PEDIT", "PLAN", "PLINE", "POINT",
         "REDO", "ROTATE", "ROTATE3D", "SCALE", "SOLID", "STRETCH", "TEXT", "UNDO", "ZOOM"};
     return names;
+}
+}  // namespace
+
+const std::vector<std::string>& command_names() {
+    ExternalCommands& e = externals();
+    if (e.list.empty()) return builtin_command_names();
+    if (!e.merged_valid) {
+        e.merged = builtin_command_names();
+        for (const ExternalCommand& c : e.list) e.merged.push_back(c.name);
+        e.merged_valid = true;
+    }
+    return e.merged;
 }
 
 const std::vector<CommandAlias>& command_aliases() {

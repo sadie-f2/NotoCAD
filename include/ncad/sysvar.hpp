@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace ncad {
 
@@ -148,12 +149,54 @@ struct SysvarDef {
     Vec3 point_default;
 };
 
+// The BUILT-IN table only: its rows sit at the index their id names, which is
+// what lets the typed accessors index an array. Variables added through
+// register_sysvar() are not in it; sysvar_total() and sysvar_def() cover both.
 const SysvarDef* sysvar_table(std::size_t& count);
 
 // Case-insensitive, as R12 is. Null when there is no such variable.
 const SysvarDef* find_sysvar(std::string_view name);
 
 const SysvarDef& sysvar_def(Sysvar id);
+
+// Built-in plus registered variables; valid ids are Sysvar(0)..Sysvar(total-1).
+std::size_t sysvar_total();
+
+// --- variables added from outside the core ----------------------------------
+//
+// A module that lives outside ncad_core (a plug-in backend, say) needs settings
+// reachable from getvar/setvar/SETVAR without the core knowing its name. The
+// registered ones take ids from Sysvar::kCount upward and then behave exactly
+// like a built-in row: same type and range checks, same journalling (so undo
+// covers them), same read-only rules, same name lookup.
+//
+// Registration is an explicit call at startup -- never a static initialiser, so
+// the order is the caller's and a test can say exactly what is installed. Ids
+// are stable for the life of the process. They are NOT written to the DXF
+// header: the header writer names the variables it knows, and a drawing that
+// carried a setting for a module the reader lacks would not round-trip anyway.
+struct SysvarSpec {
+    std::string name;  // stored upper-case; lookup is case-insensitive
+    SysvarType type{SysvarType::Int};
+    bool read_only{false};
+    bool save_in_drawing{false};  // only whether NEW/OPEN resets it; see above
+    std::int32_t int_default{0};
+    std::int32_t int_min{0};
+    std::int32_t int_max{0};
+    double real_default{0.0};
+    std::string string_default;
+    Vec3 point_default{};
+};
+
+// Registering a name again with the same type returns the same id, so an
+// install function is safe to call twice. False (and `id` untouched) for an
+// empty name, a built-in's name, or a repeat with a different type.
+bool register_sysvar(const SysvarSpec& spec, Sysvar& id);
+
+// Forgets every registered variable. For tests, so one case's installation
+// cannot leak into the next; Sysvars instances created before the call must not
+// be used afterwards.
+void clear_registered_sysvars();
 
 class Sysvars {
 public:
@@ -226,7 +269,13 @@ public:
 private:
     void journal_write(Sysvar id, const SysvarValue& before);
 
-    SysvarValue values_[static_cast<std::size_t>(Sysvar::kCount)];
+    // Grows on demand so a Database created before a variable was registered
+    // still answers for it (with its default) -- mutable because a const read
+    // is what first notices.
+    const SysvarValue& slot(Sysvar id) const;
+    SysvarValue& slot_for_write(Sysvar id);
+
+    mutable std::vector<SysvarValue> values_;
     UndoJournal* journal_{nullptr};
 };
 
