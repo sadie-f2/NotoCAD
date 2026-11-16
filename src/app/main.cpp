@@ -34,6 +34,10 @@
 #include "ncad/lisp/value.hpp"
 #include "ncad/version.hpp"
 
+#ifdef NCAD_HAVE_LASER
+#include "ncad/laser/laser_command.hpp"
+#endif
+
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -201,6 +205,11 @@ int repl(ncad::lisp::Context& ctx, ncad::lisp::Interp& in, bool interactive) {
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifdef NCAD_HAVE_LASER
+    // An explicit call, not a static initialiser: the registry is empty until
+    // here, and this is the one line that adds LASER and its LASER* variables.
+    ncad::laser::install_laser();
+#endif
     std::vector<std::string> files;
     std::vector<std::string> expressions;
     bool force_interactive = false;

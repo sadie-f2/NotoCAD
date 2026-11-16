@@ -302,7 +302,21 @@ cmake --build build
 ./build/tests/ncad_tests        # or: ctest --test-dir build
 ```
 
-Options: `NCAD_BUILD_GUI` (off), `NCAD_WITH_DWG` (off), `NCAD_BUILD_TESTS` (on).
+Options: `NCAD_BUILD_GUI` (off), `NCAD_WITH_DWG` (off), `NCAD_BUILD_TESTS` (on),
+`NCAD_WITH_LASER` (on when `../Nlaser` exists, else off with a status line).
+
+**Extensions plug in through two registries, and the core names none of them.**
+`register_command` (commands.hpp) adds a command that `make_command`,
+`command_names` and `resolve_command_name` then treat like any other;
+`register_sysvar` (sysvar.hpp) adds a named variable, ids from `Sysvar::kCount`
+up, that gets getvar/setvar/SETVAR, range checks and undo exactly as a built-in
+does. Both are explicit calls at startup -- never static initialisers -- and
+neither can take a built-in's name. The LASER command (Nlaser, a sibling
+checkout) is the first user: `ncad` and `ncad_gui` call `install_laser()`, and
+only those two executables link it, so `ncad_core`, `ncad_lisp` and the tests
+stay laser-free. Registered variables are not written to the DXF header, and a
+registered command counts in `ABOUT` but not in the version's patch number,
+which counts what this repository owns.
 
 Tests use a minimal in-tree harness (`tests/test.hpp`) with doctest-compatible macro
 names, so it can be swapped for doctest or Catch2 without touching test bodies.

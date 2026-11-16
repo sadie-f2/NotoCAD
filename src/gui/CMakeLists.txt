@@ -38,6 +38,13 @@ target_link_libraries(ncad_gui_lib PRIVATE ncad_flags)
 # The library is ncad_gui_lib to avoid colliding with the ncad_gui executable.
 add_executable(ncad_gui main.cpp)
 target_link_libraries(ncad_gui PRIVATE ncad_gui_lib ncad_flags)
+# The laser backend is plain C++ with sockets, no Qt, so it sits beside the
+# dynamic-Qt rule rather than against it; it is linked here, to the executable,
+# and not to ncad_gui_lib.
+if(NCAD_WITH_LASER)
+  target_link_libraries(ncad_gui PRIVATE ncad_laser_ncad)
+  target_compile_definitions(ncad_gui PRIVATE NCAD_HAVE_LASER)
+endif()
 
 # The deployable shape, opted into so day-to-day builds keep their flat
 # binary path. CMake generates Contents/MacOS + Info.plist from the

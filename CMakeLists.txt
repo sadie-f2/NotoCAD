@@ -16,6 +16,18 @@ endif()
 option(NCAD_BUILD_GUI  "Build the Qt6 GUI shell"          OFF)
 option(NCAD_WITH_DWG   "Enable DWG import via LibreDWG"   OFF)
 option(NCAD_BUILD_TESTS "Build the test suite"            ON)
+# The laser backend (the LASER command), a sibling checkout consumed as a
+# subproject. Default ON only when it is there, so a NotoCAD checkout on its own
+# builds exactly as before; OFF with a status line saying why, never an error.
+# It is an application-level add-on: ncad_core and ncad_lisp do not know it
+# exists, and only the two executables link it.
+set(NCAD_LASER_DIR "${PROJECT_SOURCE_DIR}/../Nlaser" CACHE PATH "Nlaser's source tree")
+if(EXISTS "${NCAD_LASER_DIR}/CMakeLists.txt")
+  set(_ncad_laser_default ON)
+else()
+  set(_ncad_laser_default OFF)
+endif()
+option(NCAD_WITH_LASER "Build the LASER command (needs the Nlaser source tree)" ${_ncad_laser_default})
 # Off by default so a development build's binary stays at src/gui/ncad_gui.
 # ON produces NotoCAD.app instead -- the deployable shape, which macdeployqt
 # and packaging/mac_bundle.sh then make self-contained. macOS only; ignored
@@ -50,6 +62,23 @@ add_custom_target(ncad_version ALL
 
 add_subdirectory(src/core)
 add_subdirectory(src/lisp)
+
+if(NCAD_WITH_LASER)
+  if(NOT EXISTS "${NCAD_LASER_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "NCAD_WITH_LASER: no Nlaser source tree at '${NCAD_LASER_DIR}'; set NCAD_LASER_DIR")
+  endif()
+  # Nlaser sees ncad_core already exists and uses it rather than adding NotoCAD
+  # again. Its own tests and tool are not part of NotoCAD's build; its bridge
+  # (ncad_laser_ncad, carrying the core and net libraries) is what is linked.
+  set(NLASER_WITH_NOTOCAD ON)
+  set(NLASER_WITH_NET ON)
+  set(NLASER_BUILD_TESTS OFF)
+  set(NLASER_BUILD_TOOLS OFF)
+  add_subdirectory("${NCAD_LASER_DIR}" nlaser EXCLUDE_FROM_ALL)
+elseif(NOT EXISTS "${NCAD_LASER_DIR}/CMakeLists.txt")
+  message(STATUS "NCAD_WITH_LASER is OFF: no Nlaser checkout at ${NCAD_LASER_DIR}")
+endif()
+
 add_subdirectory(src/app)
 add_subdirectory(tools)
 
@@ -63,4 +92,4 @@ if(NCAD_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
-message(STATUS "NotoCAD ${PROJECT_VERSION}  build=${CMAKE_BUILD_TYPE}  gui=${NCAD_BUILD_GUI}  dwg=${NCAD_WITH_DWG}")
+message(STATUS "NotoCAD ${PROJECT_VERSION}  build=${CMAKE_BUILD_TYPE}  gui=${NCAD_BUILD_GUI}  dwg=${NCAD_WITH_DWG}  laser=${NCAD_WITH_LASER}")

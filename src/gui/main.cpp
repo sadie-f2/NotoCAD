@@ -14,9 +14,20 @@
 
 #include <cstdio>
 
+#ifdef NCAD_HAVE_LASER
+#include "ncad/laser/laser_command.hpp"
+#endif
+
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("NotoCAD"));
+
+#ifdef NCAD_HAVE_LASER
+    // Before the window: its command line resolves names against the registry.
+    // Device operations block on the controller for up to a few seconds today;
+    // see LaserCommand::run_device for where a worker thread goes.
+    ncad::laser::install_laser();
+#endif
 
     QString drawing;
     bool reset_ui = false;
