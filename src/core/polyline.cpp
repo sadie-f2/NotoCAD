@@ -250,6 +250,13 @@ void Polyline::draw(const DrawContext& ctx, Renderer& r) const {
     }
 
     if (!closed_) pts.push_back(vertices_.back().pos);
+
+    // The widest vertex width, for a renderer that cares (see
+    // Renderer::polyline_width). Only sent when there is one, so every existing
+    // backend sees exactly the calls it saw before.
+    double widest = 0.0;
+    for (const PolyVertex& v : vertices_) widest = std::max({widest, v.start_width, v.end_width});
+    if (widest > 0.0) r.polyline_width(widest);
     r.polyline(pts.data(), pts.size(), closed_);
 }
 

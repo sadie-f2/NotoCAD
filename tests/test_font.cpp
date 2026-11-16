@@ -43,7 +43,7 @@ struct CountingRenderer final : Renderer {
     int polys{0};
     std::vector<Vec3> last;
 
-    void begin_entity(const EntityProps&) override {}
+    void begin_entity(const EntityProps&, Handle) override {}
     void polyline(const Vec3* pts, std::size_t count, bool) override {
         ++polys;
         last.assign(pts, pts + count);

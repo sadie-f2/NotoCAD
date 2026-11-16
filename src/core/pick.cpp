@@ -50,7 +50,7 @@ public:
 
     // Styling is not this probe's business: an entity is picked by where it is,
     // not by what colour it would have been.
-    void begin_entity(const EntityProps&) override {}
+    void begin_entity(const EntityProps&, Handle) override {}
 
     void polyline(const Vec3* pts, std::size_t count, bool closed) override {
         if (count == 0) return;
@@ -214,7 +214,7 @@ class RegionProbe : public Renderer {
 public:
     explicit RegionProbe(const SelectionRegion& r) : r_(r) {}
 
-    void begin_entity(const EntityProps&) override {}
+    void begin_entity(const EntityProps&, Handle) override {}
 
     void polyline(const Vec3* pts, std::size_t count, bool closed) override {
         if (count == 0) return;

@@ -321,7 +321,7 @@ TEST_CASE("viewport: the cached basis follows the camera") {
 namespace {
 
 struct CountingRenderer final : Renderer {
-    void begin_entity(const EntityProps&) override {}
+    void begin_entity(const EntityProps&, Handle) override {}
     void polyline(const Vec3*, std::size_t, bool) override { ++runs; }
     std::size_t runs{0};
 };

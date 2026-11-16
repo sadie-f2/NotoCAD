@@ -21,7 +21,7 @@ namespace {
 // Collects the runs a renderer is given, so the dashes can be measured.
 class Capture final : public Renderer {
 public:
-    void begin_entity(const EntityProps&) override { ++entities; }
+    void begin_entity(const EntityProps&, Handle) override { ++entities; }
     void polyline(const Vec3* pts, std::size_t count, bool closed) override {
         runs.push_back(std::vector<Vec3>(pts, pts + count));
         closed_flags.push_back(closed);

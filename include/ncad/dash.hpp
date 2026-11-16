@@ -34,7 +34,8 @@ public:
     // one drawing's dashes can be made to read at its own scale.
     DashRenderer(Renderer& target, const Database& db, double ltscale);
 
-    void begin_entity(const EntityProps& props) override;
+    void begin_entity(const EntityProps& props, Handle source) override;
+    void polyline_width(double width) override { target_.polyline_width(width); }
     void polyline(const Vec3* pts, std::size_t count, bool closed) override;
 
 private:

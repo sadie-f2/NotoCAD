@@ -61,7 +61,7 @@ public:
         origin_y_ = paper.margin_mm * kPointsPerMm + (avail_h - view.height() * scale_) * 0.5;
     }
 
-    void begin_entity(const EntityProps&) override {
+    void begin_entity(const EntityProps&, Handle) override {
         // Black line work only -- see plot.hpp. Colour arrives with the pen
         // table, which is also where lineweight comes from.
     }

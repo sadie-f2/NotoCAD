@@ -29,11 +29,13 @@ class HighlightRenderer final : public Renderer {
 public:
     HighlightRenderer(Renderer& target, std::int16_t color) : target_(target), color_(color) {}
 
-    void begin_entity(const EntityProps& props) override {
+    void begin_entity(const EntityProps& props, Handle source) override {
         EntityProps forced = props;
         forced.color = color_;
-        target_.begin_entity(forced);
+        target_.begin_entity(forced, source);
     }
+
+    void polyline_width(double width) override { target_.polyline_width(width); }
 
     void polyline(const Vec3* pts, std::size_t count, bool closed) override {
         target_.polyline(pts, count, closed);

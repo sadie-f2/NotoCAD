@@ -34,7 +34,7 @@ public:
     // paintEvent and thrown away.
     QPainterRenderer(QPainter& painter, const Viewport& viewport, const Database& db);
 
-    void begin_entity(const EntityProps& props) override;
+    void begin_entity(const EntityProps& props, Handle source) override;
     void polyline(const Vec3* pts, std::size_t count, bool closed) override;
 
 private:

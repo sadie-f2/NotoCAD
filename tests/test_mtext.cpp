@@ -33,7 +33,7 @@ constexpr double kTol = 1e-9;
 
 class Capture final : public Renderer {
 public:
-    void begin_entity(const EntityProps&) override {}
+    void begin_entity(const EntityProps&, Handle) override {}
     void polyline(const Vec3* pts, std::size_t count, bool closed) override {
         runs.push_back(std::vector<Vec3>(pts, pts + count));
         closed_flags.push_back(closed);

@@ -122,7 +122,7 @@ std::int16_t QPainterRenderer::effective_color(const EntityProps& props) const {
     return props.color;
 }
 
-void QPainterRenderer::begin_entity(const EntityProps& props) {
+void QPainterRenderer::begin_entity(const EntityProps& props, Handle) {
     QPen pen(aci_color(effective_color(props)));
     // Cosmetic: a wireframe line is one pixel wide at every zoom. R12 had no
     // lineweights, and giving them width here would only misrepresent it.

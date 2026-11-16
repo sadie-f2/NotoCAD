@@ -45,7 +45,17 @@ class TransformRenderer final : public Renderer {
 public:
     TransformRenderer(Renderer& inner, const Mat4& m) : inner_(inner), m_(m) {}
 
-    void begin_entity(const EntityProps& props) override { inner_.begin_entity(props); }
+    void begin_entity(const EntityProps& props, Handle source) override {
+        inner_.begin_entity(props, source);
+    }
+
+    // Scaled by how far the block's placement stretches X, as a block that is
+    // inserted at a scale is drawn at that scale. A non-uniform insert has no
+    // single width, and X is the answer R12's own SCALE-X-only inserts imply.
+    void polyline_width(double width) override {
+        const Vec3 x = m_.transform_vector(Vec3{1.0, 0.0, 0.0});
+        inner_.polyline_width(width * std::sqrt(x.x * x.x + x.y * x.y + x.z * x.z));
+    }
 
     void polyline(const Vec3* pts, std::size_t count, bool closed) override {
         buffer_.clear();
@@ -61,7 +71,7 @@ private:
 };
 
 void draw_definition(const BlockDef& def, const Mat4& m, const DrawContext& ctx, Renderer& r,
-                     int depth) {
+                     Handle source, int depth) {
     if (depth >= kMaxBlockDepth) return;
 
     TransformRenderer through(r, m);
@@ -76,13 +86,13 @@ void draw_definition(const BlockDef& def, const Mat4& m, const DrawContext& ctx,
                 for (std::int16_t row = 0; row < nested.rows(); ++row) {
                     for (std::int16_t col = 0; col < nested.columns(); ++col) {
                         draw_definition(*inner, m * nested.placement_for(row, col), ctx, r,
-                                        depth + 1);
+                                        source, depth + 1);
                     }
                 }
             }
             continue;
         }
-        r.begin_entity(e->props());
+        r.begin_entity(e->props(), source);
         e->draw(ctx, through);
     }
 }
@@ -269,7 +279,7 @@ void Insert::draw(const DrawContext& ctx, Renderer& r) const {
     if (!def_) return;
     for (std::int16_t row = 0; row < rows_; ++row) {
         for (std::int16_t col = 0; col < columns_; ++col) {
-            draw_definition(*def_, placement_for(row, col), ctx, r, 0);
+            draw_definition(*def_, placement_for(row, col), ctx, r, handle(), 0);
         }
     }
 }

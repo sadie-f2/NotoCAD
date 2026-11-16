@@ -25,7 +25,7 @@ void draw_database(const Database& db, const DrawContext& ctx, Renderer& r) {
         // QPainter would have discarded the pixels anyway, but only after all
         // of that work had been done.
         if (!ctx.visible(e->bbox())) continue;
-        r.begin_entity(e->props());
+        r.begin_entity(e->props(), e->handle());
         e->draw(ctx, r);
     }
 }
@@ -46,7 +46,7 @@ void draw_database(const Database& db, const DrawContext& ctx, Renderer& r,
         const Entity* e = db.get(h);
         if (!e || !entity_visible(db, *e)) continue;
         if (!ctx.visible(e->bbox())) continue;
-        r.begin_entity(e->props());
+        r.begin_entity(e->props(), e->handle());
         e->draw(ctx, r);
     }
 }
@@ -56,7 +56,7 @@ void draw_handles(const Database& db, const DrawContext& ctx, Renderer& r,
     for (const Handle h : handles) {
         const Entity* e = db.get(h);
         if (!e || !entity_visible(db, *e)) continue;
-        r.begin_entity(e->props());
+        r.begin_entity(e->props(), e->handle());
         e->draw(ctx, r);
     }
 }
@@ -64,7 +64,7 @@ void draw_handles(const Database& db, const DrawContext& ctx, Renderer& r,
 void draw_entities(const std::vector<EntityPtr>& entities, const DrawContext& ctx, Renderer& r) {
     for (const EntityPtr& e : entities) {
         if (!e) continue;
-        r.begin_entity(e->props());
+        r.begin_entity(e->props(), e->handle());
         e->draw(ctx, r);
     }
 }

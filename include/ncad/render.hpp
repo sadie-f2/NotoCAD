@@ -15,13 +15,12 @@
 #pragma once
 
 #include "ncad/bbox.hpp"
+#include "ncad/entity.hpp"
 #include "ncad/vec3.hpp"
 
 #include <cstddef>
 
 namespace ncad {
-
-struct EntityProps;
 
 // How finely to flatten curves. Carried into draw() rather than baked into the
 // entity so that tessellation density tracks zoom -- a circle filling the
@@ -69,7 +68,25 @@ public:
     // itself stays pure geometry and carries no styling. Colour resolution
     // (BYLAYER/BYBLOCK) belongs to the backend, which is what knows the layer
     // table and the display palette.
-    virtual void begin_entity(const EntityProps& props) = 0;
+    //
+    // `source` is the handle of the database entity the geometry belongs to, so
+    // a backend that has to ATTRIBUTE geometry (a job planner, a report) does
+    // not have to guess from addresses. For the contents of an INSERT it is the
+    // INSERT's handle, not the nested entity's: a block's own entities are not
+    // in the database and are meaningless outside it. `props` is still the
+    // entity actually being drawn -- the nested one, inside a block -- because
+    // that is what colour and linetype resolve from. kNullHandle when the
+    // caller drew something that is not in a database (a ghost, a probe).
+    virtual void begin_entity(const EntityProps& props, Handle source) = 0;
+
+    // The width of the polyline() that follows, in world units: the widest of
+    // the vertex widths of a wide POLYLINE. One-shot -- it applies to the very
+    // next polyline() call and is then spent, so a renderer needs no reset on
+    // begin_entity and an entity that has no width sends nothing. Most backends
+    // draw a wireframe and ignore it, which is the default; QPAINTER and PLOT
+    // stay byte-identical because of that. Forwarding renderers (dash, block
+    // transform) must pass it on or width is lost beneath them.
+    virtual void polyline_width(double /*width*/) {}
 
     // `pts` are world coordinates. `closed` joins the last point back to the
     // first without duplicating it in the array.

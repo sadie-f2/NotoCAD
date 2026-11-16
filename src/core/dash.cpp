@@ -20,8 +20,8 @@ constexpr double kDotLength = 1e-6;
 DashRenderer::DashRenderer(Renderer& target, const Database& db, double ltscale)
     : target_(target), db_(db), ltscale_(ltscale > 0.0 ? ltscale : 1.0) {}
 
-void DashRenderer::begin_entity(const EntityProps& props) {
-    target_.begin_entity(props);
+void DashRenderer::begin_entity(const EntityProps& props, Handle source) {
+    target_.begin_entity(props, source);
 
     pattern_.clear();
     period_ = 0.0;

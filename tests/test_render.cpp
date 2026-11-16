@@ -3,6 +3,7 @@
 
 #include "test.hpp"
 
+#include "ncad/blocks.hpp"
 #include "ncad/database.hpp"
 #include "ncad/ecs.hpp"
 #include "ncad/entities.hpp"
@@ -27,22 +28,32 @@ struct RecordingRenderer final : Renderer {
         std::vector<Vec3> pts;
         bool closed{false};
         EntityProps props{};
+        Handle source{kNullHandle};
+        double width{0.0};
     };
 
     std::vector<Poly> polys;
     EntityProps current{};
+    Handle current_source{kNullHandle};
+    double pending_width{0.0};
     int begin_calls{0};
 
-    void begin_entity(const EntityProps& p) override {
+    void begin_entity(const EntityProps& p, Handle source) override {
         current = p;
+        current_source = source;
         ++begin_calls;
     }
+
+    void polyline_width(double w) override { pending_width = w; }
 
     void polyline(const Vec3* pts, std::size_t count, bool closed) override {
         Poly p;
         p.pts.assign(pts, pts + count);
         p.closed = closed;
         p.props = current;
+        p.source = current_source;
+        p.width = pending_width;
+        pending_width = 0.0;
         polys.push_back(std::move(p));
     }
 };
@@ -217,7 +228,7 @@ TEST_CASE("render: HighlightRenderer forces the colour and touches nothing else"
     props.color = kColorByLayer;
     props.layer = 3;
     props.linetype = 2;
-    hi.begin_entity(props);
+    hi.begin_entity(props, 42);
 
     const Vec3 pts[3] = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}};
     hi.polyline(pts, 3, false);
@@ -231,6 +242,66 @@ TEST_CASE("render: HighlightRenderer forces the colour and touches nothing else"
     CHECK(rec.polys[0].pts.size() == 3);
     CHECK(!rec.polys[0].closed);
     CHECK_VEC(rec.polys[0].pts[2], 1.0, 1.0, 0.0, 1e-12);
+    CHECK(rec.polys[0].source == 42);
+}
+
+TEST_CASE("render: begin_entity names the database entity, and an INSERT owns its contents") {
+    Database db;
+    const Handle line = db.add(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{1, 0, 0}));
+
+    BlockDef def;
+    def.name = "TWO";
+    def.entities.push_back(std::make_unique<Line>(Vec3{0, 0, 0}, Vec3{0, 1, 0}));
+    def.entities.push_back(std::make_unique<Line>(Vec3{0, 1, 0}, Vec3{1, 1, 0}));
+    const BlockId id = db.add_block(std::move(def));
+    const Handle ins = db.add(std::make_unique<Insert>(db.block(id), Mat4::translation({5, 0, 0})));
+
+    RecordingRenderer r;
+    draw_database(db, fine(), r);
+
+    // The line, then the two nested lines: all three attributed to a handle the
+    // database knows, the nested ones to the INSERT.
+    REQUIRE(r.polys.size() == 3);
+    CHECK(r.polys[0].source == line);
+    CHECK(r.polys[1].source == ins);
+    CHECK(r.polys[2].source == ins);
+}
+
+TEST_CASE("render: polyline width reaches the renderer once, and only for wide polylines") {
+    Database db;
+    auto wide = std::make_unique<Polyline>();
+    wide->vertices().push_back({Vec3{0, 0, 0}, 0.0, 0.2, 0.5});
+    wide->vertices().push_back({Vec3{1, 0, 0}, 0.0, 0.0, 0.0});
+    db.add(std::move(wide));
+    auto thin = std::make_unique<Polyline>();
+    thin->vertices().push_back({Vec3{0, 1, 0}, 0.0, 0.0, 0.0});
+    thin->vertices().push_back({Vec3{1, 1, 0}, 0.0, 0.0, 0.0});
+    db.add(std::move(thin));
+
+    RecordingRenderer r;
+    draw_database(db, fine(), r);
+
+    REQUIRE(r.polys.size() == 2);
+    CHECK_NEAR(r.polys[0].width, 0.5, 1e-12);
+    // One-shot: the wide polyline's width must not stick to the next entity.
+    CHECK_NEAR(r.polys[1].width, 0.0, 1e-12);
+}
+
+TEST_CASE("render: a block's scale carries through to the width inside it") {
+    Database db;
+    BlockDef def;
+    def.name = "W";
+    auto wide = std::make_unique<Polyline>();
+    wide->vertices().push_back({Vec3{0, 0, 0}, 0.0, 1.0, 1.0});
+    wide->vertices().push_back({Vec3{1, 0, 0}, 0.0, 1.0, 1.0});
+    def.entities.push_back(std::move(wide));
+    const BlockId id = db.add_block(std::move(def));
+    db.add(std::make_unique<Insert>(db.block(id), Mat4::uniform_scaling(3.0)));
+
+    RecordingRenderer r;
+    draw_database(db, fine(), r);
+    REQUIRE(r.polys.size() == 1);
+    CHECK_NEAR(r.polys[0].width, 3.0, 1e-9);
 }
 
 TEST_CASE("render: draw_database can skip handles") {
